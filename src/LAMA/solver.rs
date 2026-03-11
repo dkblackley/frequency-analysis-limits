@@ -17,7 +17,16 @@ impl SolverEngine {
         }
     }
 
-    /// Formulates constraints mapping records to allowed domains and solves them.
+    /// Reconstructs an assignment of values to records.
+    ///
+    /// # Arguments
+    ///
+    /// * `records` - A slice of record identifiers.
+    /// * `t1_matches` - A map from record identifiers to their possible candidate values.
+    ///
+    /// # Returns
+    ///
+    /// An `Option` containing a vector of (record, value) pairs if a valid assignment exists.
     pub fn reconstruct(
         &self,
         records: &[u32],

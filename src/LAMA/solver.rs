@@ -21,8 +21,9 @@ impl SolverEngine {
     ///
     /// # Arguments
     ///
-    /// * `records` - A slice of record identifiers.
-    /// * `t1_matches` - A map from record identifiers to their possible candidate values.
+    /// * `records` - A slice containing unique ids/record identifiers
+    /// * `t1_matches` - A map of frequency values to record identifiers - i.e. every record that
+    /// appears with frequency ''.
     ///
     /// # Returns
     ///

@@ -1,8 +1,27 @@
 use log::{debug, info};
+use num_rational::Ratio;
 use std::collections::HashMap;
+
 
 // Import solver engine from main project:
 use frequency_analysis_limits::LAMA::solver::SolverEngine;
+
+// Figure 2 of the paper but normalized. This assumption that we think the adversary knows
+pub const PROB_MATRIX: [[f32; 5]; 5] = [
+    [19.0 / 347.0, 14.0 / 347.0, 12.0 / 347.0,  9.0 / 347.0,  7.0 / 347.0],
+    [14.0 / 347.0, 23.0 / 347.0, 17.0 / 347.0, 12.0 / 347.0,  9.0 / 347.0],
+    [12.0 / 347.0, 17.0 / 347.0, 23.0 / 347.0, 16.0 / 347.0, 12.0 / 347.0],
+    [ 9.0 / 347.0, 12.0 / 347.0, 16.0 / 347.0, 19.0 / 347.0, 14.0 / 347.0],
+    [ 7.0 / 347.0,  9.0 / 347.0, 12.0 / 347.0, 14.0 / 347.0, 19.0 / 347.0],
+];
+
+pub const FREQ_MATRIX: [[i32; 5]; 5] = [
+    [19, 14, 12,  9,  7],
+    [14, 23, 17, 12,  9],
+    [12, 17, 23, 16, 12],
+    [ 9, 12, 16, 19, 14],
+    [ 7,  9, 12, 14, 19],
+];
 
 /// Helper functions for LAMa tests.
 /// Calculates the frequency (number of range queries covering a point) in a 2D grid.
@@ -27,6 +46,8 @@ pub fn generate_grid(size: u32) -> Vec<(u32, u32)> {
 
     grid
 }
+
+
 
 #[test]
 fn test_full_reconstruction_4x4() {
@@ -128,4 +149,41 @@ fn test_full_reconstruction_4x4() {
     }
 
     info!("E2E test completed successfully! The solver respected all frequency symmetries.");
+}
+
+
+// Extra tests for this specific file.
+#[test]
+fn test_calculate_query_coverage() {
+
+    let numerators: [[i32; 5]; 5] = [
+        [19, 14, 12,  9,  7],
+        [14, 23, 17, 12,  9],
+        [12, 17, 23, 16, 12],
+        [ 9, 12, 16, 19, 14],
+        [ 7,  9, 12, 14, 19],
+    ];
+    let denom = 347;
+
+    let total_sum = numerators.iter().flatten().sum::<i32>();
+
+    assert_eq!(total_sum, denom);
+
+    // We construct the Ratios here for the exact test.
+    let true_sum: Ratio<i32> = numerators
+        .iter()
+        .flatten()
+        .map(|&num| Ratio::new(num, denom))
+        .sum();
+
+    assert_eq!(true_sum, Ratio::from_integer(1));
+
+    let float_sum: f32 = PROB_MATRIX.iter().flatten().sum();
+
+    let epsilon = 0.0001;
+
+    assert!((float_sum - 1.0).abs() < epsilon, "Sum was {float_sum}");
+
+    
+
 }

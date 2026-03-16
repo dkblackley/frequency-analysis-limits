@@ -154,46 +154,6 @@ fn compute_dominant_pair_freq(t: usize, dim: usize, dist: &str, _n: usize, recor
         info!("Finished value tuple frequencies in {:?}", timer.elapsed());
     }
 
-    // 3. COMPUTE RECORD-VALUE MATCHES FOR T-CONSTRAINT
-    if compute_matches {
-        info!("Task 3: Computing record-value matches...");
-        let timer = Instant::now();
-        let path = base_dir.join(format!("t{}_matches/{}_dimensions.bin", t, dim));
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)?;
-        }
-
-        let mut matches_dict: HashMap<Vec<usize>, Vec<usize>> = HashMap::new();
-        let records: Vec<usize> = record_value_dict.keys().cloned().collect();
-
-        debug!("Loading previously saved dictionaries from disk...");
-        let dp_path = base_dir.join(format!("dp_frequencies/{}/{}_dimensions.bin", dist, dim));
-        let dp_dict: HashMap<Pair, Frequency> = bincode::deserialize_from(BufReader::new(File::open(dp_path)?))?;
-
-        let val_path = base_dir.join(format!("val_tup_frequencies/{}/{}_dim/t{}.bin", dist, dim, t));
-        let _val_tup_freq_dict: HashMap<Frequency, Vec<Vec<Point>>> = bincode::deserialize_from(BufReader::new(File::open(val_path)?))?;
-
-        let pb = ProgressBar::new_spinner();
-        pb.set_style(ProgressStyle::default_spinner().template("{spinner:.blue} [{elapsed_precise}]")?);
-
-        // Messy way to generate all t-tuples. I think in the paper we only need to go up to 2*dim though... (t should be set to that)
-        // essentially we want a vec that has each possible value in every dimension:
-        // {1, 2, 3 ... n} and then { {1, 2}, {1, 3}, ... {1, n}, {2, 3}, {2, 4}... {n-1, n} } and
-        // then for 3 dimensions { { 1, 2, 3 }, { 1, 2, 4 }, ... { n-2, n-1, n } } etc. for how
-        // many dims
-        for mut t_tuple in records.into_iter().combinations(t) {
-            t_tuple.sort();
-            let matches = find_matches_for_tuple(&t_tuple, &record_value_dict, &dp_dict, dist, largest_val);
-            matches_dict.insert(t_tuple, matches);
-            pb.inc(1);
-        }
-        pb.finish();
-
-        let file = File::create(&path)?;
-        bincode::serialize_into(BufWriter::new(file), &matches_dict)?;
-
-        info!("Finished match computation in {:?}", timer.elapsed());
-    }
 
     info!("Finished precompute task entirely.");
     Ok(())
@@ -269,23 +229,6 @@ fn get_mbq(t_tup: &[Point]) -> Pair {
         }
     }
     (minima, maxima)
-}
-
-fn find_matches_for_tuple(
-    t_tuple: &[usize],
-    recval_dict: &HashMap<usize, Point>,
-    _dp_dict: &HashMap<Pair, Frequency>,
-    dist: &str,
-    n: usize,
-) -> Vec<usize> {
-    // Map record IDs to their actual points
-    let val_tuple: Vec<Point> = t_tuple.iter().map(|r| recval_dict[r].clone()).collect();
-
-    let bounding_pair = get_mbq(&val_tuple);
-    let _tuple_frequency = compute_pair_weight(&bounding_pair, dist, n);
-
-    // Note: The Python function returned empty/None. Returning an empty Vec to match the signature.
-    vec![]
 }
 
 

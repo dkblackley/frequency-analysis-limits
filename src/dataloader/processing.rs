@@ -54,7 +54,18 @@ fn make_true_prob_uniform_discrete(points: Vec<u64>, lower: u64, upper: u64, ) -
     return HashMap::new();
 }
 
-
+/// Precomputes and serializes TRUE frequencies for dominant pairs and t-tuples of values.
+///
+/// This function iterates through the domain to calculate how many queries cover specific
+/// point pairs (dominant pairs) and groups of $t$ points (t-tuples). The results are
+/// saved as binary files using `bincode` for later use in frequency analysis.
+///
+/// # Arguments
+/// * `t` - The size of the value tuples to analyze. Should always be 2 * dimension
+/// * `dim` - The dimensionality of the data.
+/// * `dist` - The distribution type (e.g., "uniform").
+/// * `record_value_dict` - A mapping of record IDs to their coordinate points.
+/// * `base_dir` - The root directory where frequency files will be stored.
 fn compute_dominant_pair_freq(t: usize, dim: usize, dist: &str, _n: usize, record_value_dict: HashMap<usize, Point>, base_dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
     let compute_dp_freq = true;
     let compute_val_tup_freq = true;

@@ -10,6 +10,8 @@ impl Selector {
     pub fn generate_left_hand_expressions(records: &[u32], t: usize) -> Vec<Vec<u32>> {
         records.iter().cloned().combinations(t).collect()
     }
+
+    // TODO: select based upon what values are 'plausible' for higher values of t.
 }
 
 #[cfg(test)]

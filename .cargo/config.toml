@@ -1,0 +1,2 @@
+[env]
+CXXFLAGS = "-DOR_PROTO_DLL="

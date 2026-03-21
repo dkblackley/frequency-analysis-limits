@@ -1,2 +1,3 @@
+pub mod selector;
 pub mod solver;
-mod selector;
+pub mod translator;

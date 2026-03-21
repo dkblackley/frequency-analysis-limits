@@ -1,3 +1,4 @@
-mod loading;
-mod processing;
-// mod datasets;
+
+pub mod processing;
+pub mod datasets;
+mod error;

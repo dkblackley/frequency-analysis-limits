@@ -1,27 +1,76 @@
-use log::{debug, info};
-use num_rational::Ratio;
-use std::collections::HashMap;
+#![allow(clippy::unwrap_used)]
+#![allow(clippy::expect_used)]
 
+use frequency_analysis_limits::dataloader::datasets::Searchable;
+use std::collections::hash_map::Entry;
+mod common;
 
+use crate::common::testDB;
+use frequency_analysis_limits::dataloader::processing::{
+    get_domain_range, get_freq_all_val_dict, get_freq_to_dominant_pair_map, get_freq_val_t_tup_dict,
+    Value,
+};
 // Import solver engine from main project:
 use frequency_analysis_limits::LAMA::solver::SolverEngine;
+use log::{debug, error, info};
+use num_rational::Ratio;
+use serde_json::to_string;
+use sha2::{Digest, Sha256};
+use std::collections::HashMap;
+use std::hash::{DefaultHasher, Hash, Hasher};
+use std::io::BufReader;
+use tempfile::NamedTempFile;
 
 // Figure 2 of the paper but normalized. This assumption that we think the adversary knows
 pub const PROB_MATRIX: [[f32; 5]; 5] = [
-    [19.0 / 347.0, 14.0 / 347.0, 12.0 / 347.0,  9.0 / 347.0,  7.0 / 347.0],
-    [14.0 / 347.0, 23.0 / 347.0, 17.0 / 347.0, 12.0 / 347.0,  9.0 / 347.0],
-    [12.0 / 347.0, 17.0 / 347.0, 23.0 / 347.0, 16.0 / 347.0, 12.0 / 347.0],
-    [ 9.0 / 347.0, 12.0 / 347.0, 16.0 / 347.0, 19.0 / 347.0, 14.0 / 347.0],
-    [ 7.0 / 347.0,  9.0 / 347.0, 12.0 / 347.0, 14.0 / 347.0, 19.0 / 347.0],
+    [
+        19.0 / 347.0,
+        14.0 / 347.0,
+        12.0 / 347.0,
+        9.0 / 347.0,
+        7.0 / 347.0,
+    ],
+    [
+        14.0 / 347.0,
+        23.0 / 347.0,
+        17.0 / 347.0,
+        12.0 / 347.0,
+        9.0 / 347.0,
+    ],
+    [
+        12.0 / 347.0,
+        17.0 / 347.0,
+        23.0 / 347.0,
+        16.0 / 347.0,
+        12.0 / 347.0,
+    ],
+    [
+        9.0 / 347.0,
+        12.0 / 347.0,
+        16.0 / 347.0,
+        19.0 / 347.0,
+        14.0 / 347.0,
+    ],
+    [
+        7.0 / 347.0,
+        9.0 / 347.0,
+        12.0 / 347.0,
+        14.0 / 347.0,
+        19.0 / 347.0,
+    ],
 ];
 
+// Assume we 'sampled' this as according to the above probabilities, and it just happens to be perfect.
 pub const FREQ_MATRIX: [[i32; 5]; 5] = [
-    [19, 14, 12,  9,  7],
-    [14, 23, 17, 12,  9],
+    [19, 14, 12, 9, 7],
+    [14, 23, 17, 12, 9],
     [12, 17, 23, 16, 12],
-    [ 9, 12, 16, 19, 14],
-    [ 7,  9, 12, 14, 19],
+    [9, 12, 16, 19, 14],
+    [7, 9, 12, 14, 19],
 ];
+
+// a 2d database with 25 total values. Each item is a single encrypted record. The above FREQ and
+// PROB is the matching freq and tru prob of observing this, lets say.
 
 /// Helper functions for LAMa tests.
 /// Calculates the frequency (number of range queries covering a point) in a 2D grid.
@@ -47,121 +96,113 @@ pub fn generate_grid(size: u32) -> Vec<(u32, u32)> {
     grid
 }
 
-
-
-#[test]
-fn test_full_reconstruction_4x4() {
-    // Initialize the logger. Run `RUST_LOG=info cargo test -- --nocapture` to see output.
-    let _ = env_logger::builder().is_test(true).try_init();
-
-    info!("Starting 4x4 grid E2E test");
-
-    let grid_size = 4;
-    let records = generate_grid(grid_size);
-    let total_items = records.len() as u32; // 16 items
-
-    info!(
-        "Generated {} records for a {}x{} grid",
-        total_items, grid_size, grid_size
-    );
-
-    // Step 1: Compute query coverage (frequency) for every true domain value. This assumes a
-    // uniform query distribution. Really just a map of observed frequency->record ID
-    let mut coverage_to_points: HashMap<u32, Vec<i64>> = HashMap::new();
-    for x in 0..grid_size {
-        for y in 0..grid_size {
-            let cov = calculate_query_coverage(x, y, grid_size);
-            // Flatten to unique hashabl/record ID for each input. (maybe I should make a reverse map)
-            let flattened_val = (x * grid_size + y) as i64;
-            coverage_to_points
-                .entry(cov)
-                .or_default()
-                .push(flattened_val);
-        }
-    }
-
-    // Step 2: Build the Frequency-Pair Matching Table (t1_matches)
-    // Map each encrypted record ID to the set of domain values that share its exact frequency.
-    let mut t1_matches: HashMap<u32, Vec<i64>> = HashMap::new();
-    let mut record_ids = Vec::with_capacity(total_items as usize);
-
-    for (i, &(x, y)) in records.iter().enumerate() {
-        let rec_id = i as u32;
-        record_ids.push(rec_id);
-
-        // Simulate observing the query frequency for this specific record
-        let observed_frequency = calculate_query_coverage(x, y, grid_size);
-
-        // The record's candidate values are all domain points with that same frequency
-        let candidates = coverage_to_points.get(&observed_frequency).unwrap().clone();
-
-        debug!(
-            "Record {:02} (Freq: {}) has {} candidate(s): {:?}",
-            rec_id,
-            observed_frequency,
-            candidates.len(),
-            candidates
-        );
-
-        t1_matches.insert(rec_id, candidates);
-    }
-
-    info!("Constructed t1_matches frequency table mapping records to candidate domains.");
-
-    // Step 3: Solver Integration
-    info!("Initializing Z3 Solver Engine");
-    let solver = SolverEngine::new();
-
-    info!("Running constraint satisfaction reconstruction...");
-    let solution = solver
-        .reconstruct(&record_ids, &t1_matches)
-        .expect("Z3 failed to find a valid reconstruction (UNSAT)!");
-
-    info!("Reconstruction successful (SAT). Validating constraints...");
-
-    // Step 4: Validation
-    assert_eq!(
-        solution.len(),
-        total_items as usize,
-        "Solution must map every record."
-    );
-
-    // Check that we used exactly 16 unique values (AllDifferent constraint held)
-    let mut assigned_values: Vec<i64> = solution.iter().map(|&(_, val)| val).collect();
-    assigned_values.sort_unstable();
-    assigned_values.dedup();
-    assert_eq!(
-        assigned_values.len(),
-        total_items as usize,
-        "Solution must be a 1-to-1 permutation (no duplicate values)."
-    );
-
-    // Check that every assigned value respects the original frequency bounds
-    for &(rec_id, assigned_val) in &solution {
-        let allowed_candidates = t1_matches.get(&rec_id).unwrap();
-        assert!(
-            allowed_candidates.contains(&assigned_val),
-            "Record {} assigned to {}, which violates its frequency class {:?}",
-            rec_id,
-            assigned_val,
-            allowed_candidates
-        );
-    }
-
-    info!("E2E test completed successfully! The solver respected all frequency symmetries.");
+fn get_unique_resp_id(data: &Vec<Record>) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    // The Hash trait is automatically implemented for Vecs and u32s
+    data.hash(&mut hasher);
+    hasher.finish()
 }
 
+fn generate_unique_id(vec: &Vec<i64>) -> String {
+    let mut hasher = Sha256::new();
+
+    for &num in vec {
+        hasher.update(num.to_le_bytes());
+    }
+
+    let result = hasher.finalize();
+    let hex_string = to_string(&result.to_ascii_uppercase()).unwrap();
+
+    // Format the result as a hexadecimal string
+    format!("{hex_string}")
+}
+
+/// Flattens an N-dimensional point with arbitrary upper and lower bounds into a 1D index.
+/// Assumes `upper` bounds are inclusive (e.g., bounds 1 to 10 means 10 elements (0-9).
+fn flatten_nd(point: &[i64], upper: &[i64], lower: &[i64]) -> i64 {
+    let mut index = 0;
+    let mut multiplier = 1;
+
+    for i in (0..point.len()).rev() {
+        let point_scaled = point[i] - lower[i];
+
+        index += point_scaled * multiplier;
+
+        let dimension_size = upper[i] - lower[i] + 1;
+        multiplier *= dimension_size;
+    }
+
+    index
+}
+
+/// Maps points to unique IDs, bounds is the largest possible val
+pub fn bounded_hyperrectangle_id(coords: &[u64], bounds: &[u64]) -> u64 {
+    assert_eq!(
+        coords.len(),
+        bounds.len(),
+        "Coordinates and bounds must match in dimensions"
+    );
+
+    let mut id = 0;
+    let mut stride = 1;
+
+    for (&c, &b) in coords.iter().zip(bounds.iter()) {
+        id += c * stride;
+        stride *= b;
+    }
+
+    id
+}
 
 // Extra tests for this specific file.
 #[test]
-fn test_calculate_query_coverage() {
+fn test_2d_1_based_coordinates() {
+    // Grid: X goes 1 to 10, Y goes 1 to 20
+    let lower = [1, 1];
+    let upper = [10, 20];
 
+    // Your expected examples (adjusted to 0-based 1D output)
+    // Note: The maximum index for a 10x20 grid is 199 (since we start at 0)
+
+    // Point (1, 1) should be the very first index
+    assert_eq!(flatten_nd(&[1, 1], &upper, &lower), 0);
+
+    // Point (1, 10)
+    assert_eq!(flatten_nd(&[1, 10], &upper, &lower), 9);
+
+    // Point (2, 1) -> skips exactly one full Y row (20 elements)
+    assert_eq!(flatten_nd(&[2, 1], &upper, &lower), 20);
+
+    // Point (10, 20) -> The very last element
+    assert_eq!(flatten_nd(&[10, 20], &upper, &lower), 199);
+}
+
+#[test]
+fn test_3d_mixed_bounds() {
+    // X: -5 to 5 (size 11)
+    // Y: 0 to 9  (size 10)
+    // Z: 1 to 2  (size 2)
+    let lower = [-5, 0, 1];
+    let upper = [5, 9, 2];
+
+    // Minimum point maps to 0
+    assert_eq!(flatten_nd(&[-5, 0, 1], &upper, &lower), 0);
+
+    // Moving Z by 1
+    assert_eq!(flatten_nd(&[-5, 0, 2], &upper, &lower), 1);
+
+    // Moving Y by 1 skips one Z row (2 elements)
+    assert_eq!(flatten_nd(&[-5, 1, 1], &upper, &lower), 2);
+}
+
+#[test]
+fn test_calculate_query_coverage() {
     let numerators: [[i32; 5]; 5] = [
-        [19, 14, 12,  9,  7],
-        [14, 23, 17, 12,  9],
+        [19, 14, 12, 9, 7],
+        [14, 23, 17, 12, 9],
         [12, 17, 23, 16, 12],
-        [ 9, 12, 16, 19, 14],
-        [ 7,  9, 12, 14, 19],
+        [9, 12, 16, 19, 14],
+        [7, 9, 12, 14, 19],
     ];
     let denom = 347;
 
@@ -183,7 +224,71 @@ fn test_calculate_query_coverage() {
     let epsilon = 0.0001;
 
     assert!((float_sum - 1.0).abs() < epsilon, "Sum was {float_sum}");
+}
 
-    
+use frequency_analysis_limits::dataloader::processing::{DomPair, Frequency, Record};
+use frequency_analysis_limits::LAMA::selector::Selector;
+use frequency_analysis_limits::LAMA::translator::Translator;
 
+#[test]
+fn end_to_end() {
+    let loaded_db: testDB = testDB::default();
+
+    let dp_file_path = NamedTempFile::new().expect("Failed to create temp file");
+    let val_tup_file_path = NamedTempFile::new().expect("Failed to create temp file");
+
+    let t = loaded_db.get_dims() * 2;
+    let dim = loaded_db.get_dims();
+    let dist = "uniform";
+    let (low, high) = get_domain_range(loaded_db.get_id_map().clone());
+
+    // compute_dominant_pair_freq(t as usize, dim as usize, dist, low, high, dp_file_path.path(), val_tup_file_path.path()).unwrap();
+
+    // THis is a bruteforce calculation of the TRUE frequency of all dompairs.
+    let freq_dom_pair: HashMap<Frequency, DomPair> =
+        get_freq_to_dominant_pair_map(dim, low, high, dist).unwrap();
+
+    // A bruteforce calculation of the TRUE frequency of all t-tuples
+    // let freq_of_t_tups: HashMap<Frequency, Vec<Vec<Record>>> =
+    //     get_freq_val_t_tup_dict(dim as u64, low, high, t as usize, dist).unwrap();
+
+    let freq_of_one_tups: HashMap<Frequency, Vec<Record>> =
+        get_freq_all_val_dict(dim as Value, low, high, t as usize, dist).unwrap();
+
+    let mut known_freq_plaintext = HashMap::new();
+    let mut uniq_id_to_response = HashMap::new();
+    let mut freq_to_unique_id: HashMap<Frequency, Vec<String>> = HashMap::new();
+    let mut ground_truth = HashMap::new();
+
+    for (key, val) in freq_of_one_tups {
+        let uniq_64 = get_unique_id(&val);
+        let uniq_id = format!("resp_{uniq_64}");
+
+        // This will only be a map to a minimum of 4 items (for 1-tuple, there is always at least
+        // three other items with the same freq - the items that make that one query/rectangle)!
+        match uniq_id_to_response.entry(uniq_id.clone()) {
+            Entry::Vacant(vacant_entry) => {
+                // Safe to insert!
+                vacant_entry.insert(val.clone());
+            }
+            Entry::Occupied(_) => {
+                // Abort and return an error
+                panic!(
+                    "{}",
+                    (format!("Entry rejected: The key '{key}' is already in use."))
+                )
+            }
+        }
+
+        freq_to_unique_id.entry(key).or_default().push(uniq_id);
+
+        //TODO THis should be for all t-tuples? Perhaps we should calc 'on-the-fly'. Currently it's
+        // just freq to a vec of multiple  1 d dim records.
+        known_freq_plaintext.insert(key, val);
+    }
+
+    let mut lama = SolverEngine::new(known_freq_plaintext, high.pow(dim as u32));
+    let responses = lama.reconstruct(&uniq_id_to_response, &freq_to_unique_id);
+
+    info!("OK!")
 }

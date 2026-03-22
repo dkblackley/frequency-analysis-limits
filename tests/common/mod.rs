@@ -18,7 +18,7 @@ pub struct testDB {
 
 impl Default for testDB {
     fn default() -> Self {
-        Self::new(10, 10, 90)
+        Self::new(100, 100, 90)
     }
 }
 

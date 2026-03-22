@@ -1,7 +1,11 @@
 use cp_sat::builder::{CpModelBuilder, IntVar};
 use cp_sat::ffi;
 use cp_sat::proto::constraint_proto::Constraint;
-use cp_sat::proto::{ConstraintProto, CpModelProto, CpSolverStatus, TableConstraintProto};
+use cp_sat::proto::LinearExpressionProto;
+use cp_sat::proto::{
+    AllDifferentConstraintProto, ConstraintProto, CpModelProto, CpSolverStatus,
+    TableConstraintProto,
+};
 use log::error;
 use std::collections::HashMap;
 
@@ -9,13 +13,13 @@ use std::collections::HashMap;
 /// Finds an assignment of values to identifiers that satisfies the formula C output by the Translator.
 pub struct SolverEngine {
     cp_model: CpModelBuilder,
-    freq_to_plaintext: HashMap<u64, Vec<Vec<i64>>>, // frequency to t-tuples (if t is 1 then vec len 1 vec of unique ids/encodings that match that encoding)
+    freq_to_plaintext: HashMap<(i64, u64), Vec<Vec<i64>>>, // (t, frequency) to t-tuples (if t is 1 then vec len 1 vec of unique ids/encodings that match that encoding)
     upper: i64,
     var_index_map: HashMap<IntVar, (i32, i64)>,
 }
 
 impl SolverEngine {
-    pub fn new(freq_to_plaintext: HashMap<u64, Vec<Vec<i64>>>, num_recs: i64) -> Self {
+    pub fn new(freq_to_plaintext: HashMap<(i64, u64), Vec<Vec<i64>>>, num_recs: i64) -> Self {
         let cp_model = CpModelBuilder::default();
         let var_index_map = HashMap::new();
         Self {
@@ -69,12 +73,13 @@ impl SolverEngine {
     pub fn reconstruct(
         &mut self,
         encrypted_records: Vec<i64>, // Vec of all unique records. Remember each 'value' is a single item that represents a d-dim point
-        freq_record_match: &HashMap<u64, Vec<Vec<i64>>>, // mapping of observed frequency to vec of t-tuples (Is only a single item just now)
+        freq_record_match: &HashMap<(i64, u64), Vec<Vec<i64>>>, // mapping of (t, observed frequency) to vec of t-tuples (Is only a single item just now)
     ) -> HashMap<i64, i64> {
         let mut var_map = HashMap::new();
         let mut reconstructed_db = HashMap::new();
 
         let mut count = 0;
+        let mut all_var_indices = Vec::new();
 
         for encrypted_id in encrypted_records {
             let var = self
@@ -82,11 +87,27 @@ impl SolverEngine {
                 .new_int_var_with_name([(0, self.upper)], format!("rec_{encrypted_id}"));
             var_map.insert(encrypted_id.clone(), var);
             self.var_index_map.insert(var, (count, encrypted_id));
+            all_var_indices.push(count);
             count += 1;
         }
 
         // Very silly, but we're just going to side-step everything cp_sat does because it's easier
         let mut model = self.cp_model.proto().clone();
+
+        let mut all_diff_proto = AllDifferentConstraintProto::default();
+
+        for &idx in &all_var_indices {
+            let mut expr = LinearExpressionProto::default();
+            expr.vars.push(idx); // The variable index
+            expr.coeffs.push(1); // The multiplier (1 * var)
+            all_diff_proto.vars = expr;
+        }
+
+        let mut constraint_proto = ConstraintProto::default();
+        constraint_proto.constraint = Some(Constraint::AllDiff(all_diff_proto));
+
+        // Inject the rule: "No two variables in this model can have the same value"
+        model.constraints.push(constraint_proto);
 
         for (frequency, t_tuples) in freq_record_match {
             // Look up the true plaintexts that generate this frequency
@@ -108,13 +129,12 @@ impl SolverEngine {
                     self.add_allowed_assignments(&mut model, vars, allowed_plaintexts.clone());
                 }
             } else {
-                panic!("Warning: Freq {} not found in precomputed table", frequency);
+                panic!(
+                    "Warning: Tuple {}, Freq {} not found in precomputed table",
+                    frequency.0, frequency.1
+                );
             }
         }
-
-        // Note: For multi-dimensional intersections (t=2, t=3), you would do another loop here
-        // where you pass a vector of multiple variables:
-        // model.add_allowed_assignments(vec![var_1, var_2], multi_dim_plaintexts);
 
         let response = ffi::solve(&model);
         let status = response.status();
@@ -146,9 +166,9 @@ mod tests {
         // PRECOMPUTED UNIVERSE
         let mut freq_to_plaintext = HashMap::new();
         // t=1: Frequency 10 means the plaintext is either 2 or 5
-        freq_to_plaintext.insert(10, vec![vec![2], vec![5]]);
+        freq_to_plaintext.insert((1, 10), vec![vec![2], vec![5]]);
         // t=2: Frequency 50 means the joint plaintexts are either [2, 8] or [5, 9]
-        freq_to_plaintext.insert(50, vec![vec![2, 8], vec![5, 9]]);
+        freq_to_plaintext.insert((2, 50), vec![vec![2, 8], vec![5, 9]]);
 
         let mut engine = SolverEngine::new(freq_to_plaintext, 100);
 
@@ -158,13 +178,15 @@ mod tests {
         // OBSERVED FREQUENCIES
         let mut freq_record_match = HashMap::new();
         // Both 999 and 888 independently have a frequency of 10
-        freq_record_match.insert(10, vec![vec![222], vec![555]]);
+        freq_record_match.insert((1, 10), vec![vec![222], vec![555]]);
         // When queried together, 999 and 888 have a joint frequency of 50
-        freq_record_match.insert(50, vec![vec![222, 888]]);
+        freq_record_match.insert((2, 50), vec![vec![222, 888]]);
 
         // RECONSTRUCT
         let result = engine.reconstruct(encrypted_records, &freq_record_match);
 
+        // Technically we see here the 'parallel freq' issue/mirror DB we always discuss.
+        // it is perfectly valid for 222 to be 5 and 555 to be 2... (and vice versa)
         assert_eq!(result.get(&222), Some(&2)); // 999 is forced to 2
         assert_eq!(result.get(&888), Some(&8)); // 888 is forced to 8
         assert_eq!(result.get(&555), Some(&5));

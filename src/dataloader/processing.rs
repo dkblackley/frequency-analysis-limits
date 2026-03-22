@@ -1,3 +1,4 @@
+use crate::dataloader::datasets::Searchable;
 use crate::dataloader::error::DataProcessingError;
 use indicatif::{ProgressBar, ProgressStyle};
 use itertools::Itertools;
@@ -17,6 +18,11 @@ pub type DomPair = (Record, Record);
 // Assuming frequency can be represented as an integer (e.g., scaled) or an ordered wrapper.
 // Using u64 here as a placeholder for your frequency type.
 pub type Frequency = u64;
+
+struct Query {
+    pub dom_pair: DomPair, // dom pair that defines this query
+    pub size: Value,       // the distance between the two points
+}
 
 //TODO: Re-write this docsdtring with more precise language ALso only do this after discussing with Evgenios!
 /// If you have a database that doesn't have discrete numbers to easily make rectangles over,
@@ -56,26 +62,6 @@ fn make_true_prob_uniform_continuous(
 /// * `HashMap<u64, u64>` - A mapping of points to their respective counts or probabilities.
 fn make_true_prob_uniform_discrete(points: Vec<u64>, lower: u64, upper: u64) -> HashMap<u64, u64> {
     return HashMap::new();
-}
-
-/// Remember, to compute the dominating vals/prob-freq pairs we don't really need the DB, we just
-/// Need the domain, specifically the lowest and highest possible value
-pub fn get_domain_range(record_value_dict: HashMap<Value, Vec<Value>>) -> (Value, Value) {
-    let mut largest_val = 1;
-    let mut lowest_val = 1;
-
-    for (key, val) in &record_value_dict {
-        for i in 0..val.len() {
-            if val[i] > largest_val {
-                largest_val = val[i];
-            }
-            if val[i] < lowest_val {
-                lowest_val = val[i];
-            }
-        }
-    }
-
-    (lowest_val, largest_val)
 }
 
 /// Precomputes and serializes TRUE frequencies for dominant pairs and t-tuples of values.
@@ -180,7 +166,7 @@ pub fn get_freq_to_dominant_pair_map(
     );
 
     for v in domain_iter {
-        for dv in get_all_dominating_values_optimal(&v, largest_val) {
+        for dv in get_all_dominating_values(&v, largest_val) {
             let pair = (v.clone(), dv.clone());
             let frequency = compute_pair_weight(&pair, dist, largest_val);
             true_pair_frequency_dict.insert(frequency, pair);
@@ -284,6 +270,50 @@ pub fn get_freq_val_t_tup_dict(
     Ok(val_tup_freq_dict)
 }
 
+/// Instead of dumbly generating every sing t-tuple we take in a list of all dom pairs and consider
+/// only dom-pairs that are a certain distance away (for a dense DB we can exactly calculate the
+/// number of records returned in the response, otherwise we have to count up to t). Only considers
+/// dompairs that doesn't have 0 freq
+pub fn get_freq_val_possible_t_tup_dict(
+    dim: Value,
+    t: usize,
+    dom_pairs: HashMap<DomPair, Frequency>,
+    enc_db: &impl Searchable,
+    dist: &str,
+) -> Result<HashMap<(Value, Frequency), Vec<Vec<Value>>>, DataProcessingError> {
+    let mut val_tup_freq_dict: HashMap<(Value, Frequency), Vec<Vec<Value>>> = HashMap::new();
+
+    let pb = ProgressBar::new(dom_pairs.keys().len() as u64);
+    pb.set_style(
+        ProgressStyle::default_bar()
+            // Added wide_bar, pos (current), len (total), and eta (time remaining)
+            .template(
+                "{spinner:.green} [{elapsed_precise}] [{wide_bar:.cyan/blue}] {pos}/{len} ({eta})",
+            )?
+            .progress_chars("#>-"),
+    );
+
+    for (pair, freq) in dom_pairs {
+        if freq == 0 {
+            continue;
+        }
+
+        let response = enc_db.do_search(pair.0, pair.1);
+
+        if response.len() <= t {
+            val_tup_freq_dict
+                .entry((response.len() as Value, freq))
+                .or_default()
+                .push(response);
+        }
+        pb.inc(1);
+    }
+
+    pb.finish_with_message("Done computing value tuple frequencies");
+
+    Ok(val_tup_freq_dict)
+}
+
 // Helper to determine if point u dominates point v (u_i >= v_i for all i)
 fn dominates(u: &[Coord], v: &[Coord]) -> bool {
     u.iter().zip(v.iter()).all(|(u_val, v_val)| u_val >= v_val)
@@ -294,17 +324,7 @@ fn _l1_distance(p1: &[Coord], p2: &[Coord]) -> u64 {
     p1.iter().zip(p2.iter()).map(|(a, b)| a.abs_diff(*b)).sum()
 }
 
-fn get_all_dominating_values(v: &[Coord], n: Coord) -> Vec<Record> {
-    let dim = v.len();
-    // Generate all points in the domain and filter by dominance
-    (0..dim)
-        .map(|_| 1..=n)
-        .multi_cartesian_product() // TODO: Not this
-        .filter(|u| dominates(u, v))
-        .collect()
-}
-
-fn get_all_dominating_values_optimal(v: &[Coord], n: Value) -> Vec<Record> {
+fn get_all_dominating_values(v: &[Coord], n: Value) -> Vec<Record> {
     v.iter()
         // Instead of starting at 1, start at the value of v in this dimension
         .map(|&v_val| v_val..=n)

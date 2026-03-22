@@ -7,8 +7,8 @@ mod common;
 
 use crate::common::testDB;
 use frequency_analysis_limits::dataloader::processing::{
-    get_domain_range, get_freq_all_val_dict, get_freq_to_dominant_pair_map, get_freq_val_t_tup_dict,
-    Value,
+    get_dominant_pair_to_freq_map, get_freq_all_val_dict, get_freq_to_dominant_pair_map, get_freq_val_possible_t_tup_dict,
+    get_freq_val_t_tup_dict, Value,
 };
 // Import solver engine from main project:
 use frequency_analysis_limits::LAMA::solver::SolverEngine;
@@ -240,13 +240,13 @@ fn end_to_end() {
     let t = loaded_db.get_dims() * 2;
     let dim = loaded_db.get_dims();
     let dist = "uniform";
-    let (low, high) = get_domain_range(loaded_db.get_id_map().clone());
+    let (low, high) = loaded_db.get_domain_range();
 
     // compute_dominant_pair_freq(t as usize, dim as usize, dist, low, high, dp_file_path.path(), val_tup_file_path.path()).unwrap();
 
     // THis is a bruteforce calculation of the TRUE frequency of all dompairs.
-    let freq_dom_pair: HashMap<Frequency, DomPair> =
-        get_freq_to_dominant_pair_map(dim, low, high, dist).unwrap();
+    let dom_pair_freq: HashMap<DomPair, Frequency> =
+        get_dominant_pair_to_freq_map(dim, low, high, dist).unwrap();
 
     // A bruteforce calculation of the TRUE frequency of all t-tuples
     // let freq_of_t_tups: HashMap<Frequency, Vec<Vec<Record>>> =
@@ -258,15 +258,24 @@ fn end_to_end() {
     let mut known_freq_plaintext = HashMap::new();
     let mut uniq_id_to_response = HashMap::new();
     let mut freq_to_unique_id: HashMap<Frequency, Vec<String>> = HashMap::new();
-    let mut ground_truth = HashMap::new();
+    let mut freq_to_t_tuple: HashMap<(Value, Frequency), Vec<Vec<Value>>> =
+        get_freq_val_possible_t_tup_dict(
+            dim,
+            (t * dim) as usize,
+            dom_pair_freq,
+            loaded_db,
+            "uniform",
+        )
+        .unwrap();
+    //let mut ground_truth = HashMap::new();
 
     for (key, val) in freq_of_one_tups {
-        let uniq_64 = get_unique_id(&val);
-        let uniq_id = format!("resp_{uniq_64}");
+        let uniq_resp_64 = get_unique_resp_id(&val);
+        let uniq_resp = format!("resp_{uniq_resp_64}");
 
         // This will only be a map to a minimum of 4 items (for 1-tuple, there is always at least
         // three other items with the same freq - the items that make that one query/rectangle)!
-        match uniq_id_to_response.entry(uniq_id.clone()) {
+        match uniq_id_to_response.entry(uniq_resp.clone()) {
             Entry::Vacant(vacant_entry) => {
                 // Safe to insert!
                 vacant_entry.insert(val.clone());
@@ -280,7 +289,7 @@ fn end_to_end() {
             }
         }
 
-        freq_to_unique_id.entry(key).or_default().push(uniq_id);
+        freq_to_unique_id.entry(key).or_default().push(uniq_resp);
 
         //TODO THis should be for all t-tuples? Perhaps we should calc 'on-the-fly'. Currently it's
         // just freq to a vec of multiple  1 d dim records.
@@ -288,7 +297,7 @@ fn end_to_end() {
     }
 
     let mut lama = SolverEngine::new(known_freq_plaintext, high.pow(dim as u32));
-    let responses = lama.reconstruct(&uniq_id_to_response, &freq_to_unique_id);
+    let responses = lama.reconstruct(loaded_db.get_universe(), &freq_to_t_tuple);
 
     info!("OK!")
 }

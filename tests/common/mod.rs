@@ -1,6 +1,6 @@
 use dataloader::datasets::Searchable;
 use frequency_analysis_limits::dataloader;
-use frequency_analysis_limits::dataloader::processing::{Record, Value};
+use frequency_analysis_limits::dataloader::processing::{Coord, Record, Value};
 use ndarray::{s, Array2};
 use rand::RngExt;
 use std::collections::HashMap;
@@ -12,13 +12,13 @@ pub struct testDB {
     dimensions: Value, // should always be two
     name: String,
     grid: Array2<Value>,
-    lowest_val: Value,
-    upper_val: Value,
+    lowest_val: Record,
+    upper_val: Record,
 }
 
 impl Default for testDB {
     fn default() -> Self {
-        Self::new(100, 100, 90)
+        Self::new(50, 50, 50)
     }
 }
 
@@ -31,8 +31,8 @@ impl testDB {
             dimensions: 2,
             name: "testDB".to_string(),
             grid: Self::generate_encoded_grid(rows, cols, density_pct),
-            lowest_val: 0,
-            upper_val: (rows - 1) as Value,
+            lowest_val: vec![0, 0],
+            upper_val: vec![(rows - 1) as Coord, (cols - 1) as Coord],
         }
     }
 
@@ -113,13 +113,13 @@ impl Searchable for testDB {
     /// Remember, to compute the dominating vals/prob-freq pairs we don't really need the DB, we just
     /// Need the domain, specifically the lowest and highest possible value (not flatten, highest
     /// x/y/z/whatever
-    fn get_domain_range(&self) -> (Value, Value) {
-        (self.lowest_val, self.upper_val)
+    fn get_dom_pair(&self) -> (Record, Record) {
+        (self.lowest_val.clone(), self.upper_val.clone())
     }
 
     fn get_universe(&self) -> Vec<Value> {
-        let lower_bound = vec![self.lowest_val, self.lowest_val];
-        let upper_bound = vec![self.upper_val, self.upper_val];
+        let (lower_bound, upper_bound) = self.get_dom_pair();
+
         self.do_search(lower_bound, upper_bound)
             .into_iter()
             .filter(|v| v != &i64::MIN)
@@ -146,8 +146,8 @@ mod tests {
                 dimensions: 2,
                 name: "testDB".to_string(),
                 grid: testDB::generate_encoded_grid(rows, cols, 100),
-                lowest_val: 0,
-                upper_val: 100,
+                lowest_val: vec![0, 0],
+                upper_val: vec![99, 99],
             };
 
             // 2. Perform the search across the entire grid

@@ -1,9 +1,13 @@
+use crate::dataloader::datasets::Searchable;
 use itertools::Itertools;
 
-/// Selector: Choosing Record-Retrieval Events[cite: 181].
+/// Selector: Choosing Record-Retrieval Events.
 /// This component determines which record-retrieval set expressions are used.
-/// Specifically, it generates the left-hand expressions (EX_L) as a collection[cite: 184].
-pub struct Selector;
+/// Specifically, it generates the frequencies of dominating pairs, as it corresponds to some dist
+pub struct Selector {
+    dist: String,
+    encrypted_db: dyn Searchable,
+}
 
 impl Selector {
     /// Generates T_cap combinations of size `t` for a given set of record IDs.

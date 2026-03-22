@@ -7,8 +7,8 @@ mod common;
 
 use crate::common::testDB;
 use frequency_analysis_limits::dataloader::processing::{
-    get_dominant_pair_to_freq_map, get_freq_all_val_dict, get_freq_to_dominant_pair_map, get_freq_val_possible_t_tup_dict,
-    get_freq_val_t_tup_dict, Value,
+    get_dominant_pair_to_freq_map, get_freq_all_val_dict, get_freq_val_possible_t_tup_dict, get_freq_val_t_tup_dict,
+    Value,
 };
 // Import solver engine from main project:
 use frequency_analysis_limits::LAMA::solver::SolverEngine;
@@ -241,13 +241,13 @@ fn end_to_end() {
     let t = loaded_db.get_dims() * 2;
     let dim = loaded_db.get_dims();
     let dist = "uniform";
-    let (low, high) = loaded_db.get_domain_range();
+    let (low_pair, high_pair) = loaded_db.get_dom_pair();
 
     // compute_dominant_pair_freq(t as usize, dim as usize, dist, low, high, dp_file_path.path(), val_tup_file_path.path()).unwrap();
 
     // THis is a bruteforce calculation of the TRUE frequency of all dompairs.
     let dom_pair_freq: HashMap<DomPair, Frequency> =
-        get_dominant_pair_to_freq_map(dim, low, high, dist).unwrap();
+        get_dominant_pair_to_freq_map(dim, low_pair, high_pair, dist).unwrap();
 
     // A bruteforce calculation of the TRUE frequency of all t-tuples
     // let freq_of_t_tups: HashMap<Frequency, Vec<Vec<Record>>> =
@@ -262,14 +262,7 @@ fn end_to_end() {
 
     // Remember, value in this case means encoded ID, i.e a single point
     let mut freq_to_t_tuple: HashMap<(Value, Frequency), Vec<Vec<Value>>> =
-        get_freq_val_possible_t_tup_dict(
-            dim,
-            (2 * dim) as usize,
-            dom_pair_freq,
-            &loaded_db,
-            "uniform",
-        )
-        .unwrap();
+        get_freq_val_possible_t_tup_dict((2 * dim) as usize, dom_pair_freq, &loaded_db).unwrap();
     //let mut ground_truth = HashMap::new();
 
     let mut dups = 0;

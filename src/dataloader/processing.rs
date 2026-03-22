@@ -81,9 +81,9 @@ fn make_true_prob_uniform_discrete(points: Vec<u64>, lower: u64, upper: u64) -> 
 /// # Returns
 ///
 pub fn get_dominant_pair_to_freq_map(
-    dim: Coord,
-    lowest_val: Coord,
-    largest_val: Coord,
+    dim: Value,
+    lowest_rec: Record,
+    largest_rec: Record,
     dist: &str,
 ) -> Result<HashMap<DomPair, Frequency>, DataProcessingError> {
     info!("Task 1: Computing dominant pair frequencies...");
@@ -93,13 +93,23 @@ pub fn get_dominant_pair_to_freq_map(
     //     fs::create_dir_all(parent)?;
     // }
 
-    // THis just assumes we start at 1
-    let total_pairs = (largest_val.pow(dim as u32) as f64).powi(2);
+    // Product of (max - min + 1) for each dimension
+    let space_size: f64 = lowest_rec
+        .iter()
+        .zip(largest_rec.iter())
+        .map(|(&low, &high)| (high - low + 1) as f64)
+        .product();
+
+    let total_pairs = space_size.powi(2);
     let total_dom_pairs = (total_pairs / 2_f64.powi((dim - 1) as i32)) as u64;
 
     // Assuming every query can occur, what is the frequency of each dominant pair?
     let mut true_pair_frequency_dict: HashMap<DomPair, Frequency> = HashMap::new();
-    let domain_iter = (0..dim).map(|_| 1..=largest_val).multi_cartesian_product();
+    let domain_iter = lowest_rec
+        .iter()
+        .zip(largest_rec.iter())
+        .map(|(&low, &high)| low..=high)
+        .multi_cartesian_product();
 
     // Set up indicatif progress bar
     let pb = ProgressBar::new(total_dom_pairs / 2);
@@ -112,9 +122,9 @@ pub fn get_dominant_pair_to_freq_map(
     );
 
     for v in domain_iter {
-        for dv in get_all_dominating_values(&v, largest_val) {
+        for dv in get_all_dominating_values(&v, &largest_rec) {
             let pair = (v.clone(), dv.clone());
-            let frequency = compute_pair_weight(&pair, dist, largest_val);
+            let frequency = compute_pair_weight(&pair, dist, &lowest_rec, &largest_rec);
             true_pair_frequency_dict.insert(pair, frequency);
 
             pb.inc(1); // Increment the progress bar silently
@@ -129,84 +139,90 @@ pub fn get_dominant_pair_to_freq_map(
     Ok(true_pair_frequency_dict)
 }
 
-/// Precomputes and serializes TRUE frequencies for dominant pairs and t-tuples of values.
-///
-/// This function iterates through the domain to calculate how many queries cover specific
-/// point pairs (dominant pairs) and groups of $t$ points (t-tuples). The results are
-/// saved as binary files using `bincode` for later use in frequency analysis.
-///
-/// # Arguments
-/// * `t` - The size of the value tuples to analyze. Should always be 2 * dimension
-/// * `dim` - The dimensionality of the data.
-/// * `dist` - The distribution type (e.g., "uniform").
-///
-/// # Returns
-///
-pub fn get_freq_to_dominant_pair_map(
-    dim: Value,
-    lowest_val: Value,
-    largest_val: Value,
-    dist: &str,
-) -> Result<HashMap<Frequency, DomPair>, DataProcessingError> {
-    info!("Task 1: Computing dominant pair frequencies...");
-    let timer = Instant::now();
-
-    // THis just assumes we start at 1
-    let total_pairs = largest_val.pow(dim as u32) as Value;
-
-    // Assuming every query can occur, what is the frequency of each dominant pair?
-    let mut true_pair_frequency_dict: HashMap<Frequency, DomPair> = HashMap::new();
-    let domain_iter = (0..dim).map(|_| 1..=largest_val).multi_cartesian_product();
-
-    // Set up indicatif progress bar
-    let pb = ProgressBar::new(total_pairs as u64);
-    pb.set_style(
-        ProgressStyle::default_bar()
-            .template(
-                "{spinner:.green} [{elapsed_precise}] [{wide_bar:.cyan/blue}] {pos}/{len} ({eta})",
-            )?
-            .progress_chars("#>-"),
-    );
-
-    for v in domain_iter {
-        for dv in get_all_dominating_values(&v, largest_val) {
-            let pair = (v.clone(), dv.clone());
-            let frequency = compute_pair_weight(&pair, dist, largest_val);
-            true_pair_frequency_dict.insert(frequency, pair);
-        }
-        pb.inc(1); // Increment the progress bar silently
-    }
-    pb.finish_with_message("Done computing dominant pair frequencies");
-
-    // let file = File::create(&path)?;
-    // bincode::serialize_into(BufWriter::new(file), &true_pair_frequency_dict)?;
-
-    info!("Finished DP frequencies in {:?}", timer.elapsed());
-    Ok(true_pair_frequency_dict)
-}
+// /// Precomputes and serializes TRUE frequencies for dominant pairs and t-tuples of values.
+// ///
+// /// This function iterates through the domain to calculate how many queries cover specific
+// /// point pairs (dominant pairs) and groups of $t$ points (t-tuples). The results are
+// /// saved as binary files using `bincode` for later use in frequency analysis.
+// ///
+// /// # Arguments
+// /// * `t` - The size of the value tuples to analyze. Should always be 2 * dimension
+// /// * `dim` - The dimensionality of the data.
+// /// * `dist` - The distribution type (e.g., "uniform").
+// ///
+// /// # Returns
+// ///
+// pub fn get_freq_to_dominant_pair_map(
+//     dim: Value,
+//     lowest_rec: Value,
+//     largest_rec: Value,
+//     dist: &str,
+// ) -> Result<HashMap<Frequency, DomPair>, DataProcessingError> {
+//     info!("Task 1: Computing dominant pair frequencies...");
+//     let timer = Instant::now();
+//
+//     // THis just assumes we start at 1
+//     let total_pairs = largest_rec.pow(dim as u32) as Value;
+//
+//     // Assuming every query can occur, what is the frequency of each dominant pair?
+//     let mut true_pair_frequency_dict: HashMap<Frequency, DomPair> = HashMap::new();
+//     let domain_iter = (0..dim).map(|_| 1..=largest_rec).multi_cartesian_product();
+//
+//     // Set up indicatif progress bar
+//     let pb = ProgressBar::new(total_pairs as u64);
+//     pb.set_style(
+//         ProgressStyle::default_bar()
+//             .template(
+//                 "{spinner:.green} [{elapsed_precise}] [{wide_bar:.cyan/blue}] {pos}/{len} ({eta})",
+//             )?
+//             .progress_chars("#>-"),
+//     );
+//
+//     for v in domain_iter {
+//         for dv in get_all_dominating_values(&v, largest_rec) {
+//             let pair = (v.clone(), dv.clone());
+//             let frequency = compute_pair_weight(&pair, dist, largest_rec);
+//             true_pair_frequency_dict.insert(frequency, pair);
+//         }
+//         pb.inc(1); // Increment the progress bar silently
+//     }
+//     pb.finish_with_message("Done computing dominant pair frequencies");
+//
+//     // let file = File::create(&path)?;
+//     // bincode::serialize_into(BufWriter::new(file), &true_pair_frequency_dict)?;
+//
+//     info!("Finished DP frequencies in {:?}", timer.elapsed());
+//     Ok(true_pair_frequency_dict)
+// }
 
 /// Calculate for just t=1 (and then use the solver to trim t down)
 pub fn get_freq_all_val_dict(
-    dim: Value,
-    lowest_val: Value,
-    largest_val: Value,
-    t: usize,
+    lowest_rec: &Record,
+    largest_rec: &Record,
+    t: usize, // Note: 't' is unused in this function's scope, kept for signature compatibility
     dist: &str,
 ) -> Result<HashMap<Frequency, Vec<Record>>, DataProcessingError> {
-    let mut vals: Vec<Record> = (0..dim)
-        .map(|_| 1..=largest_val)
+    // 1. Generate multi-dimensional Cartesian product based on specific bounds
+    let mut vals: Vec<Record> = lowest_rec
+        .iter()
+        .zip(largest_rec.iter())
+        .map(|(&low, &high)| low..=high)
         .multi_cartesian_product()
         .collect();
 
-    let total_combinations = largest_val.pow(dim as u32);
+    // 2. Calculate the total volume of the specific bounding box
+    let total_combinations: u64 = lowest_rec
+        .iter()
+        .zip(largest_rec.iter())
+        .map(|(&low, &high)| (high - low + 1) as u64)
+        .product();
 
     vals.sort();
+
     // Approximate total combinations to drive the progress bar
-    // Note: For large N, math::comb can overflow u64. We use a rough estimate or simply use an indeterminate spinner if it's too big.
-    let pb = ProgressBar::new(total_combinations as u64);
+    let pb = ProgressBar::new(total_combinations);
     pb.set_style(
         ProgressStyle::default_bar()
-            // Added wide_bar, pos (current), len (total), and eta (time remaining)
             .template(
                 "{spinner:.green} [{elapsed_precise}] [{wide_bar:.cyan/blue}] {pos}/{len} ({eta})",
             )?
@@ -216,9 +232,11 @@ pub fn get_freq_all_val_dict(
     let mut val_tup_freq_dict: HashMap<Frequency, Vec<Record>> = HashMap::new();
 
     for val_tuple in vals.into_iter() {
-        // Bounding pair should always be val_tuple repeated (?)
+        // Bounding pair should always be val_tuple repeated
         let bounding_pair = get_mbq(&[val_tuple.clone()]);
-        let freq = compute_pair_weight(&bounding_pair, dist, largest_val);
+
+        // Updated to pass both bounding records
+        let freq = compute_pair_weight(&bounding_pair, dist, lowest_rec, largest_rec);
 
         val_tup_freq_dict.entry(freq).or_default().push(val_tuple);
 
@@ -228,30 +246,31 @@ pub fn get_freq_all_val_dict(
 
     Ok(val_tup_freq_dict)
 }
-
+/// This takes years for any non-trivial t...
 /// This takes years for any non-trivial t...
 pub fn get_freq_val_t_tup_dict(
-    dim: Value,
-    lowest_val: Value,
-    largest_val: Value,
+    lowest_rec: &Record,
+    largest_rec: &Record,
     t: usize,
     dist: &str,
 ) -> Result<HashMap<Frequency, Vec<Vec<Record>>>, DataProcessingError> {
-    let mut vals: Vec<Record> = (0..dim)
-        .map(|_| 1..=largest_val)
+    // 1. Generate multi-dimensional Cartesian product based on specific bounds
+    let mut vals: Vec<Record> = lowest_rec
+        .iter()
+        .zip(largest_rec.iter())
+        .map(|(&low, &high)| low..=high)
         .multi_cartesian_product()
         .collect();
 
-    let n = vals.len(); // Assuming vals is a Vec, slice, or has a .len() method
+    let n = vals.len();
     let total_combinations = binomial_coefficient(n, t);
 
     vals.sort();
+
     // Approximate total combinations to drive the progress bar
-    // Note: For large N, math::comb can overflow u64. We use a rough estimate or simply use an indeterminate spinner if it's too big.
     let pb = ProgressBar::new(total_combinations);
     pb.set_style(
         ProgressStyle::default_bar()
-            // Added wide_bar, pos (current), len (total), and eta (time remaining)
             .template(
                 "{spinner:.green} [{elapsed_precise}] [{wide_bar:.cyan/blue}] {pos}/{len} ({eta})",
             )?
@@ -262,7 +281,9 @@ pub fn get_freq_val_t_tup_dict(
 
     for val_tuple in vals.into_iter().combinations(t) {
         let bounding_pair = get_mbq(&val_tuple);
-        let freq = compute_pair_weight(&bounding_pair, dist, largest_val);
+
+        // Updated to pass both bounding records
+        let freq = compute_pair_weight(&bounding_pair, dist, lowest_rec, largest_rec);
 
         val_tup_freq_dict.entry(freq).or_default().push(val_tuple);
 
@@ -272,17 +293,14 @@ pub fn get_freq_val_t_tup_dict(
 
     Ok(val_tup_freq_dict)
 }
-
 /// Instead of dumbly generating every sing t-tuple we take in a list of all dom pairs and consider
 /// only dom-pairs that are a certain distance away (for a dense DB we can exactly calculate the
 /// number of records returned in the response, otherwise we have to count up to t). Only considers
 /// dompairs that doesn't have 0 freq
 pub fn get_freq_val_possible_t_tup_dict(
-    dim: Value,
     t: usize,
     dom_pairs: HashMap<DomPair, Frequency>,
     enc_db: &(impl Searchable + Sync), // Ensure the DB can be shared across threads
-    dist: &str,
 ) -> Result<HashMap<(Value, Frequency), Vec<Vec<Value>>>, DataProcessingError> {
     let pb = ProgressBar::new(dom_pairs.len() as u64);
     pb.set_style(
@@ -293,7 +311,8 @@ pub fn get_freq_val_possible_t_tup_dict(
             .progress_chars("#>-"),
     );
 
-    let min_domain_val = enc_db.get_domain_range().0;
+    let binding = enc_db.get_dom_pair();
+    let min_domain_val = binding.0.iter().min().unwrap();
 
     // Thread-safe progress counter
     let processed_count = AtomicU64::new(0);
@@ -308,7 +327,7 @@ pub fn get_freq_val_possible_t_tup_dict(
                 let mut response = enc_db.do_search(pair.0, pair.1);
 
                 // Filter in-place to avoid allocating a new Vec
-                response.retain(|v| *v >= min_domain_val);
+                response.retain(|v| *v >= *min_domain_val);
 
                 if !response.is_empty() && response.len() <= t {
                     // Unstable sort is faster for primitives and perfectly fine here
@@ -362,30 +381,37 @@ fn _l1_distance(p1: &[Coord], p2: &[Coord]) -> u64 {
     p1.iter().zip(p2.iter()).map(|(a, b)| a.abs_diff(*b)).sum()
 }
 
-fn get_all_dominating_values(v: &[Coord], n: Value) -> Vec<Record> {
+fn get_all_dominating_values(v: &[Coord], largest_rec: &[Coord]) -> Vec<Record> {
     v.iter()
-        // Instead of starting at 1, start at the value of v in this dimension
-        .map(|&v_val| v_val..=n)
+        .zip(largest_rec.iter()) // Pair each v_val with its specific dimension's max
+        .map(|(&v_val, &max_val)| v_val..=max_val)
         .multi_cartesian_product()
         .collect()
 }
 
-fn compute_pair_weight(pair: &DomPair, dist: &str, n: Value) -> Frequency {
+fn compute_pair_weight(
+    pair: &DomPair,
+    dist: &str,
+    lowest_rec: &[Value],
+    largest_rec: &[Value],
+) -> Frequency {
     let (lower, upper) = pair;
 
     // Under uniform, simply count the queries covering the pair
     if dist == "uniform" {
         let mut dominating_vals: u64 = 1;
-        for u_val in upper {
-            dominating_vals *= ((n + 1) - u_val) as u64;
+        // Pair each upper value with its dimension's max bound
+        for (&u_val, &max_val) in upper.iter().zip(largest_rec.iter()) {
+            dominating_vals *= ((max_val + 1) - u_val) as u64;
         }
 
         let mut dominated_vals: u64 = 1;
-        for l_val in lower {
-            dominated_vals *= *l_val as u64;
+        // Pair each lower value with its dimension's min bound
+        for (&l_val, &min_val) in lower.iter().zip(lowest_rec.iter()) {
+            dominated_vals *= ((l_val + 1) - min_val) as u64;
         }
 
-        return dominated_vals * dominating_vals;
+        dominated_vals * dominating_vals
     }
     // Fallback for unimplemented distributions ('random', 'flattened', etc.)
     //TODO: Cartesian prodect of all possible queries over any given 'rectangle'
@@ -460,7 +486,8 @@ mod tests {
         let lower = vec![2];
         let upper = vec![4];
         let n = 10;
-        let weight = compute_pair_weight(&(lower, upper), "uniform", n);
+        let weight =
+            compute_pair_weight(&(lower.clone(), upper.clone()), "uniform", &lower, &upper);
         // 2 * (10 + 1 - 4) = 2 * 7 = 14
         assert_eq!(weight, 14);
     }
@@ -495,7 +522,7 @@ mod tests {
 
         for (v, dv, expected) in test_cases {
             let pair = (v.clone(), dv.clone());
-            let weight = compute_pair_weight(&pair, dist, n);
+            let weight = compute_pair_weight(&pair, dist, &p_11, &p_22);
             assert_eq!(weight, expected, "Failed for pair: v={:?}, dv={:?}", v, dv);
         }
     }

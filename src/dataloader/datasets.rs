@@ -10,7 +10,7 @@ pub trait Searchable: Sync {
     /// Remember, to compute the dominating vals/prob-freq pairs we don't really need the DB, we just
     /// Need the domain, specifically the lowest and highest possible value on x/y/z/whatever.
     /// you can think of this as the 'largest dominating pair value'
-    fn get_domain_range(&self) -> (Value, Value);
+    fn get_dom_pair(&self) -> (Record, Record);
 
     /// Returns all individual encrypted records.
     fn get_universe(&self) -> Vec<Value>;

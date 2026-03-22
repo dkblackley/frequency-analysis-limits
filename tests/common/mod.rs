@@ -18,7 +18,7 @@ pub struct testDB {
 
 impl Default for testDB {
     fn default() -> Self {
-        Self::new(10, 10, 90)
+        Self::new(4, 4, 70)
     }
 }
 
@@ -106,7 +106,7 @@ impl Searchable for testDB {
         bounding_box
             .iter()
             .copied()
-            .filter(|&v| v != i64::MIN)
+            //.filter(|&v| v != i64::MIN)
             .collect()
     }
 
@@ -121,6 +121,9 @@ impl Searchable for testDB {
         let lower_bound = vec![self.lowest_val, self.lowest_val];
         let upper_bound = vec![self.upper_val, self.upper_val];
         self.do_search(lower_bound, upper_bound)
+            .into_iter()
+            .filter(|v| v != &i64::MIN)
+            .collect()
     }
 }
 

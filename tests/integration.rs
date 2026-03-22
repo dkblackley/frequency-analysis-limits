@@ -232,6 +232,7 @@ use frequency_analysis_limits::LAMA::translator::Translator;
 
 #[test]
 fn end_to_end() {
+    let _ = env_logger::try_init();
     let loaded_db: testDB = testDB::default();
 
     let dp_file_path = NamedTempFile::new().expect("Failed to create temp file");
@@ -308,8 +309,20 @@ fn end_to_end() {
         known_freq_plaintext.insert(key, responses);
     }
 
-    let mut lama = SolverEngine::new(known_freq_plaintext, high.pow(dim as u32));
+    let mut lama = SolverEngine::new(
+        known_freq_plaintext.clone(),
+        loaded_db.get_universe().len() as i64,
+    );
     let responses = lama.reconstruct(loaded_db.get_universe(), &freq_to_t_tuple);
+
+    if responses.len() != loaded_db.get_universe().len() {
+        error!("Solver failed!! Printout out debug info");
+        error!("Known frequency-to-plaintext mappings: {known_freq_plaintext:?}");
+        let uni = loaded_db.get_universe();
+        error!("'encrypted/encoded' universe of plaintexts: {uni:?}");
+        error!("Frequency to t-tuple matches: {freq_to_t_tuple:?}");
+        panic!();
+    }
 
     info!("OK!")
 }

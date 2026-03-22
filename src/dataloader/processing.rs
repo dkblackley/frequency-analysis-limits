@@ -299,9 +299,15 @@ pub fn get_freq_val_possible_t_tup_dict(
             continue;
         }
 
-        let response = enc_db.do_search(pair.0, pair.1);
+        let mut response = enc_db.do_search(pair.0, pair.1);
 
         if response.len() > 0 && response.len() <= t {
+            let response: Vec<_> = response.into_iter().filter(|v| v != &i64::MIN).collect();
+
+            if response.len() == 0 {
+                continue;
+            }
+
             val_tup_freq_dict
                 .entry((response.len() as Value, freq))
                 .or_default()

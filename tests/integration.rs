@@ -311,7 +311,7 @@ fn end_to_end() {
 
     let mut lama = SolverEngine::new(
         known_freq_plaintext.clone(),
-        loaded_db.get_universe().len() as i64,
+        *loaded_db.get_universe().iter().max().unwrap(),
     );
     let responses = lama.reconstruct(loaded_db.get_universe(), &freq_to_t_tuple);
 
@@ -321,6 +321,7 @@ fn end_to_end() {
         let uni = loaded_db.get_universe();
         error!("'encrypted/encoded' universe of plaintexts: {uni:?}");
         error!("Frequency to t-tuple matches: {freq_to_t_tuple:?}");
+        error!("Solver: {lama:?}");
         panic!();
     }
 

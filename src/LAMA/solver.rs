@@ -11,6 +11,7 @@ use std::collections::HashMap;
 
 /// Solver Reconstruction as Constraint-Satisfaction.
 /// Finds an assignment of values to identifiers that satisfies the formula C output by the Translator.
+#[derive(Debug)]
 pub struct SolverEngine {
     cp_model: CpModelBuilder,
     freq_to_plaintext: HashMap<(i64, u64), Vec<Vec<i64>>>, // (t, frequency) to t-tuples (if t is 1 then vec len 1 vec of unique ids/encodings that match that encoding)
@@ -19,13 +20,13 @@ pub struct SolverEngine {
 }
 
 impl SolverEngine {
-    pub fn new(freq_to_plaintext: HashMap<(i64, u64), Vec<Vec<i64>>>, num_recs: i64) -> Self {
+    pub fn new(freq_to_plaintext: HashMap<(i64, u64), Vec<Vec<i64>>>, largest_val: i64) -> Self {
         let cp_model = CpModelBuilder::default();
         let var_index_map = HashMap::new();
         Self {
             cp_model,
             freq_to_plaintext,
-            upper: num_recs,
+            upper: largest_val,
             var_index_map,
         }
     }

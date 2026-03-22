@@ -282,12 +282,12 @@ pub fn get_freq_val_possible_t_tup_dict(
     enc_db: &impl Searchable,
     dist: &str,
 ) -> Result<HashMap<(Value, Frequency), Vec<Vec<Value>>>, DataProcessingError> {
-    let mut val_tup_freq_dict: HashMap<(Value, Frequency), Vec<Vec<Value>>> = HashMap::new();
+    // 1. Accumulate total frequency for each unique response
+    let mut response_to_total_freq: HashMap<Vec<Value>, Frequency> = HashMap::new();
 
     let pb = ProgressBar::new(dom_pairs.keys().len() as u64);
     pb.set_style(
         ProgressStyle::default_bar()
-            // Added wide_bar, pos (current), len (total), and eta (time remaining)
             .template(
                 "{spinner:.green} [{elapsed_precise}] [{wide_bar:.cyan/blue}] {pos}/{len} ({eta})",
             )?
@@ -299,24 +299,39 @@ pub fn get_freq_val_possible_t_tup_dict(
             continue;
         }
 
-        let mut response = enc_db.do_search(pair.0, pair.1);
+        let response = enc_db.do_search(pair.0, pair.1);
 
         if response.len() > 0 && response.len() <= t {
-            let response: Vec<_> = response.into_iter().filter(|v| v != &i64::MIN).collect();
+            let mut filtered_response: Vec<_> = response
+                .into_iter()
+                .filter(|v| v >= &enc_db.get_domain_range().0)
+                .collect();
 
-            if response.len() == 0 {
+            if filtered_response.is_empty() {
                 continue;
             }
 
-            val_tup_freq_dict
-                .entry((response.len() as Value, freq))
-                .or_default()
-                .push(response);
+            // Sort to ensure identical responses hash to the same key
+            filtered_response.sort();
+
+            // Sum up the frequencies of all queries returning this exact response
+            *response_to_total_freq.entry(filtered_response).or_insert(0) += freq;
         }
         pb.inc(1);
     }
 
     pb.finish_with_message("Done computing value tuple frequencies");
+
+    // 2. Invert the map into (t, total_freq) -> Vec<Response>
+    let mut val_tup_freq_dict: HashMap<(Value, Frequency), Vec<Vec<Value>>> = HashMap::new();
+
+    for (response, total_freq) in response_to_total_freq {
+        let t_val = response.len() as Value;
+        val_tup_freq_dict
+            .entry((t_val, total_freq))
+            .or_default()
+            .push(response);
+    }
 
     Ok(val_tup_freq_dict)
 }

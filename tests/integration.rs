@@ -12,7 +12,7 @@ use frequency_analysis_limits::dataloader::processing::{
 };
 // Import solver engine from main project:
 use frequency_analysis_limits::LAMA::solver::SolverEngine;
-use log::{debug, error, info};
+use log::{debug, error, info, warn};
 use num_rational::Ratio;
 use serde_json::to_string;
 use sha2::{Digest, Sha256};
@@ -252,25 +252,32 @@ fn end_to_end() {
     // let freq_of_t_tups: HashMap<Frequency, Vec<Vec<Record>>> =
     //     get_freq_val_t_tup_dict(dim as u64, low, high, t as usize, dist).unwrap();
 
-    let freq_of_one_tups: HashMap<Frequency, Vec<Record>> =
-        get_freq_all_val_dict(dim as Value, low, high, t as usize, dist).unwrap();
+    // let freq_of_one_tups: HashMap<Frequency, Vec<Record>> =
+    //     get_freq_all_val_dict(dim as Value, low, high, t as usize, dist).unwrap();
 
     let mut known_freq_plaintext = HashMap::new();
     let mut uniq_id_to_response = HashMap::new();
-    let mut freq_to_unique_id: HashMap<Frequency, Vec<String>> = HashMap::new();
+    let mut freq_to_unique_id: HashMap<(Value, Frequency), Vec<String>> = HashMap::new();
+
+    // Remember, value in this case means encoded ID, i.e a single point
     let mut freq_to_t_tuple: HashMap<(Value, Frequency), Vec<Vec<Value>>> =
         get_freq_val_possible_t_tup_dict(
             dim,
-            (t * dim) as usize,
+            (2 * dim) as usize,
             dom_pair_freq,
-            loaded_db,
+            &loaded_db,
             "uniform",
         )
         .unwrap();
     //let mut ground_truth = HashMap::new();
 
-    for (key, val) in freq_of_one_tups {
-        let uniq_resp_64 = get_unique_resp_id(&val);
+    let mut dups = 0;
+
+    for (key, responses) in freq_to_t_tuple.clone() {
+        let t_val = key.0;
+        let freq = key.1;
+
+        let uniq_resp_64 = get_unique_resp_id(&responses);
         let uniq_resp = format!("resp_{uniq_resp_64}");
 
         // This will only be a map to a minimum of 4 items (for 1-tuple, there is always at least
@@ -278,22 +285,27 @@ fn end_to_end() {
         match uniq_id_to_response.entry(uniq_resp.clone()) {
             Entry::Vacant(vacant_entry) => {
                 // Safe to insert!
-                vacant_entry.insert(val.clone());
+                vacant_entry.insert(responses.clone());
             }
             Entry::Occupied(_) => {
-                // Abort and return an error
-                panic!(
+                warn!(
                     "{}",
-                    (format!("Entry rejected: The key '{key}' is already in use."))
-                )
+                    (format!("Entry rejected: The key '{t_val}', {freq} is already in use."))
+                );
+                dups += 1;
             }
         }
 
-        freq_to_unique_id.entry(key).or_default().push(uniq_resp);
+        //assert_eq!(responses.len(), t_val as usize);
+
+        // freq_to_unique_id
+        //     .entry(key.clone())
+        //     .or_default()
+        //     .push(uniq_resp);
 
         //TODO THis should be for all t-tuples? Perhaps we should calc 'on-the-fly'. Currently it's
         // just freq to a vec of multiple  1 d dim records.
-        known_freq_plaintext.insert(key, val);
+        known_freq_plaintext.insert(key, responses);
     }
 
     let mut lama = SolverEngine::new(known_freq_plaintext, high.pow(dim as u32));

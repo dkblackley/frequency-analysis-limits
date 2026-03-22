@@ -13,6 +13,7 @@ use std::time::Instant;
 pub type Coord = i64;
 pub type Value = Coord;
 pub type Record = Vec<Coord>;
+pub type Responses = Vec<Record>;
 pub type DomPair = (Record, Record);
 // Note: Python dictionaries can use floats as keys, but Rust HashMaps cannot due to NaN ambiguity.
 // Assuming frequency can be represented as an integer (e.g., scaled) or an ordered wrapper.
@@ -300,7 +301,7 @@ pub fn get_freq_val_possible_t_tup_dict(
 
         let response = enc_db.do_search(pair.0, pair.1);
 
-        if response.len() <= t {
+        if response.len() > 0 && response.len() <= t {
             val_tup_freq_dict
                 .entry((response.len() as Value, freq))
                 .or_default()

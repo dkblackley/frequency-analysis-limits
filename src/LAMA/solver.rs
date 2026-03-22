@@ -94,20 +94,24 @@ impl SolverEngine {
         // Very silly, but we're just going to side-step everything cp_sat does because it's easier
         let mut model = self.cp_model.proto().clone();
 
-        let mut all_diff_proto = AllDifferentConstraintProto::default();
+        // ensure different function is deprecated (hooray) So I have to do this stupid linear
+        // constraint. For every pair of variables, strictly enforce: Var_A - Var_B != 0
+        // This guarantees a unique assignment to every record, or it fails.
+        for i in 0..all_var_indices.len() {
+            for j in (i + 1)..all_var_indices.len() {
+                let mut lin = cp_sat::proto::LinearConstraintProto::default();
+                // Select the two variables
+                lin.vars.extend([all_var_indices[i], all_var_indices[j]]);
+                // Multiply Var_A by 1, Var_B by -1
+                lin.coeffs.extend([1, -1]);
+                // Domain: [-upper, -1] OR [1, upper]. (Excludes 0!)
+                lin.domain.extend([-self.upper, -1, 1, self.upper]);
 
-        for &idx in &all_var_indices {
-            let mut expr = LinearExpressionProto::default();
-            expr.vars.push(idx); // The variable index
-            expr.coeffs.push(1); // The multiplier (1 * var)
-            all_diff_proto.vars = expr;
+                let mut constraint = ConstraintProto::default();
+                constraint.constraint = Some(Constraint::Linear(lin));
+                model.constraints.push(constraint);
+            }
         }
-
-        let mut constraint_proto = ConstraintProto::default();
-        constraint_proto.constraint = Some(Constraint::AllDiff(all_diff_proto));
-
-        // Inject the rule: "No two variables in this model can have the same value"
-        model.constraints.push(constraint_proto);
 
         for (frequency, t_tuples) in freq_record_match {
             // Look up the true plaintexts that generate this frequency

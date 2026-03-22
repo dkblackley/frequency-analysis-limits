@@ -18,7 +18,7 @@ pub struct testDB {
 
 impl Default for testDB {
     fn default() -> Self {
-        Self::new(100, 100, 90)
+        Self::new(10, 10, 90)
     }
 }
 
@@ -32,7 +32,7 @@ impl testDB {
             name: "testDB".to_string(),
             grid: Self::generate_encoded_grid(rows, cols, density_pct),
             lowest_val: 0,
-            upper_val: 100,
+            upper_val: (rows - 1) as Value,
         }
     }
 
@@ -94,7 +94,7 @@ impl Searchable for testDB {
 
     fn do_search(&self, lower: Record, upper: Record) -> Vec<Value> {
         //TODO: remove later
-        if lower[0] < upper[0] || lower[1] < upper[1] {
+        if lower[0] > upper[0] || lower[1] > upper[1] {
             panic!("Dominating pair is the wrong way round when querying DB!!")
         }
 
@@ -118,8 +118,8 @@ impl Searchable for testDB {
     }
 
     fn get_universe(&self) -> Vec<Value> {
-        let lower_bound = vec![0, 0];
-        let upper_bound = vec![99, 99];
+        let lower_bound = vec![self.lowest_val, self.lowest_val];
+        let upper_bound = vec![self.upper_val, self.upper_val];
         self.do_search(lower_bound, upper_bound)
     }
 }

@@ -3,10 +3,12 @@ use crate::dataloader::error::DataProcessingError;
 use indicatif::{ProgressBar, ProgressStyle};
 use itertools::Itertools;
 use log::{debug, error, info, warn};
+use rayon::prelude::*;
 use std::collections::HashMap;
 use std::fs::{self, File};
 use std::io::{BufReader, BufWriter};
 use std::path::Path;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Instant;
 
 // Type aliases to make the code more readable
@@ -279,13 +281,10 @@ pub fn get_freq_val_possible_t_tup_dict(
     dim: Value,
     t: usize,
     dom_pairs: HashMap<DomPair, Frequency>,
-    enc_db: &impl Searchable,
+    enc_db: &(impl Searchable + Sync), // Ensure the DB can be shared across threads
     dist: &str,
 ) -> Result<HashMap<(Value, Frequency), Vec<Vec<Value>>>, DataProcessingError> {
-    // 1. Accumulate total frequency for each unique response
-    let mut response_to_total_freq: HashMap<Vec<Value>, Frequency> = HashMap::new();
-
-    let pb = ProgressBar::new(dom_pairs.keys().len() as u64);
+    let pb = ProgressBar::new(dom_pairs.len() as u64);
     pb.set_style(
         ProgressStyle::default_bar()
             .template(
@@ -294,31 +293,48 @@ pub fn get_freq_val_possible_t_tup_dict(
             .progress_chars("#>-"),
     );
 
-    for (pair, freq) in dom_pairs {
-        if freq == 0 {
-            continue;
-        }
+    let min_domain_val = enc_db.get_domain_range().0;
 
-        let response = enc_db.do_search(pair.0, pair.1);
+    // Thread-safe progress counter
+    let processed_count = AtomicU64::new(0);
 
-        if response.len() > 0 && response.len() <= t {
-            let mut filtered_response: Vec<_> = response
-                .into_iter()
-                .filter(|v| v >= &enc_db.get_domain_range().0)
-                .collect();
+    // 1. Parallel Map-Reduce to accumulate frequencies
+    let response_to_total_freq: HashMap<Vec<Value>, Frequency> = dom_pairs
+        .into_par_iter()
+        .filter(|(_, freq)| *freq > 0)
+        .fold(
+            || HashMap::new(), // Local map for each thread
+            |mut local_map, (pair, freq)| {
+                let mut response = enc_db.do_search(pair.0, pair.1);
 
-            if filtered_response.is_empty() {
-                continue;
-            }
+                // Filter in-place to avoid allocating a new Vec
+                response.retain(|v| *v >= min_domain_val);
 
-            // Sort to ensure identical responses hash to the same key
-            filtered_response.sort();
+                if !response.is_empty() && response.len() <= t {
+                    // Unstable sort is faster for primitives and perfectly fine here
+                    response.sort_unstable();
 
-            // Sum up the frequencies of all queries returning this exact response
-            *response_to_total_freq.entry(filtered_response).or_insert(0) += freq;
-        }
-        pb.inc(1);
-    }
+                    *local_map.entry(response).or_insert(0) += freq;
+                }
+
+                // Update progress bar occasionally to avoid atomic bottleneck
+                let current = processed_count.fetch_add(1, Ordering::Relaxed);
+                if current % 1000 == 0 {
+                    pb.set_position(current);
+                }
+
+                local_map
+            },
+        )
+        .reduce(
+            || HashMap::new(), // Merge local maps together
+            |mut map1, map2| {
+                for (k, v) in map2 {
+                    *map1.entry(k).or_insert(0) += v;
+                }
+                map1
+            },
+        );
 
     pb.finish_with_message("Done computing value tuple frequencies");
 
@@ -484,40 +500,3 @@ mod tests {
         }
     }
 }
-//     #[test]
-//     fn test_e2e_precompute_pipeline() -> Result<(), Box<dyn std::error::Error>> {
-//         let dp_file_path = NamedTempFile::new().expect("Failed to create temp file");
-//         let val_tup_file_path = NamedTempFile::new().expect("Failed to create temp file");
-//
-//         // 2. Setup a small, deterministic database for the test
-//         // Dimension = 2, max coordinate = 2
-//         let db: HashMap<u64, Point> = HashMap::from([
-//             (0, vec![1, 1]),
-//             (1, vec![2, 2]),
-//             (2, vec![3, 3]),
-//             (3, vec![4, 4]),
-//             (4, vec![5, 5]),
-//         ]);
-//
-//         let dim = 2;
-//         let t = dim * 2;
-//         let dist = "uniform";
-//
-//         // 3. Run your main precomputation function
-//         // Note: Using the dynamic n_val logic you implemented
-//         compute_dominant_pair_freq(
-//             t,
-//             dim,
-//             dist,
-//             1,
-//             5,
-//             dp_file_path.path(),
-//             val_tup_file_path.path(),
-//         )?;
-//
-//
-//
-//         // The temp_dir goes out of scope here, wiping the generated files automatically!
-//         Ok(())
-//     }
-// }

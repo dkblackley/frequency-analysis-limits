@@ -325,5 +325,16 @@ fn end_to_end() {
         panic!();
     }
 
+    let mut correct = 0;
+    let mut incorrect = 0;
+
+    for (key, val) in responses {
+        if key == val {
+            correct = correct + 1
+        } else {
+            incorrect = incorrect + 1
+        }
+    }
+
     info!("OK!")
 }

@@ -6,6 +6,7 @@ use cp_sat::proto::{
     AllDifferentConstraintProto, ConstraintProto, CpModelProto, CpSolverStatus,
     TableConstraintProto,
 };
+use indicatif::{ProgressBar, ProgressStyle};
 use log::error;
 use std::collections::HashMap;
 
@@ -81,6 +82,19 @@ impl SolverEngine {
 
         let mut count = 0;
         let mut all_var_indices = Vec::new();
+        let mut all_vars = Vec::new();
+
+        let pb = ProgressBar::new(
+            (encrypted_records.len() + encrypted_records.len() + freq_record_match.len()) as u64,
+        );
+        pb.set_style(
+            ProgressStyle::default_bar()
+                // Added wide_bar, pos (current), len (total), and eta (time remaining)
+                .template(
+                    "{spinner:.green} [{elapsed_precise}] [{wide_bar:.cyan/blue}] {pos}/{len} ({eta})",
+                ).unwrap()
+                .progress_chars("#>-"),
+        );
 
         for encrypted_id in encrypted_records {
             let var = self
@@ -89,30 +103,35 @@ impl SolverEngine {
             var_map.insert(encrypted_id.clone(), var);
             self.var_index_map.insert(var, (count, encrypted_id));
             all_var_indices.push(count);
+            all_vars.push(var);
             count += 1;
+            pb.inc(1);
         }
+
+        self.cp_model.add_all_different(all_vars);
 
         // Very silly, but we're just going to side-step everything cp_sat does because it's easier
         let mut model = self.cp_model.proto().clone();
 
-        // ensure different function is deprecated (hooray) So I have to do this stupid linear
+        // // ensure different function is deprecated (hooray) So I have to do this stupid linear
         // constraint. For every pair of variables, strictly enforce: Var_A - Var_B != 0
-        // This guarantees a unique assignment to every record, or it fails.
-        for i in 0..all_var_indices.len() {
-            for j in (i + 1)..all_var_indices.len() {
-                let mut lin = cp_sat::proto::LinearConstraintProto::default();
-                // Select the two variables
-                lin.vars.extend([all_var_indices[i], all_var_indices[j]]);
-                // Multiply Var_A by 1, Var_B by -1
-                lin.coeffs.extend([1, -1]);
-                // Domain: [-upper, -1] OR [1, upper]. (Excludes 0!)
-                lin.domain.extend([-self.upper, -1, 1, self.upper]);
-
-                let mut constraint = ConstraintProto::default();
-                constraint.constraint = Some(Constraint::Linear(lin));
-                model.constraints.push(constraint);
-            }
-        }
+        // // This guarantees a unique assignment to every record, or it fails.
+        // for i in 0..all_var_indices.len() {
+        //     for j in (i + 1)..all_var_indices.len() {
+        //         let mut lin = cp_sat::proto::LinearConstraintProto::default();
+        //         // Select the two variables
+        //         lin.vars.extend([all_var_indices[i], all_var_indices[j]]);
+        //         // Multiply Var_A by 1, Var_B by -1
+        //         lin.coeffs.extend([1, -1]);
+        //         // Domain: [-upper, -1] OR [1, upper]. (Excludes 0!)
+        //         lin.domain.extend([-self.upper, -1, 1, self.upper]);
+        //
+        //         let mut constraint = ConstraintProto::default();
+        //         constraint.constraint = Some(Constraint::Linear(lin));
+        //         model.constraints.push(constraint);
+        //     }
+        //     pb.inc(1);
+        // }
 
         for (frequency, t_tuples) in freq_record_match {
             // Look up the true plaintexts that generate this frequency
@@ -139,6 +158,7 @@ impl SolverEngine {
                     frequency.0, frequency.1
                 );
             }
+            pb.inc(1);
         }
 
         let response = ffi::solve(&model);

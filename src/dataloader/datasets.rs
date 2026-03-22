@@ -1,7 +1,7 @@
 use crate::dataloader::processing::{Record, Value};
 
 // Your shared trait
-pub trait Searchable {
+pub trait Searchable: Sync {
     fn get_dims(&self) -> Value;
     // fn get_id_map(&self) -> &HashMap<Self::Key, Self::Value>;
     fn get_name(&self) -> &str;

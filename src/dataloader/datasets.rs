@@ -1,4 +1,4 @@
-use crate::dataloader::processing::{Record, Value};
+use crate::{Record, Value};
 
 // Your shared trait
 pub trait Searchable: Sync {

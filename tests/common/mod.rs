@@ -1,6 +1,6 @@
 use dataloader::datasets::Searchable;
 use frequency_analysis_limits::dataloader;
-use frequency_analysis_limits::dataloader::processing::{Coord, Record, Value};
+use frequency_analysis_limits::{Coord, Record, Value};
 use ndarray::{s, Array2};
 use rand::RngExt;
 use std::collections::HashMap;

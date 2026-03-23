@@ -2,16 +2,13 @@
 #![allow(clippy::expect_used)]
 
 use frequency_analysis_limits::dataloader::datasets::Searchable;
+use frequency_analysis_limits::Record;
 use std::collections::hash_map::Entry;
 mod common;
 
 use crate::common::testDB;
-use frequency_analysis_limits::dataloader::processing::{
-    get_dominant_pair_to_freq_map, get_freq_all_val_dict, get_freq_val_possible_t_tup_dict, get_freq_val_t_tup_dict,
-    Value,
-};
-// Import solver engine from main project:
-use frequency_analysis_limits::LAMA::solver::SolverEngine;
+use frequency_analysis_limits::LAMA::solver::Solver;
+use frequency_analysis_limits::{DomPair, Frequency, Value};
 use log::{debug, error, info, warn};
 use num_rational::Ratio;
 use serde_json::to_string;
@@ -226,14 +223,16 @@ fn test_calculate_query_coverage() {
     assert!((float_sum - 1.0).abs() < epsilon, "Sum was {float_sum}");
 }
 
-use frequency_analysis_limits::dataloader::processing::{DomPair, Frequency, Record};
 use frequency_analysis_limits::LAMA::selector::Selector;
 use frequency_analysis_limits::LAMA::translator::Translator;
 
 #[test]
 fn end_to_end() {
     let _ = env_logger::try_init();
-    let loaded_db: testDB = testDB::default();
+
+    let rows = 10;
+    let cols = 10;
+    let loaded_db = testDB::new(rows, cols, 90);
 
     let dp_file_path = NamedTempFile::new().expect("Failed to create temp file");
     let val_tup_file_path = NamedTempFile::new().expect("Failed to create temp file");
@@ -242,12 +241,19 @@ fn end_to_end() {
     let dim = loaded_db.get_dims();
     let dist = "uniform";
     let (low_pair, high_pair) = loaded_db.get_dom_pair();
+    let largest_val = high_pair.iter().max().unwrap();
 
-    // compute_dominant_pair_freq(t as usize, dim as usize, dist, low, high, dp_file_path.path(), val_tup_file_path.path()).unwrap();
+    let selector = Selector {
+        dist: dist.to_string(),
+        encrypted_db: &loaded_db,
+        dim,
+        lowest_rec: low_pair,
+        largest_rec: high_pair.clone(),
+    };
 
     // THis is a bruteforce calculation of the TRUE frequency of all dompairs.
     let dom_pair_freq: HashMap<DomPair, Frequency> =
-        get_dominant_pair_to_freq_map(dim, low_pair, high_pair, dist).unwrap();
+        selector.get_dominant_pair_to_freq_map().unwrap();
 
     // A bruteforce calculation of the TRUE frequency of all t-tuples
     // let freq_of_t_tups: HashMap<Frequency, Vec<Vec<Record>>> =
@@ -256,71 +262,34 @@ fn end_to_end() {
     // let freq_of_one_tups: HashMap<Frequency, Vec<Record>> =
     //     get_freq_all_val_dict(dim as Value, low, high, t as usize, dist).unwrap();
 
-    let mut known_freq_plaintext = HashMap::new();
-    let mut uniq_id_to_response = HashMap::new();
-    let mut freq_to_unique_id: HashMap<(Value, Frequency), Vec<String>> = HashMap::new();
+    // Remember, value in this case means encoded ID, i.e a single point. We assume the 'ideal' case
+    // that is: Both the true freq-plaintext and observed are the same.
+    let mut freq_to_t_tuple: HashMap<(Value, Frequency), Vec<Vec<Value>>> = selector
+        .get_freq_val_possible_t_tup_dict((2 * dim) as usize, dom_pair_freq)
+        .unwrap();
 
-    // Remember, value in this case means encoded ID, i.e a single point
-    let mut freq_to_t_tuple: HashMap<(Value, Frequency), Vec<Vec<Value>>> =
-        get_freq_val_possible_t_tup_dict((2 * dim) as usize, dom_pair_freq, &loaded_db).unwrap();
-    //let mut ground_truth = HashMap::new();
+    let mut translator = Translator::new(freq_to_t_tuple.clone(), *largest_val);
 
-    let mut dups = 0;
+    let (mut model, int_var_map) = translator.translate(&freq_to_t_tuple, loaded_db.get_universe());
 
-    for (key, responses) in freq_to_t_tuple.clone() {
-        let t_val = key.0;
-        let freq = key.1;
+    let solver = Solver::new(int_var_map);
 
-        let uniq_resp_64 = get_unique_resp_id(&responses);
-        let uniq_resp = format!("resp_{uniq_resp_64}");
-
-        // This will only be a map to a minimum of 4 items (for 1-tuple, there is always at least
-        // three other items with the same freq - the items that make that one query/rectangle)!
-        match uniq_id_to_response.entry(uniq_resp.clone()) {
-            Entry::Vacant(vacant_entry) => {
-                // Safe to insert!
-                vacant_entry.insert(responses.clone());
-            }
-            Entry::Occupied(_) => {
-                warn!(
-                    "{}",
-                    (format!("Entry rejected: The key '{t_val}', {freq} is already in use."))
-                );
-                dups += 1;
-            }
-        }
-
-        //assert_eq!(responses.len(), t_val as usize);
-
-        // freq_to_unique_id
-        //     .entry(key.clone())
-        //     .or_default()
-        //     .push(uniq_resp);
-
-        //TODO THis should be for all t-tuples? Perhaps we should calc 'on-the-fly'. Currently it's
-        // just freq to a vec of multiple  1 d dim records.
-        known_freq_plaintext.insert(key, responses);
-    }
-
-    let mut lama = SolverEngine::new(
-        known_freq_plaintext.clone(),
-        *loaded_db.get_universe().iter().max().unwrap(),
-    );
-    let responses = lama.reconstruct(loaded_db.get_universe(), &freq_to_t_tuple);
+    let responses = solver.solve(&mut model);
 
     if responses.len() != loaded_db.get_universe().len() {
         error!("Solver failed!! Printout out debug info");
-        error!("Known frequency-to-plaintext mappings: {known_freq_plaintext:?}");
+        error!("Known frequency-to-plaintext mappings: {freq_to_t_tuple:?}");
         let uni = loaded_db.get_universe();
         error!("'encrypted/encoded' universe of plaintexts: {uni:?}");
         error!("Frequency to t-tuple matches: {freq_to_t_tuple:?}");
-        error!("Solver: {lama:?}");
+        error!("Solver: {solver:?}");
         panic!();
     }
 
     let mut correct = 0;
     let mut incorrect = 0;
 
+    //Key is actually the true value.
     for (key, val) in responses {
         if key == val {
             correct = correct + 1

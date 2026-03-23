@@ -1,4 +1,4 @@
-use crate::dataloader::datasets::Searchable;
+use crate::dataloader::Searchable;
 use crate::LAMA::error::LAMAError;
 use crate::LAMA::utility::{
     binomial_coefficient, compute_pair_weight, get_all_dominating_values, get_mbq,

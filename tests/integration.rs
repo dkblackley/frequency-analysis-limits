@@ -1,7 +1,7 @@
 #![allow(clippy::unwrap_used)]
 #![allow(clippy::expect_used)]
 
-use frequency_analysis_limits::dataloader::datasets::Searchable;
+use frequency_analysis_limits::dataloader::Searchable;
 use frequency_analysis_limits::Record;
 use std::collections::hash_map::Entry;
 mod common;

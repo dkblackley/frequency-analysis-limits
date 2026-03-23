@@ -1,5 +1,4 @@
-use dataloader::datasets::Searchable;
-use frequency_analysis_limits::dataloader;
+use frequency_analysis_limits::dataloader::Searchable;
 use frequency_analysis_limits::{Coord, Record, Value};
 use ndarray::{s, Array2};
 use rand::RngExt;

@@ -33,10 +33,12 @@ impl Solver {
         if status == CpSolverStatus::Optimal || status == CpSolverStatus::Feasible {
             // Read the final chosen values out of the solver response
             for (intvar, ids) in &self.var_index_map {
-                let true_value = intvar.solution_value(&response);
+                let found_val = intvar.solution_value(&response);
                 // ids is the original 'encrypted' db. For convenience, the key is a true encoded
                 // val of the record.
-                reconstructed_db.insert(ids.1, true_value);
+                //TODO: 'un-encrypt' the found value and make a graph out of it. Do this by using
+                // gradient colours and swapping incorrect colours!
+                reconstructed_db.insert(ids.1, found_val);
             }
         } else {
             let numb: i32 = status.into();
@@ -49,47 +51,12 @@ impl Solver {
 
 #[cfg(test)]
 mod tests {
-
-    #[test]
-    fn test_solver_engine() {
-        // PRECOMPUTED UNIVERSE
-        let mut freq_to_plaintext = HashMap::new();
-        // t=1: Frequency 10 means the plaintext is either 2 or 5
-        freq_to_plaintext.insert((1, 10), vec![vec![2], vec![5]]);
-        // t=2: Frequency 50 means the joint plaintexts are either [2, 8] or [5, 9]
-        freq_to_plaintext.insert((2, 50), vec![vec![2, 8], vec![5, 9]]);
-
-        let mut engine = Solver::new(freq_to_plaintext, 100);
-
-        // ENCRYPTED DATABASE
-        let encrypted_records = vec![222, 888, 555]; // Three observed encrypted records
-
-        // OBSERVED FREQUENCIES
-        let mut freq_record_match = HashMap::new();
-        // Both 999 and 888 independently have a frequency of 10
-        freq_record_match.insert((1, 10), vec![vec![222], vec![555]]);
-        // When queried together, 999 and 888 have a joint frequency of 50
-        freq_record_match.insert((2, 50), vec![vec![222, 888]]);
-
-        // RECONSTRUCT
-        let result = engine.reconstruct(encrypted_records, &freq_record_match);
-
-        // Technically we see here the 'parallel freq' issue/mirror DB we always discuss.
-        // it is perfectly valid for 222 to be 5 and 555 to be 2... (and vice versa)
-        assert_eq!(result.get(&222), Some(&2)); // 999 is forced to 2
-        assert_eq!(result.get(&888), Some(&8)); // 888 is forced to 8
-        assert_eq!(result.get(&555), Some(&5));
-        println!("Database successfully reconstructed: {:?}", result);
-    }
-
-    use crate::LAMA::solver::Solver;
     use cp_sat::builder::CpModelBuilder;
     use cp_sat::ffi;
     use cp_sat::proto::constraint_proto::Constraint;
     use cp_sat::proto::{ConstraintProto, CpSolverStatus, TableConstraintProto};
-    use std::collections::HashMap;
-    // Import the FFI module
 
+    // Test making sure cp_sat works.
     #[test]
     fn test_clone_ffi_and_table_constraints() {
         let mut model = CpModelBuilder::default();

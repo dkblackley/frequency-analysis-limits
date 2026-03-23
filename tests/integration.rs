@@ -230,8 +230,8 @@ use frequency_analysis_limits::LAMA::translator::Translator;
 fn end_to_end() {
     let _ = env_logger::try_init();
 
-    let rows = 10;
-    let cols = 10;
+    let rows = 200;
+    let cols = 200;
     let loaded_db = testDB::new(rows, cols, 90);
 
     let dp_file_path = NamedTempFile::new().expect("Failed to create temp file");
@@ -241,7 +241,8 @@ fn end_to_end() {
     let dim = loaded_db.get_dims();
     let dist = "uniform";
     let (low_pair, high_pair) = loaded_db.get_dom_pair();
-    let largest_val = high_pair.iter().max().unwrap();
+    let binding = loaded_db.get_universe();
+    let largest_enc_val = binding.iter().max().unwrap();
 
     let selector = Selector {
         dist: dist.to_string(),
@@ -268,7 +269,7 @@ fn end_to_end() {
         .get_freq_val_possible_t_tup_dict((2 * dim) as usize, dom_pair_freq)
         .unwrap();
 
-    let mut translator = Translator::new(freq_to_t_tuple.clone(), *largest_val);
+    let mut translator = Translator::new(freq_to_t_tuple.clone(), *largest_enc_val);
 
     let (mut model, int_var_map) = translator.translate(&freq_to_t_tuple, loaded_db.get_universe());
 

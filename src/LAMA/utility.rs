@@ -1,6 +1,6 @@
 use crate::{Coord, DomPair, Frequency, Record, Value};
 use itertools::Itertools;
-use log::warn;
+use std::str::FromStr;
 
 // Helper to determine if point u dominates point v (u_i >= v_i for all i)
 pub fn dominates(u: &[Coord], v: &[Coord]) -> bool {
@@ -20,54 +20,66 @@ pub fn get_all_dominating_values(v: &[Coord], largest_rec: &[Coord]) -> Vec<Reco
         .collect()
 }
 
+// Define an Enum to avoid string comparisons in the hot loop
+pub enum Distribution {
+    Uniform,
+    Other,
+}
+
+impl FromStr for Distribution {
+    type Err = ();
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "uniform" => Ok(Distribution::Uniform),
+            _ => Ok(Distribution::Other),
+        }
+    }
+}
+
 pub fn compute_pair_weight(
     pair: &DomPair,
-    dist: &String,
+    dist: &Distribution,
     lowest_rec: &[Value],
     largest_rec: &[Value],
 ) -> Frequency {
     let (lower, upper) = pair;
 
-    // Under uniform, simply count the queries covering the pair
-    if dist == "uniform" {
-        let mut dominating_vals: u64 = 1;
-        // Pair each upper value with its dimension's max bound
-        for (&u_val, &max_val) in upper.iter().zip(largest_rec.iter()) {
-            dominating_vals *= ((max_val + 1) - u_val) as u64;
-        }
+    match dist {
+        Distribution::Uniform => {
+            let mut dominating_vals: u64 = 1;
+            for (&u_val, &max_val) in upper.iter().zip(largest_rec.iter()) {
+                dominating_vals *= ((max_val + 1) - u_val) as u64;
+            }
 
-        let mut dominated_vals: u64 = 1;
-        // Pair each lower value with its dimension's min bound
-        for (&l_val, &min_val) in lower.iter().zip(lowest_rec.iter()) {
-            dominated_vals *= ((l_val + 1) - min_val) as u64;
-        }
+            let mut dominated_vals: u64 = 1;
+            for (&l_val, &min_val) in lower.iter().zip(lowest_rec.iter()) {
+                dominated_vals *= ((l_val + 1) - min_val) as u64;
+            }
 
-        dominated_vals * dominating_vals
-    }
-    // Fallback for unimplemented distributions ('random', 'flattened', etc.)
-    //TODO: Cartesian prodect of all possible queries over any given 'rectangle'
-    else {
-        warn!(
-            "Distribution '{}' is not fully implemented. Returning weight 0.",
-            dist
-        );
-        return 0;
+            dominated_vals * dominating_vals
+        }
+        Distribution::Other => {
+            // Fallback logic
+            0
+        }
     }
 }
 
-/// Return the minimum bounding query (MBQ) of a t-tuple (i.e. dominating vals)
 pub fn get_mbq(t_tup: &[Record]) -> DomPair {
-    let dim = t_tup[0].len();
-    let mut minima = vec![Value::MAX; dim];
-    let mut maxima = vec![Value::MIN; dim];
+    // Avoid allocating empty vectors with Value::MAX/MIN.
+    // Clone the first record to use as our baseline bounds.
+    let mut minima = t_tup[0].clone();
+    let mut maxima = t_tup[0].clone();
 
-    for p in t_tup {
-        for d in 0..dim {
-            if p[d] < minima[d] {
-                minima[d] = p[d];
+    // Iterate through the remaining records to find true min/max
+    for p in t_tup.iter().skip(1) {
+        for (d, &val) in p.iter().enumerate() {
+            if val < minima[d] {
+                minima[d] = val;
             }
-            if p[d] > maxima[d] {
-                maxima[d] = p[d];
+            if val > maxima[d] {
+                maxima[d] = val;
             }
         }
     }
@@ -115,12 +127,14 @@ mod tests {
         // In 1D, for range [l, u] in domain [1, n], weight is l * (n + 1 - u)
         let lower = vec![2];
         let upper = vec![4];
+        let domain_min = vec![1];
+        let domain_max = vec![10];
         let n = 10;
         let weight = compute_pair_weight(
-            &(lower.clone(), upper.clone()),
-            "uniform".into(),
-            &lower,
-            &upper,
+            &(lower, upper),
+            &"uniform".parse::<Distribution>().unwrap(),
+            &domain_min,
+            &domain_max,
         );
         // 2 * (10 + 1 - 4) = 2 * 7 = 14
         assert_eq!(weight, 14);
@@ -156,7 +170,7 @@ mod tests {
 
         for (v, dv, expected) in test_cases {
             let pair = (v.clone(), dv.clone());
-            let weight = compute_pair_weight(&pair, dist, &p_11, &p_22);
+            let weight = compute_pair_weight(&pair, &dist.parse().unwrap(), &p_11, &p_22);
             assert_eq!(weight, expected, "Failed for pair: v={:?}, dv={:?}", v, dv);
         }
     }

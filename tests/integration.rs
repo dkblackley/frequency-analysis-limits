@@ -1,18 +1,16 @@
 #![allow(clippy::unwrap_used)]
 #![allow(clippy::expect_used)]
 
+use frequency_analysis_limits::dataloader::tester::testDB;
 use frequency_analysis_limits::dataloader::Searchable;
 use frequency_analysis_limits::Record;
-use std::collections::hash_map::Entry;
-mod common;
-
-use crate::common::testDB;
 use frequency_analysis_limits::LAMA::solver::Solver;
 use frequency_analysis_limits::{DomPair, Frequency, Value};
 use log::{debug, error, info, warn};
 use num_rational::Ratio;
 use serde_json::to_string;
 use sha2::{Digest, Sha256};
+use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::io::BufReader;
@@ -230,15 +228,16 @@ use frequency_analysis_limits::LAMA::translator::Translator;
 fn end_to_end() {
     let _ = env_logger::try_init();
 
-    let rows = 200;
-    let cols = 200;
-    let loaded_db = testDB::new(rows, cols, 90);
+    let rows = 25;
+    let cols = 25;
+    let loaded_db: Box<dyn Searchable + Sync> = Box::new(testDB::new(rows, cols, 100));
 
     let dp_file_path = NamedTempFile::new().expect("Failed to create temp file");
     let val_tup_file_path = NamedTempFile::new().expect("Failed to create temp file");
 
-    let t = loaded_db.get_dims() * 2;
     let dim = loaded_db.get_dims();
+    // let t = loaded_db.get_dims() * 2;
+    let t = 4;
     let dist = "uniform";
     let (low_pair, high_pair) = loaded_db.get_dom_pair();
     let binding = loaded_db.get_universe();
@@ -265,9 +264,17 @@ fn end_to_end() {
 
     // Remember, value in this case means encoded ID, i.e a single point. We assume the 'ideal' case
     // that is: Both the true freq-plaintext and observed are the same.
-    let mut freq_to_t_tuple: HashMap<(Value, Frequency), Vec<Vec<Value>>> = selector
-        .get_freq_val_possible_t_tup_dict((2 * dim) as usize, dom_pair_freq)
-        .unwrap();
+    // let mut freq_to_t_tuple: HashMap<(Value, Frequency), Vec<Vec<Value>>> =
+    //     selector.get_freq_val_t_tup_dict(t as usize).unwrap();
+
+    let temp_file1 = NamedTempFile::new().unwrap();
+    let path = temp_file1.path().to_str().unwrap();
+    let temp_file2 = NamedTempFile::new().unwrap();
+    let path = temp_file2.path().to_str().unwrap();
+    let temp_file3 = NamedTempFile::new().unwrap();
+    let path = temp_file3.path().to_str().unwrap();
+    let temp_file4 = NamedTempFile::new().unwrap();
+    let path = temp_file4.path().to_str().unwrap();
 
     let mut translator = Translator::new(freq_to_t_tuple.clone(), *largest_enc_val);
 

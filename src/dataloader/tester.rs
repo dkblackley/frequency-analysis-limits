@@ -1,5 +1,5 @@
-use frequency_analysis_limits::dataloader::Searchable;
-use frequency_analysis_limits::{Coord, Record, Value};
+use crate::dataloader::{flatten_nd, Searchable};
+use crate::{Coord, Record, Value};
 use ndarray::{s, Array2};
 use rand::RngExt;
 use std::collections::HashMap;
@@ -35,24 +35,6 @@ impl testDB {
         }
     }
 
-    /// Flattens an N-dimensional point with arbitrary upper and lower bounds into a 1D index.
-    /// Assumes `upper` bounds are inclusive (e.g., bounds 1 to 10 means 10 elements (0-9).
-    pub fn flatten_nd(point: &[i64], upper: &[i64], lower: &[i64]) -> i64 {
-        let mut index = 0;
-        let mut multiplier = 1;
-
-        for i in (0..point.len()).rev() {
-            let point_scaled = point[i] - lower[i];
-
-            index += point_scaled * multiplier;
-
-            let dimension_size = upper[i] - lower[i] + 1;
-            multiplier *= dimension_size;
-        }
-
-        index
-    }
-
     fn generate_encoded_grid(rows: usize, cols: usize, density_pct: u8) -> Array2<i64> {
         let mut rng = rand::rng();
 
@@ -69,7 +51,7 @@ impl testDB {
                 // It's a "hit". Encode the current (y, x) position!
                 // We cast the usize indices to i64 to match your function signature.
                 let point = [y as i64, x as i64];
-                Self::flatten_nd(&point, &upper, &lower)
+                flatten_nd(&point, &upper, &lower)
             } else {
                 // It's a "miss". Place your magic number.
                 i64::MIN
@@ -92,11 +74,6 @@ impl Searchable for testDB {
     }
 
     fn do_search(&self, lower: Record, upper: Record) -> Vec<Value> {
-        //TODO: remove later
-        if lower[0] > upper[0] || lower[1] > upper[1] {
-            panic!("Dominating pair is the wrong way round when querying DB!!")
-        }
-
         let bounding_box = self.grid.slice(s![
             lower[0] as usize..=upper[0] as usize,
             lower[1] as usize..=upper[1] as usize
@@ -111,7 +88,7 @@ impl Searchable for testDB {
 
     /// Remember, to compute the dominating vals/prob-freq pairs we don't really need the DB, we just
     /// Need the domain, specifically the lowest and highest possible value (not flatten, highest
-    /// x/y/z/whatever
+    /// x/y/z/whatever)> expects first item to be lowest and second to be largest.
     fn get_dom_pair(&self) -> (Record, Record) {
         (self.lowest_val.clone(), self.upper_val.clone())
     }
@@ -132,6 +109,7 @@ mod tests {
     #[cfg(test)]
     mod tests {
         use super::*;
+        use crate::dataloader::flatten_nd;
         use std::collections::HashSet;
         // Import everything from the parent module
 
@@ -163,7 +141,7 @@ mod tests {
             for y in 0..rows {
                 for x in 0..cols {
                     let point = [y as i64, x as i64];
-                    let encoded_val = testDB::flatten_nd(&point, &upper_params, &lower_params);
+                    let encoded_val = flatten_nd(&point, &upper_params, &lower_params);
                     expected_values.push(encoded_val);
                 }
             }

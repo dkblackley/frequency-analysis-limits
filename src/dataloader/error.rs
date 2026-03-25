@@ -9,17 +9,15 @@ pub enum DataLoadingError {
     #[error("Failed to read file: {0}")]
     Io(#[from] std::io::Error),
 
-
     #[error("Failed to read file {file_path}: {error}")]
-    Parsing {
-        file_path: String,
-        error: String,
-    },
+    Parsing { file_path: String, error: String },
+
+    #[error("Json failed to de-serialise: {0}")]
+    Serde(#[from] serde_json::Error),
 }
 
 #[derive(Error, Debug)]
 pub enum DataProcessingError {
-
     #[error("Failed to write to file: {0}")]
     Io(#[from] std::io::Error),
 

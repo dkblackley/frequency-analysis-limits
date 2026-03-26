@@ -73,7 +73,7 @@ impl Searchable for testDB {
         &self.name
     }
 
-    fn do_search(&self, lower: Record, upper: Record) -> Vec<Value> {
+    fn do_search(&self, lower: &Record, upper: &Record) -> Vec<Value> {
         let bounding_box = self.grid.slice(s![
             lower[0] as usize..=upper[0] as usize,
             lower[1] as usize..=upper[1] as usize
@@ -96,7 +96,7 @@ impl Searchable for testDB {
     fn get_universe(&self) -> Vec<Value> {
         let (lower_bound, upper_bound) = self.get_dom_pair();
 
-        self.do_search(lower_bound, upper_bound)
+        self.do_search(&lower_bound, &upper_bound)
             .into_iter()
             .filter(|v| v != &i64::MIN)
             .collect()

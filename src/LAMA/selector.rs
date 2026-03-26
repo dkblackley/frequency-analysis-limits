@@ -1,7 +1,8 @@
 use crate::dataloader::{flatten_nd, Searchable};
 use crate::LAMA::error::LAMAError;
 use crate::LAMA::utility::{
-    binomial_coefficient, compute_pair_weight, get_all_dominating_values, get_mbq, Distribution,
+    binomial_coefficient, compute_pair_weight, dominates, get_all_dominating_values, get_mbq,
+    Distribution,
 };
 use crate::{Coord, DomPair, Frequency, Record, Value};
 use indicatif::{ProgressBar, ProgressStyle};
@@ -90,7 +91,7 @@ impl Selector<'_> {
                 .template("{spinner:.green} [{elapsed_precise}] [{wide_bar:.cyan/blue}] {pos}/{len} ({eta})").unwrap()
         );
 
-        let processed_count = AtomicU64::new(0);
+        let mut processed_count = AtomicU64::new(0);
 
         // Channel for streaming computed tuples to the chunk manager
         let (sender, receiver) = sync_channel::<(u64, Vec<i64>)>(50_000);
@@ -158,6 +159,7 @@ impl Selector<'_> {
             });
 
         pb.finish_with_message("Done generating. Merging chunks...");
+
         let chunk_files = chunk_thread.join().unwrap();
 
         // --- PHASE 2: K-WAY MERGE INTO FINAL FILE ---
@@ -167,7 +169,7 @@ impl Selector<'_> {
         // Open all chunk files for reading
         for (idx, filename) in chunk_files.iter().enumerate() {
             let file = File::open(filename).unwrap();
-            let mut reader = BufReader::with_capacity(1024 * 1024, file); // 1MB buffer per file
+            let mut reader = BufReader::with_capacity(1024 * 1024 * 50, file); // 50MB buffer per file
 
             // Read the first item from each file to seed the heap
             if let Ok((freq, tuple)) = bincode::deserialize_from::<_, (u64, Vec<i64>)>(&mut reader)
@@ -210,7 +212,12 @@ impl Selector<'_> {
         }
     }
 
-    pub fn precompute_ram_sorted_to_disk(&self, t: usize, output_filepath: &str) {
+    pub fn precompute_ram_sorted_to_disk(
+        &self,
+        t: usize,
+        output_filepath: &str,
+        secret_map: HashMap<i64, i64>,
+    ) {
         let lowest_rec = self.lowest_rec.clone();
         let largest_rec = self.largest_rec.clone();
         let dist_enum = Distribution::from_str(&self.dist).unwrap_or(Distribution::Uniform);
@@ -223,32 +230,127 @@ impl Selector<'_> {
             .collect();
         vals.sort();
 
-        // 1. Calculate all frequencies and flatten tuples
-        let mut all_tuples: Vec<(u64, Vec<i64>)> = vals
+        //TODO: Option for either enc or unenc (probably in flatten_nd)
+        let mut encrypted_tuples: Vec<(u64, Vec<i64>)> = vals
             .into_iter()
             .combinations(t)
             .map(|val_tuple| {
                 let bounding_pair = get_mbq(&val_tuple);
                 let freq =
                     compute_pair_weight(&bounding_pair, &dist_enum, &lowest_rec, &largest_rec);
-                let flattened: Vec<i64> = val_tuple
+
+                let encrypted_flattened: Vec<i64> = val_tuple
                     .iter()
-                    .map(|rec| flatten_nd(rec, &largest_rec, &lowest_rec))
+                    .map(|rec| {
+                        let true_flat_id = flatten_nd(rec, &largest_rec, &lowest_rec);
+                        // MASK THE ID HERE
+                        *secret_map
+                            .get(&true_flat_id)
+                            .expect("ID missing from universe")
+                    })
                     .collect();
-                (freq, flattened)
+
+                (freq, encrypted_flattened)
             })
             .collect();
 
-        // 2. Sort by frequency
-        all_tuples.sort_unstable_by_key(|k| k.0);
+        encrypted_tuples.sort_unstable_by_key(|k| k.0);
 
         // 3. Stream to disk sequentially
         let file = File::create(output_filepath).expect("Failed to create file");
         let mut writer = BufWriter::with_capacity(8 * 1024 * 1024, file);
 
-        for item in all_tuples {
+        for item in encrypted_tuples {
             bincode::serialize_into(&mut writer, &item).unwrap();
         }
+    }
+
+    pub fn precompute_observed_to_disk(
+        &self,
+        t: usize,
+        output_filepath: &str,
+        dom_pairs: &HashMap<DomPair, Frequency>,
+    ) -> Vec<(u64, Vec<i64>)> {
+        let pb = ProgressBar::new(dom_pairs.len() as u64);
+        pb.set_style(
+            ProgressStyle::default_bar()
+                .template("{spinner:.green} [{elapsed_precise}] [{wide_bar:.cyan/blue}] {pos}/{len} ({eta})")
+                .unwrap()
+                .progress_chars("#>-"),
+        );
+        let processed_count = AtomicU64::new(0);
+
+        info!("Simulating leakage and aggregating t-tuple frequencies...");
+
+        // 3. Parallel Map-Reduce to accumulate true observed frequencies
+        let t_tuple_to_freq: HashMap<Vec<i64>, u64> = dom_pairs
+            .into_par_iter()
+            .fold(
+                HashMap::new, // Thread-local map
+                |mut local_map, dom_freq| {
+                    // Compute the weight of this specific query
+                    let (pair, freq) = dom_freq;
+
+                    if freq > &0 {
+                        // Query the encrypted DB
+                        let mut response = self.encrypted_db.do_search(&pair.0, &pair.1);
+
+                        // If the response contains at least `t` items, we can extract t-tuples
+                        if response.len() >= t {
+                            response.sort_unstable();
+
+                            // For every t-tuple present in this response, add the query's weight
+                            for t_tuple in response.into_iter().combinations(t) {
+                                *local_map.entry(t_tuple).or_insert(0) += freq;
+                            }
+                        }
+                    }
+
+                    // Update progress bar without bottlenecking threads
+                    let current = processed_count.fetch_add(1, AtomicOrdering::Relaxed);
+                    if current % 5000 == 0 {
+                        pb.set_position(current);
+                    }
+
+                    local_map
+                },
+            )
+            .reduce(
+                HashMap::new, // Merge all thread-local maps
+                |mut map1, map2| {
+                    for (k, v) in map2 {
+                        *map1.entry(k).or_insert(0) += v;
+                    }
+                    map1
+                },
+            );
+
+        pb.finish_with_message("Done aggregating frequencies.");
+
+        // 4. Transform into the (Frequency, Tuple) format expected by the Translator
+        let mut observed_tuples: Vec<(u64, Vec<i64>)> = t_tuple_to_freq
+            .into_iter()
+            .map(|(tuple, freq)| (freq, tuple))
+            .collect();
+
+        // 5. Sort by frequency
+        observed_tuples.sort_unstable_by_key(|k| k.0);
+
+        // 6. Stream to disk sequentially
+        info!(
+            "Writing {} unique t-tuples to disk...",
+            observed_tuples.len()
+        );
+        let file = File::create(output_filepath).expect("Failed to create file");
+        let mut writer = BufWriter::with_capacity(8 * 1024 * 1024, file);
+
+        for item in observed_tuples {
+            bincode::serialize_into(&mut writer, &item).unwrap();
+        }
+
+        info!("Precomputation complete.");
+
+        return observed_tuples;
     }
 
     /// Precomputes and serializes TRUE frequencies for dominant pairs and t-tuples of values.
@@ -321,7 +423,7 @@ impl Selector<'_> {
     }
 
     pub fn get_freq_val_t_tup_dict(
-        self,
+        &self,
         t: usize,
     ) -> Result<HashMap<(Value, Frequency), Vec<Vec<Value>>>, LAMAError> {
         let lowest_rec = self.lowest_rec.clone();

@@ -9,7 +9,7 @@ pub trait Searchable: Sync {
     fn get_dims(&self) -> Value;
     // fn get_id_map(&self) -> &HashMap<Self::Key, Self::Value>;
     fn get_name(&self) -> &str;
-    fn do_search(&self, lower: Record, upper: Record) -> Vec<Value>;
+    fn do_search(&self, lower: &Record, upper: &Record) -> Vec<Value>;
 
     /// Remember, to compute the dominating vals/prob-freq pairs we don't really need the DB, we just
     /// Need the domain, specifically the lowest and highest possible value on x/y/z/whatever.

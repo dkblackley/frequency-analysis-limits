@@ -134,35 +134,35 @@ fn main() {
         }
     }
 
-    let mut translator = Translator::new(freq_to_t_tuple.clone(), *largest_enc_val);
-
-    let (mut model, int_var_map) = translator.translate(&freq_to_t_tuple, loaded_db.get_universe());
-
-    let solver = Solver::new(int_var_map);
-
-    let responses = solver.solve(&mut model);
-
-    if responses.len() != loaded_db.get_universe().len() {
-        error!("Solver failed!! Printout out debug info");
-        error!("Known frequency-to-plaintext mappings: {freq_to_t_tuple:?}");
-        let uni = loaded_db.get_universe();
-        error!("'encrypted/encoded' universe of plaintexts: {uni:?}");
-        error!("Frequency to t-tuple matches: {freq_to_t_tuple:?}");
-        error!("Solver: {solver:?}");
-        panic!();
-    }
-
-    let mut correct = 0;
-    let mut incorrect = 0;
-
-    //Key is actually the true value.
-    for (key, val) in responses {
-        if key == val {
-            correct = correct + 1
-        } else {
-            incorrect = incorrect + 1
-        }
-    }
+    // let mut translator = Translator::new(freq_to_t_tuple.clone(), *largest_enc_val);
+    //
+    // let (mut model, int_var_map) = translator.translate(&freq_to_t_tuple, loaded_db.get_universe());
+    //
+    // let solver = Solver::new(int_var_map);
+    //
+    // let responses = solver.solve(&mut model);
+    //
+    // if responses.len() != loaded_db.get_universe().len() {
+    //     error!("Solver failed!! Printout out debug info");
+    //     error!("Known frequency-to-plaintext mappings: {freq_to_t_tuple:?}");
+    //     let uni = loaded_db.get_universe();
+    //     error!("'encrypted/encoded' universe of plaintexts: {uni:?}");
+    //     error!("Frequency to t-tuple matches: {freq_to_t_tuple:?}");
+    //     error!("Solver: {solver:?}");
+    //     panic!();
+    // }
+    //
+    // let mut correct = 0;
+    // let mut incorrect = 0;
+    //
+    // //Key is actually the true value.
+    // for (key, val) in responses {
+    //     if key == val {
+    //         correct = correct + 1
+    //     } else {
+    //         incorrect = incorrect + 1
+    //     }
+    // }
 
     info!("morituri te salutant or morituri te salutamus");
 }

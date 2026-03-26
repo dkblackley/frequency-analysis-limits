@@ -228,8 +228,7 @@ checksum = "a6ef517f0926dd24a1582492c791b6a4818a4d94e789a334894aa15b0d12f55c"
 [[package]]
 name = "cp_sat"
 version = "0.3.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9c974d3de62545fc4563bf6da4e3a4be9c862ac2074013ec74e58c99e672b72e"
+source = "git+https://github.com/KardinalAI/cp_sat.git?branch=master#307c87bde930a93fb8eb684fd6332dcc12f0866a"
 dependencies = [
  "bytes",
  "cc",

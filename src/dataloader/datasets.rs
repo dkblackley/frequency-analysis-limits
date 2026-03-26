@@ -102,7 +102,7 @@ impl Searchable for CaliMap50 {
         self.name.as_str()
     }
 
-    fn do_search(&self, lower: Record, upper: Record) -> Vec<Value> {
+    fn do_search(&self, lower: &Record, upper: &Record) -> Vec<Value> {
         let bounding_box = self.grid.slice(s![
             lower[0] as usize..=upper[0] as usize,
             lower[1] as usize..=upper[1] as usize

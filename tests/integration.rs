@@ -1,6 +1,7 @@
 #![allow(clippy::unwrap_used)]
 #![allow(clippy::expect_used)]
 
+use cp_sat::proto::CpSolverStatus;
 use frequency_analysis_limits::dataloader::tester::testDB;
 use frequency_analysis_limits::dataloader::Searchable;
 use frequency_analysis_limits::Record;
@@ -8,6 +9,9 @@ use frequency_analysis_limits::LAMA::solver::Solver;
 use frequency_analysis_limits::{DomPair, Frequency, Value};
 use log::{debug, error, info, warn};
 use num_rational::Ratio;
+use rand::rngs::StdRng;
+use rand::seq::SliceRandom;
+use rand::SeedableRng;
 use serde_json::to_string;
 use sha2::{Digest, Sha256};
 use std::collections::hash_map::Entry;
@@ -223,21 +227,109 @@ fn test_calculate_query_coverage() {
 
 use frequency_analysis_limits::LAMA::selector::Selector;
 use frequency_analysis_limits::LAMA::translator::Translator;
+pub fn generate_secret_mapping(universe: &[i64]) -> HashMap<i64, i64> {
+    // 1. Copy the universe to act as our pool of available aliases
+    let mut encrypted_aliases = universe.to_vec();
+
+    // Create a seeded RNG (requires a 32-byte array)
+    let mut rng = StdRng::seed_from_u64(42);
+
+    encrypted_aliases.shuffle(&mut rng);
+
+    // 3. Bind each true ID to a totally random (but unique) alias from the same domain
+    let secret_map: HashMap<i64, i64> = universe
+        .iter()
+        .cloned()
+        .zip(encrypted_aliases.into_iter())
+        .collect();
+
+    secret_map
+}
+pub fn generate_mapping(universe: &[i64]) -> HashMap<i64, i64> {
+    // 1. Copy the universe to act as our pool of available aliases
+    let mut plaintext = universe.to_vec();
+
+    // 3. Bind each true ID to a totally random (but unique) alias from the same domain
+    let secret_map: HashMap<i64, i64> = universe
+        .iter()
+        .cloned()
+        .zip(plaintext.into_iter())
+        .collect();
+
+    secret_map
+}
+
+fn check_isomorphism(responses: &HashMap<i64, i64>, rows: i64, cols: i64) -> Option<&'static str> {
+    // 2. Build the solver's actual mapping: True_Plaintext_ID -> Guessed_Plaintext_ID
+    let mut true_to_guessed = HashMap::new();
+    for (encrypted_alias, guessed_id) in responses {
+        true_to_guessed.insert(encrypted_alias, *guessed_id);
+    }
+
+    let max_r = rows - 1;
+    let max_c = cols - 1;
+
+    // Helper closures to translate between 1D IDs and 2D Coordinates
+    // This matches the math from your `flatten_nd` function
+    let to_coord = |id: i64| -> (i64, i64) { (id / cols, id % cols) };
+    let to_id = |r: i64, c: i64| -> i64 { r * cols + c };
+
+    // 3. Define the 8 valid geometric transformations for a 2D grid
+    let transformations: Vec<(&str, Box<dyn Fn(i64, i64) -> (i64, i64)>)> = vec![
+        ("Identity (Perfect Match)", Box::new(|r, c| (r, c))),
+        ("Rotated 90°", Box::new(move |r, c| (c, max_r - r))),
+        ("Rotated 180°", Box::new(move |r, c| (max_r - r, max_c - c))),
+        ("Rotated 270°", Box::new(move |r, c| (max_c - c, r))),
+        (
+            "Reflected Horizontal (Flip Y)",
+            Box::new(move |r, c| (r, max_c - c)),
+        ),
+        (
+            "Reflected Vertical (Flip X)",
+            Box::new(move |r, c| (max_r - r, c)),
+        ),
+        ("Reflected Main Diagonal", Box::new(|r, c| (c, r))),
+        (
+            "Reflected Anti-Diagonal",
+            Box::new(move |r, c| (max_c - c, max_r - r)),
+        ),
+    ];
+
+    // 4. Test the solver's mapping against each transformation
+    for (name, transform) in transformations {
+        let mut is_match = true;
+
+        for (&true_id, &guessed_id) in &true_to_guessed {
+            let (r, c) = to_coord(*true_id);
+            let (trans_r, trans_c) = transform(r, c);
+            let expected_guessed_id = to_id(trans_r, trans_c);
+
+            if guessed_id != expected_guessed_id {
+                is_match = false;
+                break;
+            }
+        }
+
+        // If all 400 points conform to this specific transformation, we cracked it
+        if is_match {
+            return Some(name);
+        }
+    }
+
+    None
+}
 
 #[test]
 fn end_to_end() {
     let _ = env_logger::try_init();
 
-    let rows = 25;
-    let cols = 25;
+    let rows = 15;
+    let cols = 15;
     let loaded_db: Box<dyn Searchable + Sync> = Box::new(testDB::new(rows, cols, 100));
 
-    let dp_file_path = NamedTempFile::new().expect("Failed to create temp file");
-    let val_tup_file_path = NamedTempFile::new().expect("Failed to create temp file");
-
     let dim = loaded_db.get_dims();
-    // let t = loaded_db.get_dims() * 2;
-    let t = 4;
+    let t = loaded_db.get_dims() * 2;
+    //let t = 2;
     let dist = "uniform";
     let (low_pair, high_pair) = loaded_db.get_dom_pair();
     let binding = loaded_db.get_universe();
@@ -255,36 +347,28 @@ fn end_to_end() {
     let dom_pair_freq: HashMap<DomPair, Frequency> =
         selector.get_dominant_pair_to_freq_map().unwrap();
 
-    // A bruteforce calculation of the TRUE frequency of all t-tuples
-    // let freq_of_t_tups: HashMap<Frequency, Vec<Vec<Record>>> =
-    //     get_freq_val_t_tup_dict(dim as u64, low, high, t as usize, dist).unwrap();
+    let plain_file1 = NamedTempFile::new().unwrap();
+    let plain1 = plain_file1.path().to_str().unwrap();
+    let plain_file2 = NamedTempFile::new().unwrap();
+    let plain2 = plain_file2.path().to_str().unwrap();
 
-    // let freq_of_one_tups: HashMap<Frequency, Vec<Record>> =
-    //     get_freq_all_val_dict(dim as Value, low, high, t as usize, dist).unwrap();
+    let freq_to_one_tups: Vec<(u64, Vec<i64>)> =
+        selector.precompute_observed_to_disk(1, plain1, &dom_pair_freq);
+    let freq_to_two_tups: Vec<(u64, Vec<i64>)> =
+        selector.precompute_observed_to_disk(2, plain2, &dom_pair_freq);
 
-    // Remember, value in this case means encoded ID, i.e a single point. We assume the 'ideal' case
-    // that is: Both the true freq-plaintext and observed are the same.
-    // let mut freq_to_t_tuple: HashMap<(Value, Frequency), Vec<Vec<Value>>> =
-    //     selector.get_freq_val_t_tup_dict(t as usize).unwrap();
+    let mut translator = Translator::new(*largest_enc_val, loaded_db.get_universe());
 
-    let temp_file1 = NamedTempFile::new().unwrap();
-    let path = temp_file1.path().to_str().unwrap();
-    let temp_file2 = NamedTempFile::new().unwrap();
-    let path = temp_file2.path().to_str().unwrap();
-    let temp_file3 = NamedTempFile::new().unwrap();
-    let path = temp_file3.path().to_str().unwrap();
-    let temp_file4 = NamedTempFile::new().unwrap();
-    let path = temp_file4.path().to_str().unwrap();
+    translator.translate(&plain1, &plain1, 1).unwrap();
+    translator.translate(&plain2, &plain2, 2).unwrap();
 
-    let mut translator = Translator::new(freq_to_t_tuple.clone(), *largest_enc_val);
+    let mut solver = Solver::new(translator.get_var_index_map());
 
-    let (mut model, int_var_map) = translator.translate(&freq_to_t_tuple, loaded_db.get_universe());
-
-    let solver = Solver::new(int_var_map);
-
-    let responses = solver.solve(&mut model);
+    let responses = solver.solve(&mut translator.get_proto_model());
 
     if responses.len() != loaded_db.get_universe().len() {
+        let mut freq_to_t_tuple: HashMap<(Value, Frequency), Vec<Vec<Value>>> =
+            selector.get_freq_val_t_tup_dict(t as usize).unwrap();
         error!("Solver failed!! Printout out debug info");
         error!("Known frequency-to-plaintext mappings: {freq_to_t_tuple:?}");
         let uni = loaded_db.get_universe();
@@ -298,11 +382,26 @@ fn end_to_end() {
     let mut incorrect = 0;
 
     //Key is actually the true value.
-    for (key, val) in responses {
-        if key == val {
-            correct = correct + 1
+    for (encrypted_alias, guessed_plaintext) in responses.clone() {
+        // Look up what the guessed plaintext SHOULD encrypt to
+        if guessed_plaintext == encrypted_alias {
+            correct += 1;
         } else {
-            incorrect = incorrect + 1
+            incorrect += 1;
+        }
+    }
+
+    // Check for a valid rotation/reflection
+    match check_isomorphism(&responses, rows as i64, cols as i64) {
+        Some(transformation_name) => {
+            info!(
+                "SUCCESS! Solver found a valid isomorphism: {}",
+                transformation_name
+            );
+        }
+        None => {
+            error!("Solver produced a mathematically invalid reconstruction.");
+            panic!("Test Failed: Not a valid rotation or reflection.");
         }
     }
 

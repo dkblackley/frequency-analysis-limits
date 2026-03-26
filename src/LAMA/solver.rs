@@ -1,7 +1,7 @@
 use cp_sat::builder::{CpModelBuilder, IntVar};
 use cp_sat::ffi;
-use cp_sat::proto::CpModelProto;
 use cp_sat::proto::CpSolverStatus;
+use cp_sat::proto::{CpModelProto, SatParameters};
 use indicatif::{ProgressBar, ProgressStyle};
 use log::error;
 use std::collections::HashMap;
@@ -11,11 +11,15 @@ use std::collections::HashMap;
 #[derive(Debug)]
 pub struct Solver {
     var_index_map: HashMap<IntVar, (i32, i64)>,
+    pub solution_stat: CpSolverStatus,
 }
 
 impl Solver {
     pub fn new(var_index_map: HashMap<IntVar, (i32, i64)>) -> Self {
-        Self { var_index_map }
+        Self {
+            var_index_map,
+            solution_stat: CpSolverStatus::Unknown,
+        }
     }
 
     /// Reconstructs an assignment of values to records.
@@ -25,10 +29,44 @@ impl Solver {
     ///
     /// # Returns
     ///
-    pub fn solve(&self, model: &mut CpModelProto) -> HashMap<i64, i64> {
-        let response = ffi::solve(&model);
+    pub fn solve(&mut self, model: &mut CpModelProto) -> HashMap<i64, i64> {
+        let mut params = SatParameters::default();
+        params.enumerate_all_solutions = Some(true);
+        params.fill_additional_solutions_in_response = Some(true);
+        params.solution_pool_size = Some(10 as i32); // Store all solutions found
+
+        params.num_workers = Some(8); // Tell OR-Tools to use 8 CPU cores
+
+        params.log_search_progress = Some(true);
+
+        // Validate the model structurally before solving
+        println!(
+            "Model Validation: {}",
+            cp_sat::ffi::validate_cp_model(&model)
+        );
+        println!(
+            "Starting solve with {} variables and {} constraints...",
+            model.variables.len(),
+            model.constraints.len()
+        );
+
+        let pb = ProgressBar::new_spinner();
+        //pb.enable_steady_tick(std::time::Duration::from_millis(800));
+        pb.set_style(
+            ProgressStyle::default_spinner()
+                .template("{spinner:.blue} [{elapsed_precise}] Solver thinking (no strict ETA for SAT problems)...")
+                .unwrap()
+        );
+        let response = ffi::solve_with_parameters(&model, &params);
+        pb.finish_with_message(format!("Solver finished in {:?}", pb.elapsed()));
         let status = response.status();
         let mut reconstructed_db = HashMap::new();
+
+        // The total number of solutions is the primary solution + the additional ones
+        let total_solutions = 1 + response.additional_solutions.len();
+        println!("Found {} total solutions!", total_solutions);
+
+        self.solution_stat = status.into();
 
         if status == CpSolverStatus::Optimal || status == CpSolverStatus::Feasible {
             // Read the final chosen values out of the solver response

@@ -344,7 +344,7 @@ impl Selector<'_> {
         let file = File::create(output_filepath).expect("Failed to create file");
         let mut writer = BufWriter::with_capacity(8 * 1024 * 1024, file);
 
-        for item in observed_tuples {
+        for item in &observed_tuples {
             bincode::serialize_into(&mut writer, &item).unwrap();
         }
 

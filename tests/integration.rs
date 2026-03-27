@@ -3,9 +3,10 @@
 
 use cp_sat::proto::CpSolverStatus;
 use frequency_analysis_limits::dataloader::tester::testDB;
-use frequency_analysis_limits::dataloader::Searchable;
+use frequency_analysis_limits::dataloader::{unflatten_nd, Searchable};
 use frequency_analysis_limits::Record;
 use frequency_analysis_limits::LAMA::solver::Solver;
+use frequency_analysis_limits::LAMA::utility::get_mbq;
 use frequency_analysis_limits::{DomPair, Frequency, Value};
 use log::{debug, error, info, warn};
 use num_rational::Ratio;
@@ -321,75 +322,124 @@ fn check_isomorphism(responses: &HashMap<i64, i64>, rows: i64, cols: i64) -> Opt
 
 #[test]
 fn end_to_end() {
-    let _ = env_logger::try_init();
+    let _ = env_logger::builder()
+        .is_test(true)
+        // This forces 'info' to be the default level if RUST_LOG isn't set
+        .filter_level(log::LevelFilter::Debug)
+        .try_init();
 
     let rows = 15;
     let cols = 15;
+
+    info!("Loading test DB ({}x{})", rows, cols);
     let loaded_db: Box<dyn Searchable + Sync> = Box::new(testDB::new(rows, cols, 100));
 
     let dim = loaded_db.get_dims();
-    let t = loaded_db.get_dims() * 2;
-    //let t = 2;
     let dist = "uniform";
     let (low_pair, high_pair) = loaded_db.get_dom_pair();
-    let binding = loaded_db.get_universe();
-    let largest_enc_val = binding.iter().max().unwrap();
+    let universe = loaded_db.get_universe();
+    let largest_enc_val = universe.iter().max().unwrap();
 
     let selector = Selector {
         dist: dist.to_string(),
         encrypted_db: &loaded_db,
         dim,
-        lowest_rec: low_pair,
+        lowest_rec: low_pair.clone(),
         largest_rec: high_pair.clone(),
     };
 
-    // THis is a bruteforce calculation of the TRUE frequency of all dompairs.
-    let dom_pair_freq: HashMap<DomPair, Frequency> =
-        selector.get_dominant_pair_to_freq_map().unwrap();
+    info!("1. Computing True Frequencies (DomPair -> Freq map)...");
+    let dom_pair_freq = selector.get_dominant_pair_to_freq_map().unwrap();
 
-    let plain_file1 = NamedTempFile::new().unwrap();
-    let plain1 = plain_file1.path().to_str().unwrap();
-    let plain_file2 = NamedTempFile::new().unwrap();
-    let plain2 = plain_file2.path().to_str().unwrap();
+    info!("2. Precomputing observed encrypted tuples for t=1...");
+    let obs_t1 = selector.precompute_observed_to_disk(1, "dummy1", &dom_pair_freq);
 
-    let freq_to_one_tups: Vec<(u64, Vec<i64>)> =
-        selector.precompute_observed_to_disk(1, plain1, &dom_pair_freq);
-    let freq_to_two_tups: Vec<(u64, Vec<i64>)> =
-        selector.precompute_observed_to_disk(2, plain2, &dom_pair_freq);
+    info!("3. Building plaintext dictionary for fast t=1 lookup...");
+    let pt_t1_dict = build_plaintext_dict(&obs_t1);
 
-    let mut translator = Translator::new(*largest_enc_val, loaded_db.get_universe());
+    info!(
+        "4. Initializing Translator with universe size: {}",
+        universe.len()
+    );
+    let mut translator = Translator::new(*largest_enc_val, universe.clone());
 
-    translator.translate(&plain1, &plain1, 1).unwrap();
-    translator.translate(&plain2, &plain2, 2).unwrap();
+    info!("--> Processing Base Case (t=1)");
+    translator.process_t1(&obs_t1, &pt_t1_dict);
 
+    // Explicitly bind read-only references so the closures cleanly pass the Sync+Send bounds
+    // required by Rayon's worker threads in `process_t_greater_than_1`.
+    let dom_freq_ref = &dom_pair_freq;
+    let high_pair_ref = &high_pair;
+    let low_pair_ref = &low_pair;
+
+    info!("5. Compiling closures for dynamic frequency lookups...");
+
+    // The Observed Frequency Closure
+    let get_observed_freq = |enc_tuple: &[i64]| -> u64 {
+        let true_plaintexts: Vec<Record> = enc_tuple
+            .iter()
+            .map(|rec| unflatten_nd(*rec, high_pair_ref, low_pair_ref))
+            .collect();
+
+        let dom_pair = get_mbq(&true_plaintexts);
+        *dom_freq_ref.get(&dom_pair).unwrap_or(&0)
+    };
+
+    // The Expected Frequency Closure
+    let get_expected_freq = |candidate_vals: &[i64]| -> u64 {
+        let decoded_points: Vec<Record> = candidate_vals
+            .iter()
+            .map(|&v| unflatten_nd(v, high_pair_ref, low_pair_ref))
+            .collect();
+
+        let dom_pair = get_mbq(&decoded_points);
+        *dom_freq_ref.get(&dom_pair).unwrap_or(&0)
+    };
+
+    info!("--> Processing Recursive Case (t=2) across thread pool...");
+    translator.process_t_greater_than_1(2, &universe, get_observed_freq, get_expected_freq);
+    info!("--> Processing Recursive Case (t=3) across thread pool...");
+    translator.process_t_greater_than_1(3, &universe, get_observed_freq, get_expected_freq);
+    info!("--> Processing Recursive Case (t=4) across thread pool...");
+    translator.process_t_greater_than_1(4, &universe, get_observed_freq, get_expected_freq);
+
+    info!("6. Building and executing the CP-SAT Solver for the final constraint graph...");
     let mut solver = Solver::new(translator.get_var_index_map());
 
+    // Note: depending on your Translator method signatures, you may need to use
+    // `mut model = translator.get_proto_model(); solver.solve(&mut model);`
+    // if get_proto_model() consumes `self`.
     let responses = solver.solve(&mut translator.get_proto_model());
 
-    if responses.len() != loaded_db.get_universe().len() {
+    if responses.len() != universe.len() {
         let mut freq_to_t_tuple: HashMap<(Value, Frequency), Vec<Vec<Value>>> =
-            selector.get_freq_val_t_tup_dict(t as usize).unwrap();
-        error!("Solver failed!! Printout out debug info");
+            selector.get_freq_val_t_tup_dict(2).unwrap();
+
+        error!("FATAL: Solver failed to reconstruct full universe!!");
         error!("Known frequency-to-plaintext mappings: {freq_to_t_tuple:?}");
-        let uni = loaded_db.get_universe();
-        error!("'encrypted/encoded' universe of plaintexts: {uni:?}");
+        error!("'encrypted/encoded' universe of plaintexts: {universe:?}");
         error!("Frequency to t-tuple matches: {freq_to_t_tuple:?}");
-        error!("Solver: {solver:?}");
-        panic!();
+        error!("Solver Status: {:?}", solver.solution_stat);
+        panic!("Solver did not return a full assignment.");
     }
 
     let mut correct = 0;
     let mut incorrect = 0;
 
-    //Key is actually the true value.
+    // Key is actually the true encoded value.
     for (encrypted_alias, guessed_plaintext) in responses.clone() {
-        // Look up what the guessed plaintext SHOULD encrypt to
         if guessed_plaintext == encrypted_alias {
             correct += 1;
         } else {
             incorrect += 1;
         }
     }
+
+    info!(
+        "Direct matches: {} correct, {} incorrect",
+        correct, incorrect
+    );
+    info!("7. Running Isomorphism Checks...");
 
     // Check for a valid rotation/reflection
     match check_isomorphism(&responses, rows as i64, cols as i64) {
@@ -405,5 +455,14 @@ fn end_to_end() {
         }
     }
 
-    info!("OK!")
+    info!("Test completed successfully.")
+}
+
+// Helper to group the plaintexts by frequency for fast O(1) lookups
+fn build_plaintext_dict(tuples: &[(u64, Vec<i64>)]) -> HashMap<u64, Vec<Vec<i64>>> {
+    let mut dict: HashMap<u64, Vec<Vec<i64>>> = HashMap::new();
+    for (freq, tup) in tuples {
+        dict.entry(*freq).or_default().push(tup.clone());
+    }
+    dict
 }

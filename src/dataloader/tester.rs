@@ -82,7 +82,7 @@ impl Searchable for testDB {
         bounding_box
             .iter()
             .copied()
-            //.filter(|&v| v != i64::MIN)
+            // .filter(|&v| v != i64::MIN)
             .collect()
     }
 
@@ -131,7 +131,7 @@ mod tests {
             // 0-indexed bounds: (0, 0) to (99, 99)
             let lower_bound = vec![0, 0];
             let upper_bound = vec![99, 99];
-            let results = db.do_search(lower_bound, upper_bound);
+            let results = db.do_search(&lower_bound, &upper_bound);
 
             // 3. Manually calculate what the expected values SHOULD be
             let mut expected_values = Vec::new();

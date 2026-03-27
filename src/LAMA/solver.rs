@@ -33,17 +33,12 @@ impl Solver {
         let mut params = SatParameters::default();
         params.enumerate_all_solutions = Some(true);
         params.fill_additional_solutions_in_response = Some(true);
-        params.solution_pool_size = Some(10 as i32); // Store all solutions found
+        params.solution_pool_size = Some(self.var_index_map.len() as i32); // Store all solutions found
 
-        params.num_workers = Some(8); // Tell OR-Tools to use 8 CPU cores
-
-        params.log_search_progress = Some(true);
+        //params.num_workers = Some(8); // Tell OR-Tools to use 8 CPU cores
 
         // Validate the model structurally before solving
-        println!(
-            "Model Validation: {}",
-            cp_sat::ffi::validate_cp_model(&model)
-        );
+        println!("Model Validation: {}", ffi::validate_cp_model(&model));
         println!(
             "Starting solve with {} variables and {} constraints...",
             model.variables.len(),
@@ -51,7 +46,7 @@ impl Solver {
         );
 
         let pb = ProgressBar::new_spinner();
-        //pb.enable_steady_tick(std::time::Duration::from_millis(800));
+        pb.enable_steady_tick(std::time::Duration::from_millis(800));
         pb.set_style(
             ProgressStyle::default_spinner()
                 .template("{spinner:.blue} [{elapsed_precise}] Solver thinking (no strict ETA for SAT problems)...")

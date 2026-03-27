@@ -38,6 +38,28 @@ pub fn flatten_nd(point: &[i64], upper: &[i64], lower: &[i64]) -> i64 {
     index
 }
 
+pub fn unflatten_nd(mut index: i64, upper: &[i64], lower: &[i64]) -> Record {
+    let len = upper.len();
+    let mut point = vec![0; len];
+
+    // We iterate backwards, mirroring the flattening function
+    for i in (0..len).rev() {
+        let dimension_size = upper[i] - lower[i] + 1;
+
+        // Modulo extracts the 0-based coordinate for this specific dimension
+        let point_scaled = index % dimension_size;
+
+        // Add the lower bound back to restore the original coordinate space
+        point[i] = point_scaled + lower[i];
+
+        // Integer division peels off the current dimension so the next loop
+        // can evaluate the preceding dimension
+        index /= dimension_size;
+    }
+
+    point
+}
+
 fn get_bounding_box<T, const D: usize>(
     points: impl Iterator<Item = [T; D]>,
 ) -> Option<([T; D], [T; D])>
@@ -60,4 +82,42 @@ where
         }
         (lower, upper)
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    // Imports your flatten_nd and unflatten_nd functions
+
+    #[test]
+    fn test_flatten_unflatten_roundtrip() {
+        let lower = &[-1, 0, 2];
+        let upper = &[5, 5, 10];
+
+        // Test Case 1: A coordinate somewhere in the middle
+        let original_point = &[0, 2, 5];
+        let index = flatten_nd(original_point, upper, lower);
+        let restored_point = unflatten_nd(index, upper, lower);
+        assert_eq!(
+            original_point,
+            &restored_point[..],
+            "Failed on middle coordinate"
+        );
+
+        // Test Case 2: The absolute lower bounds
+        let min_point = &[-1, 0, 2];
+        let min_index = flatten_nd(min_point, upper, lower);
+        let restored_min = unflatten_nd(min_index, upper, lower);
+        assert_eq!(min_point, &restored_min[..], "Failed on lower bounds");
+        assert_eq!(
+            min_index, 0,
+            "Lower bounds should always flatten to index 0"
+        );
+
+        // Test Case 3: The absolute upper bounds
+        let max_point = &[5, 5, 10];
+        let max_index = flatten_nd(max_point, upper, lower);
+        let restored_max = unflatten_nd(max_index, upper, lower);
+        assert_eq!(max_point, &restored_max[..], "Failed on upper bounds");
+    }
 }

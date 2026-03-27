@@ -1,4 +1,4 @@
-use crate::dataloader::{flatten_nd, Searchable};
+use crate::dataloader::{flatten_nd, unflatten_nd, Searchable};
 use crate::LAMA::error::LAMAError;
 use crate::LAMA::utility::{
     binomial_coefficient, compute_pair_weight, dominates, get_all_dominating_values, get_mbq,
@@ -265,92 +265,84 @@ impl Selector<'_> {
         }
     }
 
-    pub fn precompute_observed_to_disk(
+    pub fn precompute_t_observed(
         &self,
         t: usize,
         output_filepath: &str,
         dom_pairs: &HashMap<DomPair, Frequency>,
-    ) -> Vec<(u64, Vec<i64>)> {
-        let pb = ProgressBar::new(dom_pairs.len() as u64);
+    ) -> HashMap<u64, Vec<Vec<i64>>> {
+        let pb = ProgressBar::new_spinner();
         pb.set_style(
             ProgressStyle::default_bar()
-                .template("{spinner:.green} [{elapsed_precise}] [{wide_bar:.cyan/blue}] {pos}/{len} ({eta})")
-                .unwrap()
-                .progress_chars("#>-"),
+                .template("{spinner:.green} [{elapsed_precise}] {msg}")
+                .unwrap(),
         );
+        pb.set_message("Fetching entire database...");
+
+        // 1. Do a single search to extract the entire encrypted database
+        let mut response = self
+            .encrypted_db
+            .do_search(&self.lowest_rec, &self.largest_rec);
+        response.retain(|&x| x != i64::MIN); // Filter out empty space placeholders
+        response.sort_unstable(); // Ensure canonical combination ordering
+
+        pb.set_message(format!("Processing combinations for t={}...", t));
+
         let processed_count = AtomicU64::new(0);
 
-        info!("Simulating leakage and aggregating t-tuple frequencies...");
-
-        // 3. Parallel Map-Reduce to accumulate true observed frequencies
-        let t_tuple_to_freq: HashMap<Vec<i64>, u64> = dom_pairs
-            .into_par_iter()
+        // 2. Parallel Map-Reduce: Calculate MBQ for every combination directly
+        let freq_to_observed_map: HashMap<u64, Vec<Vec<i64>>> = response
+            .into_iter()
+            .combinations(t)
+            .par_bridge() // Distribute combinations to Rayon worker threads
             .fold(
-                HashMap::new, // Thread-local map
-                |mut local_map, dom_freq| {
-                    // Compute the weight of this specific query
-                    let (pair, freq) = dom_freq;
+                HashMap::new,
+                |mut local_map: HashMap<u64, Vec<Vec<i64>>>, t_tuple| {
+                    // Decode the point coordinates using the bounds
+                    let decoded_points: Vec<Record> = t_tuple
+                        .iter()
+                        .map(|&v| unflatten_nd(v, &self.largest_rec, &self.lowest_rec))
+                        .collect();
 
-                    if freq > &0 {
-                        // Query the encrypted DB
-                        let mut response = self.encrypted_db.do_search(&pair.0, &pair.1);
+                    // Calculate the theoretical Minimum Bounding Query for these points
+                    let dom_pair = get_mbq(&decoded_points);
 
-                        // If the response contains at least `t` items, we can extract t-tuples
-                        if response.len() >= t {
-                            response.sort_unstable();
+                    // Directly look up its expected theoretical frequency
+                    let freq = *dom_pairs.get(&dom_pair).unwrap();
 
-                            // For every t-tuple present in this response, add the query's weight
-                            for t_tuple in response.into_iter().combinations(t) {
-                                *local_map.entry(t_tuple).or_insert(0) += freq;
-                            }
-                        }
+                    if freq > 0 {
+                        local_map.entry(freq).or_default().push(t_tuple);
                     }
 
-                    // Update progress bar without bottlenecking threads
+                    // Update progress bar safely
                     let current = processed_count.fetch_add(1, AtomicOrdering::Relaxed);
-                    if current % 5000 == 0 {
-                        pb.set_position(current);
+                    if current % 10_000 == 0 {
+                        pb.set_message(format!("Processed {} tuples...", current));
                     }
 
                     local_map
                 },
             )
-            .reduce(
-                HashMap::new, // Merge all thread-local maps
-                |mut map1, map2| {
-                    for (k, v) in map2 {
-                        *map1.entry(k).or_insert(0) += v;
-                    }
-                    map1
-                },
-            );
+            .reduce(HashMap::new, |mut map1, map2| {
+                // Merge thread-local HashMaps by extending the vectors
+                for (freq, mut tuples) in map2 {
+                    map1.entry(freq).or_default().append(&mut tuples);
+                }
+                map1
+            });
 
-        pb.finish_with_message("Done aggregating frequencies.");
+        pb.finish_with_message("Done computing observed frequencies via direct MBQ.");
 
-        // 4. Transform into the (Frequency, Tuple) format expected by the Translator
-        let mut observed_tuples: Vec<(u64, Vec<i64>)> = t_tuple_to_freq
-            .into_iter()
-            .map(|(tuple, freq)| (freq, tuple))
-            .collect();
-
-        // 5. Sort by frequency
-        observed_tuples.sort_unstable_by_key(|k| k.0);
-
-        // 6. Stream to disk sequentially
-        info!(
-            "Writing {} unique t-tuples to disk...",
-            observed_tuples.len()
-        );
+        // 3. Serialize the final grouped map to disk
+        info!("Writing grouped observed map to disk...");
         let file = File::create(output_filepath).expect("Failed to create file");
-        let mut writer = BufWriter::with_capacity(8 * 1024 * 1024, file);
+        let writer = BufWriter::with_capacity(8 * 1024 * 1024, file);
 
-        for item in &observed_tuples {
-            bincode::serialize_into(&mut writer, &item).unwrap();
-        }
+        bincode::serialize_into(writer, &freq_to_observed_map).expect("Failed to write to disk");
 
         info!("Precomputation complete.");
 
-        return observed_tuples;
+        freq_to_observed_map
     }
 
     /// Precomputes and serializes TRUE frequencies for dominant pairs and t-tuples of values.
@@ -503,6 +495,82 @@ impl Selector<'_> {
         pb.finish_with_message("Done computing value tuple frequencies");
 
         Ok(val_tup_freq_dict)
+    }
+
+    /// Computes the theoretical (100% dense) expected frequencies for all t-tuples
+    pub fn build_theoretical_t_dict(
+        lowest_rec: &[i64],
+        largest_rec: &[i64],
+        dist: &str,
+        t: usize,
+    ) -> HashMap<u64, Vec<Vec<i64>>> {
+        let dist_enum = Distribution::from_str(dist).expect("Invalid distribution");
+
+        // 1. Generate the 100% dense universe (every single theoretical coordinate)
+        let mut vals: Vec<Record> = lowest_rec
+            .iter()
+            .zip(largest_rec.iter())
+            .map(|(&low, &high)| low..=high)
+            .multi_cartesian_product()
+            .collect();
+
+        let n = vals.len();
+        let total_combinations = binomial_coefficient(n, t);
+        vals.sort_unstable(); // Ensure consistent lexicographical ordering
+
+        let pb = ProgressBar::new(total_combinations as u64);
+        pb.set_style(
+            ProgressStyle::default_bar()
+                .template("{spinner:.green} [{elapsed_precise}] [{wide_bar:.cyan/blue}] {pos}/{len} ({eta})").unwrap()
+                .progress_chars("#>-"),
+        );
+
+        let processed_count = AtomicU64::new(0);
+
+        // 2. Parallel map-reduce over every single t-length combination
+        let theoretical_dict: HashMap<u64, Vec<Vec<i64>>> = vals
+            .into_iter()
+            .combinations(t)
+            .par_bridge() // Hand off combinations to the Rayon worker pool
+            .fold(
+                HashMap::new, // Give each thread its own local HashMap
+                |mut local_map: HashMap<u64, Vec<Vec<i64>>>, val_tuple| {
+                    // Calculate expected frequency (MBQ weight)
+                    let bounding_pair = get_mbq(&val_tuple);
+                    let freq =
+                        compute_pair_weight(&bounding_pair, &dist_enum, lowest_rec, largest_rec);
+
+                    // Flatten the n-dimensional points to their 1D target aliases
+                    let flattened_tuple: Vec<i64> = val_tuple
+                        .iter()
+                        .map(|record| flatten_nd(record, largest_rec, lowest_rec))
+                        .collect();
+
+                    // Group by frequency
+                    local_map.entry(freq).or_default().push(flattened_tuple);
+
+                    // Update progress bar without causing thread lock contention
+                    let current = processed_count.fetch_add(1, AtomicOrdering::Relaxed);
+                    if current % 10_000 == 0 {
+                        pb.set_position(current);
+                    }
+
+                    local_map
+                },
+            )
+            .reduce(
+                HashMap::new, // Merge all the thread-local HashMaps back together
+                |mut map1, map2| {
+                    for (freq, mut tuples) in map2 {
+                        map1.entry(freq).or_default().append(&mut tuples);
+                    }
+                    map1
+                },
+            );
+
+        pb.finish_with_message(format!("Finished theoretical mapping for t={}", t));
+
+        theoretical_dict
     }
 }
 

@@ -3,7 +3,7 @@ use cp_sat::ffi;
 use cp_sat::proto::CpSolverStatus;
 use cp_sat::proto::{CpModelProto, SatParameters};
 use indicatif::{ProgressBar, ProgressStyle};
-use log::error;
+use log::{error, info};
 use std::collections::HashMap;
 
 /// Solver Reconstruction as Constraint-Satisfaction.
@@ -35,11 +35,11 @@ impl Solver {
         params.fill_additional_solutions_in_response = Some(true);
         params.solution_pool_size = Some(self.var_index_map.len() as i32); // Store all solutions found
 
-        //params.num_workers = Some(8); // Tell OR-Tools to use 8 CPU cores
+        // params.num_workers = Some(8); // Tell OR-Tools to use 8 CPU cores
 
         // Validate the model structurally before solving
-        println!("Model Validation: {}", ffi::validate_cp_model(&model));
-        println!(
+        info!("Model Validation: {}", ffi::validate_cp_model(&model));
+        info!(
             "Starting solve with {} variables and {} constraints...",
             model.variables.len(),
             model.constraints.len()
@@ -59,7 +59,7 @@ impl Solver {
 
         // The total number of solutions is the primary solution + the additional ones
         let total_solutions = 1 + response.additional_solutions.len();
-        println!("Found {} total solutions!", total_solutions);
+        info!("Found {} total solutions!", total_solutions);
 
         self.solution_stat = status.into();
 

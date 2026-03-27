@@ -82,7 +82,7 @@ impl Searchable for testDB {
         bounding_box
             .iter()
             .copied()
-            // .filter(|&v| v != i64::MIN)
+            .filter(|&v| v != i64::MIN)
             .collect()
     }
 

@@ -328,11 +328,12 @@ fn end_to_end() {
         .filter_level(log::LevelFilter::Debug)
         .try_init();
 
-    let rows = 15;
-    let cols = 15;
+    let rows = 5;
+    let cols = 5;
+    let use_dfs = false;
 
     info!("Loading test DB ({}x{})", rows, cols);
-    let loaded_db: Box<dyn Searchable + Sync> = Box::new(testDB::new(rows, cols, 100));
+    let loaded_db: Box<dyn Searchable + Sync> = Box::new(testDB::new(rows, cols, 50));
 
     let dim = loaded_db.get_dims();
     let dist = "uniform";
@@ -352,10 +353,11 @@ fn end_to_end() {
     let dom_pair_freq = selector.get_dominant_pair_to_freq_map().unwrap();
 
     info!("2. Precomputing observed encrypted tuples for t=1...");
-    let obs_t1 = selector.precompute_observed_to_disk(1, "dummy1", &dom_pair_freq);
+    let obs_t1 = selector.precompute_t_observed(1, "dummy1", &dom_pair_freq);
 
-    info!("3. Building plaintext dictionary for fast t=1 lookup...");
-    let pt_t1_dict = build_plaintext_dict(&obs_t1);
+    info!("Making known frequency map");
+    let query_dist_over_one =
+        Selector::build_theoretical_t_dict(&*low_pair, &*high_pair, "uniform", 1);
 
     info!(
         "4. Initializing Translator with universe size: {}",
@@ -364,7 +366,7 @@ fn end_to_end() {
     let mut translator = Translator::new(*largest_enc_val, universe.clone());
 
     info!("--> Processing Base Case (t=1)");
-    translator.process_t1(&obs_t1, &pt_t1_dict);
+    translator.process_t1(&obs_t1, &query_dist_over_one);
 
     // Explicitly bind read-only references so the closures cleanly pass the Sync+Send bounds
     // required by Rayon's worker threads in `process_t_greater_than_1`.
@@ -395,13 +397,31 @@ fn end_to_end() {
         let dom_pair = get_mbq(&decoded_points);
         *dom_freq_ref.get(&dom_pair).unwrap_or(&0)
     };
-
+    info!("DFS STATUS: {use_dfs}");
     info!("--> Processing Recursive Case (t=2) across thread pool...");
-    translator.process_t_greater_than_1(2, &universe, get_observed_freq, get_expected_freq);
+    translator.process_t_greater_than_1(
+        2,
+        use_dfs,
+        &universe,
+        get_observed_freq,
+        get_expected_freq,
+    );
     info!("--> Processing Recursive Case (t=3) across thread pool...");
-    translator.process_t_greater_than_1(3, &universe, get_observed_freq, get_expected_freq);
+    translator.process_t_greater_than_1(
+        3,
+        use_dfs,
+        &universe,
+        get_observed_freq,
+        get_expected_freq,
+    );
     info!("--> Processing Recursive Case (t=4) across thread pool...");
-    translator.process_t_greater_than_1(4, &universe, get_observed_freq, get_expected_freq);
+    translator.process_t_greater_than_1(
+        4,
+        use_dfs,
+        &universe,
+        get_observed_freq,
+        get_expected_freq,
+    );
 
     info!("6. Building and executing the CP-SAT Solver for the final constraint graph...");
     let mut solver = Solver::new(translator.get_var_index_map());

@@ -10,7 +10,7 @@ use cp_sat::proto::SatParameters;
 use cp_sat::proto::{ConstraintProto, CpModelProto, TableConstraintProto};
 use indicatif::{ProgressBar, ProgressStyle};
 use itertools::Itertools;
-use log::warn;
+use log::{debug, warn};
 use rand::rngs::StdRng;
 use rand::seq::SliceRandom;
 use rand::SeedableRng;
@@ -58,11 +58,12 @@ pub struct Translator {
     enc_id_to_intvar: HashMap<i64, IntVar>,
     var_index_map: HashMap<IntVar, (i32, i64)>,
     proto_model: CpModelProto,
+    use_dfs: bool,
     pub candidate_cache: HashMap<usize, HashMap<Vec<i64>, Vec<Vec<i64>>>>,
 }
 
 impl Translator {
-    pub fn new(largest_val: i64, mut encrypted_records: Vec<i64>) -> Self {
+    pub fn new(largest_val: i64, mut encrypted_records: Vec<i64>, use_dfs: bool) -> Self {
         let mut rng = StdRng::seed_from_u64(42);
 
         encrypted_records.shuffle(&mut rng);
@@ -77,6 +78,7 @@ impl Translator {
             enc_id_to_intvar,
             var_index_map,
             candidate_cache: HashMap::new(),
+            use_dfs,
         }
     }
 
@@ -281,6 +283,17 @@ impl Translator {
         // Sort keys lexically so matching prefixes are adjacent
         prev_keys.sort_unstable();
 
+        debug!("Attempting to find candidates using previous round candidates");
+        let pb = ProgressBar::new(prev_keys.len() as u64);
+        pb.set_style(
+            ProgressStyle::default_bar()
+                .template(
+                    "{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} ({eta})",
+                )
+                .unwrap()
+                .progress_chars("#>-"),
+        );
+
         for i in 0..prev_keys.len() {
             for j in i + 1..prev_keys.len() {
                 let k1 = &prev_keys[i];
@@ -308,7 +321,9 @@ impl Translator {
                     break;
                 }
             }
+            pb.inc(1);
         }
+        pb.finish_with_message("found candidates");
         //TODO: THis might be removing the reflections
         candidates.sort_unstable();
         candidates.dedup();
@@ -515,7 +530,6 @@ impl Translator {
     pub fn process_t_greater_than_1<O, E>(
         &mut self,
         t: usize,
-        use_dfs: bool,
         encrypted_records: &[i64],
         get_observed_freq: O,
         get_expected_freq: E,
@@ -544,7 +558,7 @@ impl Translator {
 
         // let total_combinations = binomial_coefficient(encrypted_records.len() as usize, t);
 
-        if use_dfs {
+        if self.use_dfs {
             let pb = ProgressBar::new(candidate_combinations.len() as u64);
             pb.set_style(
                 ProgressStyle::default_bar()

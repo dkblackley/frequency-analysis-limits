@@ -1,10 +1,11 @@
 use clap::Parser;
 use frequency_analysis_limits::dataloader::datasets::CaliMap50;
-use frequency_analysis_limits::dataloader::Searchable;
+use frequency_analysis_limits::dataloader::{unflatten_nd, Searchable};
 use frequency_analysis_limits::LAMA::selector::Selector;
 use frequency_analysis_limits::LAMA::solver::Solver;
 use frequency_analysis_limits::LAMA::translator::Translator;
-use frequency_analysis_limits::{DomPair, Frequency, Value};
+use frequency_analysis_limits::LAMA::utility::get_mbq;
+use frequency_analysis_limits::{DomPair, Frequency, Record, Value};
 use log::{error, info};
 use std::collections::HashMap;
 use std::fs::File;
@@ -32,7 +33,11 @@ struct Args {
 fn main() {
     let args = Args::parse();
     let loaded_db: Box<dyn Searchable + Sync>;
-    env_logger::try_init().expect("Logger failed to init!");
+    env_logger::builder()
+        .is_test(false)
+        .filter_level(log::LevelFilter::Debug)
+        .try_init()
+        .expect("Logger failed to init!");
     let full_datapath = format!("{0}{1}", args.dir_path, args.name);
 
     match args.name.as_str() {
@@ -47,11 +52,21 @@ fn main() {
         }
     }
 
+    info!(
+        "Loaded {}, a {}-dim DB with {} records and highest/lowest recors {:?}/{:?}",
+        loaded_db.get_name(),
+        loaded_db.get_dims(),
+        loaded_db.get_universe().len(),
+        loaded_db.get_dom_pair().0,
+        loaded_db.get_dom_pair().1
+    );
+
     //TODO: choose these!
     let dist = "uniform";
 
     let dim = loaded_db.get_dims();
-    let t = loaded_db.get_dims() * 2;
+    // let t = loaded_db.get_dims() * 2;
+    let t = 3;
 
     let (low_pair, high_pair) = loaded_db.get_dom_pair();
     let binding = loaded_db.get_universe();
@@ -61,9 +76,34 @@ fn main() {
         dist: dist.to_string(),
         encrypted_db: &loaded_db,
         dim,
-        lowest_rec: low_pair,
+        lowest_rec: low_pair.clone(),
         largest_rec: high_pair.clone(),
     };
+
+    //     match file_res {
+    //         Ok(mut file) => {
+    //             let writer = BufWriter::new(file);
+    //
+    //             info!("Writing dom pair to freq map to {full_datapath}");
+    //             bincode::serialize_into(writer, &dom_pair_freq)
+    //                 .inspect_err(|e| {
+    //                     error!(
+    //                         "bincode failed to write dom pair freq map to {}: {}",
+    //                         filename, e
+    //                     )
+    //                 })
+    //                 .ok();
+    //         }
+    //         Err(e) => {
+    //             error!(
+    //                 "Error occurred when writing dom pair freq map to {}: {}",
+    //                 filename, e
+    //             );
+    //         }
+    //     }
+    // }
+
+    info!("Selector computing values");
 
     info!("Beginning to bruteforce all DomPair->Freq mappings");
     // This is a bruteforce calculation of the TRUE frequency of all dompairs.
@@ -72,97 +112,82 @@ fn main() {
 
     if args.save {
         let filename = format!("{full_datapath}/dom_to_freq");
-        let file_res = File::create(filename.clone());
-
-        match file_res {
-            Ok(mut file) => {
-                let writer = BufWriter::new(file);
-
-                info!("Writing dom pair to freq map to {full_datapath}");
-                bincode::serialize_into(writer, &dom_pair_freq)
-                    .inspect_err(|e| {
-                        error!(
-                            "bincode failed to write dom pair freq map to {}: {}",
-                            filename, e
-                        )
-                    })
-                    .ok();
-            }
-            Err(e) => {
-                error!(
-                    "Error occurred when writing dom pair freq map to {}: {}",
-                    filename, e
-                );
-            }
-        }
+        let file = File::create(filename.clone()).unwrap();
+        let writer = BufWriter::new(file);
+        info!("Writing dom pair to freq map to {full_datapath}");
+        bincode::serialize_into(writer, &dom_pair_freq).unwrap();
     }
 
-    info!("Beginning to bruteforce all DomPair->Freq mappings");
+    //TODO: Move these into selector
+    info!("Computing Observed frequencies -> 1 tuple");
+    let obs_t1 = selector.precompute_t_observed(1, "dummy1", &dom_pair_freq);
 
-    // Remember, value in this case means encoded ID, i.e a single point. We assume the 'ideal' case
-    // that is: Both the true freq-plaintext and observed are the same.
-    let mut freq_to_t_tuple: HashMap<(Value, Frequency), Vec<Vec<Value>>> = selector
-        .get_freq_val_t_tup_dict(t as usize)
-        .expect("Cannot calculate the frequency of t-tuples!");
+    info!("Computing True frequencies -> 1 tuple");
+    let query_dist_over_one =
+        Selector::build_theoretical_t_dict(&*low_pair, &*high_pair, "uniform", 1);
 
-    if args.save {
-        let filename = format!("{full_datapath}/freq_to_tuple");
+    let mut translator = Translator::new(*largest_enc_val, loaded_db.get_universe(), false);
 
-        let file_res = File::create(filename.clone());
+    // TODO: move this into translator
 
-        match file_res {
-            Ok(mut file) => {
-                let writer = BufWriter::new(file);
+    translator.process_t1(&obs_t1, &query_dist_over_one);
 
-                info!("Writing freq to tuple map to {full_datapath}");
-                bincode::serialize_into(writer, &freq_to_t_tuple)
-                    .inspect_err(|e| {
-                        error!(
-                            "bincode failed to write freq to tuple map to {}: {}",
-                            filename, e
-                        )
-                    })
-                    .ok();
-            }
+    let dom_freq_ref = &dom_pair_freq;
+    let high_pair_ref = &high_pair;
+    let low_pair_ref = &low_pair;
 
-            Err(e) => {
-                error!(
-                    "Error occurred when writing dom pair freq map to {}: {}",
-                    filename, e
-                );
-            }
-        }
+    //TODO change observed for empirical VC dim
+
+    // The Observed Frequency Closure
+    let get_observed_freq = |enc_tuple: &[i64]| -> u64 {
+        let true_plaintexts: Vec<Record> = enc_tuple
+            .iter()
+            .map(|rec| unflatten_nd(*rec, high_pair_ref, low_pair_ref))
+            .collect();
+
+        let dom_pair = get_mbq(&true_plaintexts);
+        *dom_freq_ref.get(&dom_pair).unwrap_or(&0)
+    };
+
+    // The Expected Frequency Closure
+    let get_expected_freq = |candidate_vals: &[i64]| -> u64 {
+        let decoded_points: Vec<Record> = candidate_vals
+            .iter()
+            .map(|&v| unflatten_nd(v, high_pair_ref, low_pair_ref))
+            .collect();
+
+        let dom_pair = get_mbq(&decoded_points);
+        *dom_freq_ref.get(&dom_pair).unwrap_or(&0)
+    };
+
+    let universe = loaded_db.get_universe();
+
+    for i in 2..t {
+        info!("Recursively computing frequencies for {i} tuples");
+        translator.process_t_greater_than_1(
+            i as usize,
+            &universe,
+            get_observed_freq,
+            get_expected_freq,
+        );
     }
 
-    // let mut translator = Translator::new(freq_to_t_tuple.clone(), *largest_enc_val);
-    //
-    // let (mut model, int_var_map) = translator.translate(&freq_to_t_tuple, loaded_db.get_universe());
-    //
-    // let solver = Solver::new(int_var_map);
-    //
-    // let responses = solver.solve(&mut model);
-    //
-    // if responses.len() != loaded_db.get_universe().len() {
-    //     error!("Solver failed!! Printout out debug info");
-    //     error!("Known frequency-to-plaintext mappings: {freq_to_t_tuple:?}");
-    //     let uni = loaded_db.get_universe();
-    //     error!("'encrypted/encoded' universe of plaintexts: {uni:?}");
-    //     error!("Frequency to t-tuple matches: {freq_to_t_tuple:?}");
-    //     error!("Solver: {solver:?}");
-    //     panic!();
-    // }
-    //
-    // let mut correct = 0;
-    // let mut incorrect = 0;
-    //
-    // //Key is actually the true value.
-    // for (key, val) in responses {
-    //     if key == val {
-    //         correct = correct + 1
-    //     } else {
-    //         incorrect = incorrect + 1
-    //     }
-    // }
+    info!("6. Building and executing the CP-SAT Solver for the final constraint graph...");
+    let mut solver = Solver::new(translator.get_var_index_map());
+
+    let responses = solver.solve(&mut translator.get_proto_model(), true);
+
+    let mut correct = 0;
+    let mut incorrect = 0;
+
+    //Key is actually the true value.
+    for (key, val) in responses {
+        if key == val {
+            correct = correct + 1
+        } else {
+            incorrect = incorrect + 1
+        }
+    }
 
     info!("morituri te salutant or morituri te salutamus");
 }

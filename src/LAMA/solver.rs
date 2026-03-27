@@ -4,6 +4,7 @@ use cp_sat::proto::CpSolverStatus;
 use cp_sat::proto::{CpModelProto, SatParameters};
 use indicatif::{ProgressBar, ProgressStyle};
 use log::{error, info};
+use std::cmp::max;
 use std::collections::HashMap;
 
 /// Solver Reconstruction as Constraint-Satisfaction.
@@ -29,13 +30,18 @@ impl Solver {
     ///
     /// # Returns
     ///
-    pub fn solve(&mut self, model: &mut CpModelProto) -> HashMap<i64, i64> {
+    pub fn solve(&mut self, model: &mut CpModelProto, get_one: bool) -> HashMap<i64, i64> {
         let mut params = SatParameters::default();
-        params.enumerate_all_solutions = Some(true);
-        params.fill_additional_solutions_in_response = Some(true);
-        params.solution_pool_size = Some(self.var_index_map.len() as i32); // Store all solutions found
 
-        // params.num_workers = Some(8); // Tell OR-Tools to use 8 CPU cores
+        if get_one {
+            params.num_workers = Some(8);
+        } else {
+            params.enumerate_all_solutions = Some(true);
+            params.fill_additional_solutions_in_response = Some(true);
+            params.solution_pool_size = Some(self.var_index_map.len() as i32); // Store all solutions found
+        }
+
+        //
 
         // Validate the model structurally before solving
         info!("Model Validation: {}", ffi::validate_cp_model(&model));
@@ -57,9 +63,8 @@ impl Solver {
         let status = response.status();
         let mut reconstructed_db = HashMap::new();
 
-        // The total number of solutions is the primary solution + the additional ones
-        let total_solutions = 1 + response.additional_solutions.len();
-        info!("Found {} total solutions!", total_solutions);
+        let total_solutions = response.additional_solutions.len();
+        info!("Found {} solutions!", max(total_solutions, 1));
 
         self.solution_stat = status.into();
 
@@ -69,8 +74,6 @@ impl Solver {
                 let found_val = intvar.solution_value(&response);
                 // ids is the original 'encrypted' db. For convenience, the key is a true encoded
                 // val of the record.
-                //TODO: 'un-encrypt' the found value and make a graph out of it. Do this by using
-                // gradient colours and swapping incorrect colours!
                 reconstructed_db.insert(ids.1, found_val);
             }
         } else {

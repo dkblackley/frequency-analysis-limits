@@ -311,7 +311,7 @@ fn check_isomorphism(responses: &HashMap<i64, i64>, rows: i64, cols: i64) -> Opt
             }
         }
 
-        // If all 400 points conform to this specific transformation, we cracked it
+        // If all points conform to this specific transformation, we cracked it
         if is_match {
             return Some(name);
         }
@@ -328,12 +328,12 @@ fn end_to_end() {
         .filter_level(log::LevelFilter::Debug)
         .try_init();
 
-    let rows = 5;
-    let cols = 5;
+    let rows = 150;
+    let cols = 150;
     let use_dfs = false;
 
     info!("Loading test DB ({}x{})", rows, cols);
-    let loaded_db: Box<dyn Searchable + Sync> = Box::new(testDB::new(rows, cols, 50));
+    let loaded_db: Box<dyn Searchable + Sync> = Box::new(testDB::new(rows, cols, 80));
 
     let dim = loaded_db.get_dims();
     let dist = "uniform";
@@ -363,7 +363,8 @@ fn end_to_end() {
         "4. Initializing Translator with universe size: {}",
         universe.len()
     );
-    let mut translator = Translator::new(*largest_enc_val, universe.clone());
+
+    let mut translator = Translator::new(*largest_enc_val, universe.clone(), false);
 
     info!("--> Processing Base Case (t=1)");
     translator.process_t1(&obs_t1, &query_dist_over_one);
@@ -399,29 +400,11 @@ fn end_to_end() {
     };
     info!("DFS STATUS: {use_dfs}");
     info!("--> Processing Recursive Case (t=2) across thread pool...");
-    translator.process_t_greater_than_1(
-        2,
-        use_dfs,
-        &universe,
-        get_observed_freq,
-        get_expected_freq,
-    );
+    translator.process_t_greater_than_1(2, &universe, get_observed_freq, get_expected_freq);
     info!("--> Processing Recursive Case (t=3) across thread pool...");
-    translator.process_t_greater_than_1(
-        3,
-        use_dfs,
-        &universe,
-        get_observed_freq,
-        get_expected_freq,
-    );
-    info!("--> Processing Recursive Case (t=4) across thread pool...");
-    translator.process_t_greater_than_1(
-        4,
-        use_dfs,
-        &universe,
-        get_observed_freq,
-        get_expected_freq,
-    );
+    translator.process_t_greater_than_1(3, &universe, get_observed_freq, get_expected_freq);
+    // info!("--> Processing Recursive Case (t=4) across thread pool...");
+    // translator.process_t_greater_than_1(4, &universe, get_observed_freq, get_expected_freq);
 
     info!("6. Building and executing the CP-SAT Solver for the final constraint graph...");
     let mut solver = Solver::new(translator.get_var_index_map());
@@ -429,7 +412,7 @@ fn end_to_end() {
     // Note: depending on your Translator method signatures, you may need to use
     // `mut model = translator.get_proto_model(); solver.solve(&mut model);`
     // if get_proto_model() consumes `self`.
-    let responses = solver.solve(&mut translator.get_proto_model());
+    let responses = solver.solve(&mut translator.get_proto_model(), false);
 
     if responses.len() != universe.len() {
         let mut freq_to_t_tuple: HashMap<(Value, Frequency), Vec<Vec<Value>>> =

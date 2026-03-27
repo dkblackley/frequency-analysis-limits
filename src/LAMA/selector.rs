@@ -375,40 +375,63 @@ impl Selector<'_> {
         let total_pairs = space_size.powi(2);
         let total_dom_pairs = (total_pairs / 2_f64.powi((self.dim - 1) as i32)) as u64;
 
-        //TODO: Non-uniform
-
-        // Assuming every query occurs once, what is the frequency of seeing each dominant pair?
-        let mut true_pair_frequency_dict: HashMap<DomPair, Frequency> = HashMap::new();
         let domain_iter = lowest_rec
             .iter()
             .zip(largest_rec.iter())
             .map(|(&low, &high)| low..=high)
             .multi_cartesian_product();
 
-        // Set up indicatif progress bar
         let pb = ProgressBar::new(total_dom_pairs / 2);
         pb.set_style(
             ProgressStyle::default_bar()
-                .template(
-                    "{spinner:.green} [{elapsed_precise}] [{wide_bar:.cyan/blue}] {pos}/{len} ({eta})",
-                )?
+                .template("{spinner:.green} [{elapsed_precise}] [{wide_bar:.cyan/blue}] {pos}/{len} ({eta})")?
                 .progress_chars("#>-"),
         );
+        let processed_count = AtomicU64::new(0);
 
-        for v in domain_iter {
-            for dv in get_all_dominating_values(&v, &largest_rec) {
-                let pair = (v.clone(), dv.clone());
-                let frequency =
-                    compute_pair_weight(&pair, &dist.parse().unwrap(), &lowest_rec, &largest_rec);
-                true_pair_frequency_dict.insert(pair, frequency);
+        let parsed_dist = dist.parse().unwrap();
 
-                pb.inc(1); // Increment the progress bar silently
-            }
-        }
+        let parsed_dist_ref = &parsed_dist;
+        let lowest_rec_ref = &lowest_rec;
+        let largest_rec_ref = &largest_rec;
+        let processed_count_ref = &processed_count;
+
+        let true_pair_frequency_dict: HashMap<DomPair, Frequency> = domain_iter
+            .par_bridge() // Parallelize the outer loop
+            .flat_map(|v| {
+                // Build the iterator lazily without allocating a Vec
+                let dom_iter = v
+                    .iter()
+                    .zip(largest_rec_ref.iter())
+                    .map(|(&v_val, &max_val)| v_val..=max_val)
+                    .multi_cartesian_product();
+                let pb_inner = pb.clone();
+
+                // Bridge the inner iterator to run concurrently as well
+                dom_iter.par_bridge().map({
+                    // Clone `v` once per outer iteration so the inner closure can own its own copy
+                    let v_clone = v.clone();
+
+                    move |dv| {
+                        let pair = (v_clone.clone(), dv);
+                        // Using the references we created outside
+                        let frequency = compute_pair_weight(
+                            &pair,
+                            parsed_dist_ref,
+                            lowest_rec_ref,
+                            largest_rec_ref,
+                        );
+                        let count = processed_count_ref.fetch_add(1, AtomicOrdering::Relaxed);
+                        if count % 100_000 == 0 {
+                            pb_inner.set_position(count);
+                        }
+                        (pair, frequency)
+                    }
+                })
+            })
+            .collect();
+
         pb.finish_with_message("Done computing dominant pair frequencies");
-
-        // let file = File::create(&path)?;
-        // bincode::serialize_into(BufWriter::new(file), &true_pair_frequency_dict)?;
 
         info!("Finished DP frequencies in {:?}", timer.elapsed());
         Ok(true_pair_frequency_dict)

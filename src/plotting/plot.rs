@@ -53,12 +53,20 @@ impl Plotter {
                 let content = fs::read_to_string(&recon_path).unwrap();
                 let data: ReconstructionData2d = serde_json::from_str(&content).unwrap();
 
-                let output_img = dir.join("reconstruction_plot.png");
+                let mut output_img = dir.join("reconstruction_plot.png");
                 self.plot_spatial_reconstruction(
                     &data.true_points,
                     &data.reconstructed_points,
                     output_img.to_str().unwrap(),
                     show_true_points,
+                )
+                .unwrap();
+                output_img = dir.join("original_plot.png");
+                self.plot_spatial_reconstruction(
+                    &data.true_points,
+                    &data.true_points,
+                    output_img.to_str().unwrap(),
+                    false,
                 )
                 .unwrap();
             }

@@ -45,8 +45,7 @@ fn do_attack(args: Args) {
         .expect("Logger failed to init!");
     let full_datapath = format!("{0}{1}", args.dir_path, args.name);
 
-    if args.name.as_str() == "cali"
-        || args.name.as_str() == "paris"
+    if args.name.as_str() == "paris"
         || args.name.as_str() == "manhattan"
         || args.name.as_str() == "shanghai"
         || args.name.as_str() == "amsterdam"
@@ -56,8 +55,8 @@ fn do_attack(args: Args) {
                 &format!("{0}/{1}.json", full_datapath, args.name),
                 args.name.as_str(),
                 100.0,
-                Some((250, 250)),
-                // None,
+                // Some((250, 250)),
+                None,
             )
             .unwrap(),
         );
@@ -68,7 +67,18 @@ fn do_attack(args: Args) {
             TwoDMap::new(
                 &format!("{0}/{1}.json", full_datapath, args.name),
                 args.name.as_str(),
+                100.0,
+                None,
+            )
+            .unwrap(),
+        );
+    } else if args.name.as_str() == "cali" {
+        loaded_db = Box::new(
+            TwoDMap::new(
+                &format!("{0}/{1}.json", full_datapath, args.name),
+                args.name.as_str(),
                 10.0,
+                // Some((250, 250)),
                 None,
             )
             .unwrap(),

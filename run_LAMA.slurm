@@ -61,7 +61,6 @@ for name in "${NAMES[@]}"; do
     $SG_RUN ./target/release/frequency_analysis_limits \
         --dir-path "$DATA_DIR/" \
         --name "$name" \
-        --save \
         --plot
 
     if [ $? -ne 0 ]; then

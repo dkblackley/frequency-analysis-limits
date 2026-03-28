@@ -8,10 +8,12 @@ use frequency_analysis_limits::LAMA::solver::Solver;
 use frequency_analysis_limits::LAMA::translator::Translator;
 use frequency_analysis_limits::LAMA::utility::{binomial_coefficient, get_mbq};
 use frequency_analysis_limits::{DomPair, Frequency, Record, Value};
-use log::{error, info};
+use log::{debug, error, info};
 use std::collections::HashMap;
+use std::fs;
 use std::fs::File;
 use std::io::BufWriter;
+use std::time::Instant;
 
 #[derive(Parser, Debug, Clone)]
 #[command(version, about, long_about = None)]
@@ -106,6 +108,8 @@ fn do_attack(args: Args) {
     //let t = loaded_db.get_dims() * 2;
     let t = 2;
 
+    let start = Instant::now();
+
     let (low_pair, high_pair) = loaded_db.get_dom_pair();
     let binding = loaded_db.get_universe();
     let largest_enc_val = binding.iter().max().unwrap();
@@ -192,6 +196,7 @@ fn do_attack(args: Args) {
 
     let responses = solver.solve(&mut translator.get_proto_model(), true);
 
+    let duration = start.elapsed();
     let mut correct = 0;
     let mut incorrect = 0;
 
@@ -203,6 +208,8 @@ fn do_attack(args: Args) {
             incorrect = incorrect + 1
         }
     }
+
+    debug!("{correct} correct, {incorrect} incorrect");
 
     info!("Saving to {full_datapath}/reconstruction.json");
     save_reconstruction_data(
@@ -219,7 +226,7 @@ fn do_attack(args: Args) {
         match_rate: Some(1.0),
         chamfer: Some(0.0),
         number_of_reconstructions: "8".to_string(),
-        time_taken: 0.0,
+        time_taken: duration.as_secs_f64(),
         total_db_size: loaded_db.get_universe().len() as u64,
         percent_queries_used: 100.0,
     };
@@ -244,8 +251,23 @@ fn main() {
             plotter.x_padder = 0.2;
             plotter.y_padder = 7.0;
         }
+        plotter.handle_spatial_plot(&[format!("{dir}/{name}")].clone(), true);
 
-        plotter.process_data_directories(&[format!("{dir}/{name}")], true);
+        let mut dir_paths = Vec::new();
+
+        if let Ok(entries) = fs::read_dir(&dir) {
+            for entry in entries.flatten() {
+                if let Ok(file_type) = entry.file_type() {
+                    if file_type.is_dir() {
+                        if let Some(name) = entry.file_name().to_str() {
+                            dir_paths.push(format!("{dir}/{name}"));
+                        }
+                    }
+                }
+            }
+        }
+
+        plotter.make_table(&dir_paths);
     }
     info!("morituri te salutant or morituri te salutamus");
 }

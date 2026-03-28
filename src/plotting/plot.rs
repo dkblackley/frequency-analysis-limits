@@ -34,7 +34,7 @@ pub struct Plotter {
 
 impl Plotter {
     /// Generates a sleek CLI table for a vector of DbResult structs.
-    pub fn process_data_directories(&self, dir_paths: &[String], show_true_points: bool) {
+    pub fn make_table(&self, dir_paths: &[String]) {
         let mut all_results = Vec::new();
 
         for dir_path in dir_paths {
@@ -46,6 +46,16 @@ impl Plotter {
                 let content = fs::read_to_string(&results_path).unwrap();
                 all_results.push(serde_json::from_str::<DbResult>(&content).unwrap());
             }
+        }
+
+        if !all_results.is_empty() {
+            self.print_results_table(&all_results);
+        }
+    }
+
+    pub fn handle_spatial_plot(&self, dir_paths: &[String], show_true_points: bool) {
+        for dir_path in dir_paths {
+            let dir = Path::new(dir_path);
 
             // 2. Handle Spatial Plotting
             let recon_path = dir.join("reconstruction.json");
@@ -70,10 +80,6 @@ impl Plotter {
                 )
                 .unwrap();
             }
-        }
-
-        if !all_results.is_empty() {
-            self.print_results_table(&all_results);
         }
     }
 

@@ -28,10 +28,10 @@ echo "Building project..."
 cargo build --release
 
 # Define the targets extracted from your Rust match/if logic
-NAMES=("paris" "manhattan" "shanghai" "amsterdam" "grid" "spitz" "cali")
+NAMES=("paris" "manhattan" "shanghai" "amsterdam" "spitz" "cali")
 
 # Define your data directory (update this to point to where your .json files live)
-DATA_DIR="./data"
+DATA_DIR="./databases"
 
 echo "Starting batch processing..."
 

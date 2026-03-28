@@ -184,6 +184,7 @@ fn do_attack(args: Args) {
     let universe = loaded_db.get_universe();
 
     for i in 2..(t + 1) {
+        let start_t = Instant::now();
         info!("Recursively computing frequencies for {i} tuples");
         translator.process_t_greater_than_1(
             i as usize,
@@ -191,6 +192,8 @@ fn do_attack(args: Args) {
             get_observed_freq,
             get_expected_freq,
         );
+        let end_t = Instant::now();
+        debug!("Round {i} took {end_t:?}")
     }
 
     info!("6. Building and executing the CP-SAT Solver for the final constraint graph...");

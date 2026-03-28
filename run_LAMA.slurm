@@ -15,22 +15,19 @@ module --quiet purge
 module load hosts/hopper
 module load singularity
 
-# We no longer load Hopper's protobuf module; the container handles it.
+# 1. Setup OR-Tools paths using the SINGULARITYENV_ prefix.
+# This forces Singularity to pass these specific variables INSIDE the container.
+export SINGULARITYENV_ORTOOLS_PREFIX="/scratch/dblackle/ortools"
+export SINGULARITYENV_LD_LIBRARY_PATH="/scratch/dblackle/ortools/lib"
 
-# Set Cargo home to scratch so the container doesn't try to write to its read-only internal system
-export CARGO_HOME=/scratch/dblackle/cargo
-export ORTOOLS_PREFIX="/scratch/dblackle/ortools"
+# Tell Cargo to link the Protobuf C++ library required by cp_sat
+export SINGULARITYENV_RUSTFLAGS='-Clink-arg=-lprotobuf'
 
-# Make sure the container can find Cargo and the 'protoc' compiler included in OR-Tools
-export PATH="$CARGO_HOME/bin:$ORTOOLS_PREFIX/bin:$PATH"
-export LD_LIBRARY_PATH="$ORTOOLS_PREFIX/lib:$LD_LIBRARY_PATH"
-
-# Link the Protobuf library included in your OR-Tools download
-export RUSTFLAGS='-Clink-arg=-lprotobuf'
-
-# Define how we call the container (binding scratch ensures the container has read/write access to your files)
+# 2. Define the container run command with Bind Mounts
+# --bind /scratch/dblackle : Gives the container access to your project code and ortools.
+# --bind /scratch/dblackle/cargo:/usr/local/cargo : Maps your writable scratch folder directly over the container's read-only cargo cache!
 CONTAINER="/scratch/dblackle/rust_env.sif"
-SG_RUN="singularity exec --bind /scratch/dblackle $CONTAINER"
+SG_RUN="singularity exec --bind /scratch/dblackle --bind /scratch/dblackle/cargo:/usr/local/cargo $CONTAINER"
 
 echo "Building project inside container..."
 $SG_RUN cargo build --release

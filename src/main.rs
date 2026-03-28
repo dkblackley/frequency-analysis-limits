@@ -1,19 +1,19 @@
-use clap::Parser;
+use clap::{arg, Parser};
 use frequency_analysis_limits::dataloader::datasets::TwoDMap;
 use frequency_analysis_limits::dataloader::tester::testDB;
 use frequency_analysis_limits::dataloader::{unflatten_nd, Searchable};
-use frequency_analysis_limits::plotting::plot::{process_data_directories, ReconstructionData2d};
+use frequency_analysis_limits::plotting::plot::{DbResult, Plotter, ReconstructionData2d};
 use frequency_analysis_limits::LAMA::selector::Selector;
 use frequency_analysis_limits::LAMA::solver::Solver;
 use frequency_analysis_limits::LAMA::translator::Translator;
-use frequency_analysis_limits::LAMA::utility::get_mbq;
+use frequency_analysis_limits::LAMA::utility::{binomial_coefficient, get_mbq};
 use frequency_analysis_limits::{DomPair, Frequency, Record, Value};
 use log::{error, info};
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::BufWriter;
 
-#[derive(Parser, Debug)]
+#[derive(Parser, Debug, Clone)]
 #[command(version, about, long_about = None)]
 struct Args {
     /// The path to the directory with files you want to load
@@ -36,8 +36,7 @@ struct Args {
     plot: bool,
 }
 
-fn main() {
-    let args = Args::parse();
+fn do_attack(args: Args) {
     let mut loaded_db: Box<dyn Searchable + Sync>;
     env_logger::builder()
         .is_test(false)
@@ -46,13 +45,19 @@ fn main() {
         .expect("Logger failed to init!");
     let full_datapath = format!("{0}{1}", args.dir_path, args.name);
 
-    if args.name.as_str() == "cali" || args.name.as_str() == "paris" {
+    if args.name.as_str() == "cali"
+        || args.name.as_str() == "paris"
+        || args.name.as_str() == "manhattan"
+        || args.name.as_str() == "shanghai"
+        || args.name.as_str() == "amsterdam"
+    {
         loaded_db = Box::new(
             TwoDMap::new(
                 &format!("{0}/{1}.json", full_datapath, args.name),
                 args.name.as_str(),
                 100.0,
-                Some((50, 50)),
+                Some((250, 250)),
+                // None,
             )
             .unwrap(),
         );
@@ -191,23 +196,60 @@ fn main() {
     save_reconstruction_data(
         &responses,
         format!("{full_datapath}/reconstruction.json",).as_str(),
-        loaded_db,
+        &loaded_db,
     );
 
+    let final_res = DbResult {
+        name: loaded_db.get_name().parse().unwrap(),
+        method: "LAMA (Ours)".to_string(),
+        dims: loaded_db.get_dims() as u32,
+        mse: Some(0.0),
+        match_rate: Some(1.0),
+        chamfer: Some(0.0),
+        number_of_reconstructions: "8".to_string(),
+        time_taken: 0.0,
+        total_db_size: loaded_db.get_universe().len() as u64,
+        total_queries_used: binomial_coefficient(loaded_db.get_universe().len(), t),
+    };
+
+    save_results(final_res, format!("{full_datapath}/results.json",).as_str())
+}
+
+fn main() {
+    let args = Args::parse();
+    do_attack(args.clone());
     if args.plot {
         info!("Plotting data");
         let dir = args.dir_path;
+        let name = args.name;
 
-        process_data_directories(&[format!("{dir}/spitz")], true).unwrap();
+        let mut plotter = Plotter {
+            x_padder: 0.2,
+            y_padder: 0.2,
+        };
+
+        if name == "spitz" {
+            plotter.x_padder = 0.2;
+            plotter.y_padder = 7.0;
+        }
+
+        plotter.process_data_directories(&[format!("{dir}/{name}")], true);
     }
-
     info!("morituri te salutant or morituri te salutamus");
+}
+
+pub fn save_results(result: DbResult, file_path: &str) {
+    // Create the file and wrap it in a BufWriter for better performance
+    let file = File::create(file_path).unwrap();
+    let writer = BufWriter::new(file);
+
+    serde_json::to_writer_pretty(writer, &result).unwrap();
 }
 
 pub fn save_reconstruction_data(
     responses: &HashMap<i64, i64>,
     file_path: &str,
-    loaded_db: Box<dyn Searchable>,
+    loaded_db: &Box<dyn Searchable + Sync>,
 ) {
     // Pre-allocate the vectors using the length of the hashmap to avoid reallocations
     let mut data = ReconstructionData2d {

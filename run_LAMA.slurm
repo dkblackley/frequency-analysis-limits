@@ -15,17 +15,14 @@ module --quiet purge
 module load hosts/hopper
 module load singularity
 
-# 1. Setup OR-Tools paths using the SINGULARITYENV_ prefix.
-# This forces Singularity to pass these specific variables INSIDE the container.
+# Setup OR-Tools paths using the SINGULARITYENV_ prefix.
 export SINGULARITYENV_ORTOOLS_PREFIX="/scratch/dblackle/ortools"
 export SINGULARITYENV_LD_LIBRARY_PATH="/scratch/dblackle/ortools/lib"
 
-# Tell Cargo to link the Protobuf C++ library required by cp_sat
-export SINGULARITYENV_RUSTFLAGS='-Clink-arg=-lprotobuf'
+# Tell the compiler where to find C++ libraries at build time without poisoning RUSTFLAGS
+export SINGULARITYENV_LIBRARY_PATH="/scratch/dblackle/ortools/lib"
 
-# 2. Define the container run command with Bind Mounts
-# --bind /scratch/dblackle : Gives the container access to your project code and ortools.
-# --bind /scratch/dblackle/cargo:/usr/local/cargo : Maps your writable scratch folder directly over the container's read-only cargo cache!
+# Define the container run command with Bind Mounts
 CONTAINER="/scratch/dblackle/rust_env.sif"
 SG_RUN="singularity exec --bind /scratch/dblackle --bind /scratch/dblackle/cargo:/usr/local/cargo $CONTAINER"
 
@@ -43,8 +40,9 @@ for name in "${NAMES[@]}"; do
     echo "========================================"
 
     # Run the compiled binary inside the container
+    # Notice we append /$name to the DATA_DIR so the Rust code evaluates to databases/cali/cali.json
     $SG_RUN ./target/release/frequency_analysis_limits \
-        --dir-path "$DATA_DIR" \
+        --dir-path "$DATA_DIR/$name" \
         --name "$name" \
         --save \
         --plot

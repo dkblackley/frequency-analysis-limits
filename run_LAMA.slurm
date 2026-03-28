@@ -15,19 +15,16 @@ module --quiet purge
 module load hosts/hopper
 module load singularity
 
-# Setup OR-Tools paths using the SINGULARITYENV_ prefix.
 export SINGULARITYENV_ORTOOLS_PREFIX="/scratch/dblackle/ortools"
 export SINGULARITYENV_LD_LIBRARY_PATH="/scratch/dblackle/ortools/lib"
-
-# Tell the compiler where to find C++ libraries at build time without poisoning RUSTFLAGS
 export SINGULARITYENV_LIBRARY_PATH="/scratch/dblackle/ortools/lib"
 
-# Define the container run command with Bind Mounts
 CONTAINER="/scratch/dblackle/rust_env.sif"
 SG_RUN="singularity exec --bind /scratch/dblackle --bind /scratch/dblackle/cargo:/usr/local/cargo $CONTAINER"
 
 echo "Building project inside container..."
-$SG_RUN cargo build --release
+# Use cargo rustc to link protobuf only to the final executable
+$SG_RUN cargo rustc --release -- -Clink-arg=-lprotobuf
 
 NAMES=("paris" "manhattan" "shanghai" "amsterdam" "spitz" "cali")
 DATA_DIR="./databases"
@@ -39,10 +36,8 @@ for name in "${NAMES[@]}"; do
     echo "Running configuration for: $name"
     echo "========================================"
 
-    # Run the compiled binary inside the container
-    # Notice we append /$name to the DATA_DIR so the Rust code evaluates to databases/cali/cali.json
     $SG_RUN ./target/release/frequency_analysis_limits \
-        --dir-path "$DATA_DIR/$name/" \
+        --dir-path "$DATA_DIR/$name" \
         --name "$name" \
         --save \
         --plot

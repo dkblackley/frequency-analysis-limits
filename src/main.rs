@@ -29,6 +29,10 @@ struct Args {
     #[arg(short, long)]
     load: bool,
 
+    /// Run the LAMA attack or just do plotting
+    #[arg(short, long)]
+    skip_lama: bool,
+
     /// The identifier for the specific function to load the file
     #[arg(short, long)]
     name: String,
@@ -240,7 +244,10 @@ fn main() {
         .filter_level(log::LevelFilter::Debug)
         .try_init()
         .expect("Logger failed to init!");
-    // do_attack(args.clone());
+
+    if !args.skip_lama {
+        do_attack(args.clone());
+    }
     if args.plot {
         info!("Plotting data");
         let dir = args.dir_path;

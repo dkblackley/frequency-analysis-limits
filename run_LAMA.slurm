@@ -1,8 +1,8 @@
 #!/bin/bash -l
 #SBATCH --job-name=rust_ortools_batch
 #SBATCH --partition=bigmem
-#SBATCH --output=rust_batch.out
-#SBATCH --error=rust_batch.err
+#SBATCH --output=LAMA.out
+#SBATCH --error=LAMA.err
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=128
@@ -13,6 +13,17 @@ cd "$SLURM_SUBMIT_DIR"
 
 module --quiet purge
 module load hosts/hopper
+
+module load protobuf/3.12.2-bq
+
+# Tell the cp_sat crate where OR-Tools is extracted
+export ORTOOLS_PREFIX="/scratch/dblackle/ortools"
+
+# Ensure the Slurm node can find the OR-Tools shared libraries at runtime
+export LD_LIBRARY_PATH="$ORTOOLS_PREFIX/lib:$LD_LIBRARY_PATH"
+
+# Tell Cargo to link the Protobuf C++ library required by cp_sat
+export RUSTFLAGS='-Clink-arg=-lprotobuf'
 
 # Setup custom Rust paths on scratch
 export RUSTUP_HOME=/scratch/dblackle/rustup

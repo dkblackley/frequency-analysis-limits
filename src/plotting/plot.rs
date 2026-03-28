@@ -16,7 +16,7 @@ pub struct DbResult {
     pub number_of_reconstructions: String,
     pub time_taken: f64,
     pub total_db_size: u64,
-    pub total_queries_used: u64,
+    pub percent_queries_used: f64,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -89,7 +89,7 @@ impl Plotter {
             Cell::new("Reconstructions").fg(TableColor::Cyan),
             Cell::new("Time (s)").fg(TableColor::Cyan),
             Cell::new("DB Size").fg(TableColor::Cyan),
-            Cell::new("Queries used").fg(TableColor::Cyan),
+            Cell::new("Queries used (%)").fg(TableColor::Cyan),
         ]);
 
         for res in results {
@@ -114,7 +114,7 @@ impl Plotter {
                 Cell::new(res.number_of_reconstructions.clone()),
                 Cell::new(format!("{:.4}", res.time_taken)),
                 Cell::new(res.total_db_size),
-                Cell::new(res.total_queries_used),
+                Cell::new(res.percent_queries_used),
             ]);
         }
 

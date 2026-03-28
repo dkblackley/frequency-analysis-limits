@@ -221,7 +221,7 @@ fn do_attack(args: Args) {
         number_of_reconstructions: "8".to_string(),
         time_taken: 0.0,
         total_db_size: loaded_db.get_universe().len() as u64,
-        total_queries_used: binomial_coefficient(loaded_db.get_universe().len(), t),
+        percent_queries_used: 100.0,
     };
 
     save_results(final_res, format!("{full_datapath}/results.json",).as_str())

@@ -105,8 +105,8 @@ fn do_attack(args: Args) {
     let dist = "uniform";
 
     let dim = loaded_db.get_dims();
-    //let t = loaded_db.get_dims() * 2;
-    let t = 3;
+    let t = loaded_db.get_dims() * 2;
+    //let t = 3;
 
     let start = Instant::now();
 
@@ -236,24 +236,19 @@ fn do_attack(args: Args) {
 
 fn main() {
     let args = Args::parse();
-    do_attack(args.clone());
+    // do_attack(args.clone());
     if args.plot {
         info!("Plotting data");
         let dir = args.dir_path;
         let name = args.name;
 
+        //plotter.handle_spatial_plot(&[format!("{dir}/{name}")].clone(), true);
+
+        let mut dir_paths = Vec::new();
         let mut plotter = Plotter {
             x_padder: 0.2,
             y_padder: 0.2,
         };
-
-        if name == "spitz" {
-            plotter.x_padder = 0.2;
-            plotter.y_padder = 7.0;
-        }
-        plotter.handle_spatial_plot(&[format!("{dir}/{name}")].clone(), true);
-
-        let mut dir_paths = Vec::new();
 
         if let Ok(entries) = fs::read_dir(&dir) {
             for entry in entries.flatten() {
@@ -261,6 +256,15 @@ fn main() {
                     if file_type.is_dir() {
                         if let Some(name) = entry.file_name().to_str() {
                             dir_paths.push(format!("{dir}/{name}"));
+
+                            if name == "spitz" {
+                                plotter.x_padder = 0.2;
+                                plotter.y_padder = 7.0;
+                            } else {
+                                plotter.x_padder = 0.2;
+                                plotter.y_padder = 0.2;
+                            }
+                            plotter.handle_spatial_plot(&[format!("{dir}/{name}")].clone(), true);
                         }
                     }
                 }

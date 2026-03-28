@@ -106,7 +106,7 @@ fn do_attack(args: Args) {
 
     let dim = loaded_db.get_dims();
     //let t = loaded_db.get_dims() * 2;
-    let t = 2;
+    let t = 3;
 
     let start = Instant::now();
 

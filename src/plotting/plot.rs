@@ -1,23 +1,25 @@
 use comfy_table::{presets::UTF8_FULL, Cell, Color as TableColor, Table};
 use plotters::prelude::*;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::error::Error;
 use std::fs;
 use std::path::Path;
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct DbResult {
     pub name: String,
     pub method: String,
     pub dims: u32,
-    pub accuracy: Option<f64>,
-    pub number_of_reconstructions: u32,
+    pub mse: Option<f64>,
+    pub match_rate: Option<f64>,
+    pub chamfer: Option<f64>,
+    pub number_of_reconstructions: String,
     pub time_taken: f64,
     pub total_db_size: u64,
 }
 
-#[derive(Debug, Deserialize)]
-pub struct ReconstructionData {
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ReconstructionData2d {
     #[serde(rename = "true")]
     pub true_points: Vec<(f64, f64)>,
     #[serde(rename = "reconstructed")]
@@ -45,7 +47,7 @@ pub fn process_data_directories(
         let recon_path = dir.join("reconstruction.json");
         if recon_path.exists() {
             let content = fs::read_to_string(&recon_path)?;
-            let data: ReconstructionData = serde_json::from_str(&content)?;
+            let data: ReconstructionData2d = serde_json::from_str(&content)?;
 
             let output_img = dir.join("reconstruction_plot.png");
             plot_spatial_reconstruction(
@@ -77,11 +79,11 @@ pub fn print_results_table(results: &[DbResult]) {
 
     for res in results {
         let acc_str = res
-            .accuracy
+            .mse
             .map(|a| format!("{:.2}", a))
             .unwrap_or_else(|| "N/A".to_string());
 
-        let acc_color = if res.accuracy == Some(100.0) {
+        let acc_color = if res.mse == Some(100.0) {
             TableColor::Green
         } else {
             TableColor::Reset
@@ -219,7 +221,7 @@ mod tests {
 
         fs::write(our_path.join("results.json"), json!({
             "name": "CA_Database_Exact", "method": "Leakage Abuse (Ours)", "dims": 2,
-            "accuracy": 100.0, "number_of_reconstructions": 1, "time_taken": 0.02, "total_db_size": 100
+            "accuracy": 100.0, "number_of_reconstructions": "1", "time_taken": 0.02, "total_db_size": 100
         }).to_string())?;
 
         fs::write(
@@ -243,7 +245,7 @@ mod tests {
 
         fs::write(sota_path.join("results.json"), json!({
             "name": "CA_Database_SOTA", "method": "VolAn", "dims": 2,
-            "accuracy": 82.1, "number_of_reconstructions": 5, "time_taken": 10.5, "total_db_size": 100
+            "accuracy": 82.1, "number_of_reconstructions": "5", "time_taken": 10.5, "total_db_size": 100
         }).to_string())?;
 
         fs::write(

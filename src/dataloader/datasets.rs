@@ -1,115 +1,171 @@
-use crate::dataloader::error::DataLoadingError;
-use crate::dataloader::{flatten_nd, get_bounding_box, Searchable};
+use crate::dataloader::{flatten_nd, unflatten_nd, Searchable};
 use crate::{Record, Value};
-use log::info;
 use ndarray::{s, Array2};
 use serde::{Deserialize, Serialize};
-use std::cmp::{max, min};
 use std::collections::HashSet;
 use std::fs::File;
 use std::io::BufReader;
-// From lilika's paper
 
-// Database 1: Users
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct Location {
+    longitude: f64,
+    latitude: f64,
+}
+
 #[derive(Debug)]
-pub struct CaliMap50 {
-    //Map of 'node_id' to the two lat and longs (multiplied by 100 and cast to u64) - inner vec should
-    // always be of size 2
-    plaintext: Vec<(Value, Value)>,
+pub struct TwoDMap {
     encrypted_db: Vec<Value>,
     grid: Array2<Value>,
-    dimensions: Value, // should always be two
+    dimensions: Value,
     name: String,
+    scale: f64,
     upper: Vec<Value>,
     lower: Vec<Value>,
     offset: Vec<Value>,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct Location {
-    id: u32,
-    longitude: f64,
-    latitude: f64,
-}
-
-impl CaliMap50 {
-    fn load_locations_from_file(filepath: &str) -> Result<Vec<Location>, DataLoadingError> {
+impl TwoDMap {
+    fn load_locations_from_file(filepath: &str) -> Result<Vec<Location>, std::io::Error> {
         let file = File::open(filepath)?;
         let reader = BufReader::new(file);
         let locations = serde_json::from_reader(reader)?;
         Ok(locations)
     }
 
-    // Add the offset field to your struct definition
-    // pub offset: Vec<Value>,
-
-    pub fn new(file_path: &str) -> Result<Self, DataLoadingError> {
-        info!("About to load {}", file_path);
-
+    /// `scale_factor` preserves decimal places before integer cast (e.g., 100.0).
+    /// `target_grid` allows squishing the map into a bounded space, e.g., Some((50, 50)).
+    pub fn new(
+        file_path: &str,
+        name: &str,
+        scale_factor: f64,
+        target_grid: Option<(Value, Value)>,
+    ) -> Result<Self, std::io::Error> {
         let locations = Self::load_locations_from_file(file_path)?;
 
-        let points_iter = locations
-            .clone()
+        // 1. Scale floats and cast to Value (i64)
+        let scaled_points: Vec<[Value; 2]> = locations
             .into_iter()
-            .map(|loc| [loc.longitude as Value, loc.latitude as Value]);
+            .map(|loc| {
+                [
+                    (loc.longitude * scale_factor).round() as Value,
+                    (loc.latitude * scale_factor).round() as Value,
+                ]
+            })
+            .collect();
 
-        let (true_lower, true_upper) =
-            get_bounding_box(points_iter).unwrap_or_else(|| ([0 as Value; 2], [0 as Value; 2]));
+        // 2. Find bounding box
+        let mut true_lower = [Value::MAX, Value::MAX];
+        let mut true_upper = [Value::MIN, Value::MIN];
 
-        // 1. Define the offset as the true minimums
+        for p in &scaled_points {
+            if p[0] < true_lower[0] {
+                true_lower[0] = p[0];
+            }
+            if p[1] < true_lower[1] {
+                true_lower[1] = p[1];
+            }
+            if p[0] > true_upper[0] {
+                true_upper[0] = p[0];
+            }
+            if p[1] > true_upper[1] {
+                true_upper[1] = p[1];
+            }
+        }
+
+        if true_lower[0] == Value::MAX {
+            true_lower = [0, 0];
+            true_upper = [0, 0];
+        }
+
         let offset = vec![true_lower[0], true_lower[1]];
-
-        // 2. Normalize upper and lower bounds to start at 0
         let lower = [0, 0];
         let upper = [true_upper[0] - offset[0], true_upper[1] - offset[1]];
 
-        let mut plaintext = Vec::new();
-        let mut encrypted_db = Vec::new();
-        let mut my_set = HashSet::new();
+        // Calculate the maximum ranges to act as our denominator for scaling
+        let mut max_x_range = true_upper[0] - true_lower[0];
+        let mut max_y_range = true_upper[1] - true_lower[1];
 
-        for location in locations {
-            // 3. Shift every point by subtracting the offset
-            let point1 = location.longitude as Value - offset[0];
-            let point2 = location.latitude as Value - offset[1];
-
-            plaintext.push((point1, point2));
-            let flat_point = flatten_nd(&[point1, point2], &upper, &lower);
-            encrypted_db.push(flat_point);
-            my_set.insert(flat_point);
+        // Prevent divide-by-zero if all points are identical
+        if max_x_range == 0 {
+            max_x_range = 1;
+        }
+        if max_y_range == 0 {
+            max_y_range = 1;
         }
 
+        let mut encrypted_db = Vec::new();
+        let mut unique_points = HashSet::new();
+
+        // 3. Shift, optionally scale, and deduplicate
+        for p in scaled_points {
+            let mut shifted_x = p[0] - offset[0];
+            let mut shifted_y = p[1] - offset[1];
+
+            // Here is the Rust equivalent of your friend's Python code!
+            if let Some((grid_x, grid_y)) = target_grid {
+                // (current_val / max_range) * target_dimension
+                shifted_x =
+                    ((shifted_x as f64 / max_x_range as f64) * grid_x as f64).round() as Value;
+                shifted_y =
+                    ((shifted_y as f64 / max_y_range as f64) * grid_y as f64).round() as Value;
+
+                // Clamping to 0 instead of 1 to keep things 0-indexed
+                shifted_x = shifted_x.max(0);
+                shifted_y = shifted_y.max(0);
+            }
+
+            let flat_point = flatten_nd(&[shifted_x, shifted_y], &upper, &lower);
+            if unique_points.insert(flat_point) {
+                encrypted_db.push(flat_point);
+            }
+        }
+
+        // 4. Adjust the 'upper' bound tracked by the struct depending on scaling
+        let upper = if let Some((grid_x, grid_y)) = target_grid {
+            [grid_x, grid_y]
+        } else {
+            [max_x_range, max_y_range]
+        };
+
+        // 5. Build the grid efficiently
         let dim_x = (upper[0] - lower[0]) as usize + 1;
         let dim_y = (upper[1] - lower[1]) as usize + 1;
 
-        let grid = Array2::from_shape_fn((dim_x, dim_y), |(x, y)| {
-            let flat_point = flatten_nd(&[x as i64, y as i64], &upper, &lower);
+        let mut grid = Array2::from_elem((dim_x, dim_y), i64::MIN);
+        for &flat_point in &encrypted_db {
+            let grid_point = unflatten_nd(flat_point, &upper, &lower);
+            grid[[grid_point[0] as usize, grid_point[1] as usize]] = flat_point;
+        }
 
-            if my_set.contains(&flat_point) {
-                flat_point
-            } else {
-                i64::MIN
-            }
-        });
+        encrypted_db.sort_unstable();
 
-        encrypted_db.sort();
-        encrypted_db.dedup();
-
-        Ok(CaliMap50 {
-            plaintext,
+        Ok(TwoDMap {
             encrypted_db,
             grid,
             dimensions: 2,
-            name: "CaliMap".to_string(),
+            name: name.to_string(),
+            scale: scale_factor,
             upper: upper.to_vec(),
             lower: lower.to_vec(),
-            offset, // 4. Store for later use
+            offset,
         })
+    }
+
+    /// Helper to get the actual float coordinates back out, bypassing
+    /// the integer truncation that happens in `decrypt_point`.
+    pub fn decrypt_to_f64(&self, val: &Value) -> Vec<f64> {
+        let grid_point = unflatten_nd(*val, &self.upper, &self.lower);
+
+        vec![
+            (grid_point[0] + self.offset[0]) as f64 / self.scale,
+            (grid_point[1] + self.offset[1]) as f64 / self.scale,
+        ]
     }
 }
 
-impl Searchable for CaliMap50 {
+impl Searchable for TwoDMap {
     fn get_dims(&self) -> Value {
-        2
+        self.dimensions
     }
 
     fn get_name(&self) -> &str {
@@ -133,6 +189,19 @@ impl Searchable for CaliMap50 {
         (self.lower.clone(), self.upper.clone())
     }
 
+    fn decrypt_point(&self, val: &Value) -> Record {
+        // 1. Unflatten using the normalized 0-based bounds
+        let grid_point = unflatten_nd(*val, &self.upper, &self.lower);
+
+        // 2. Add the offset back. We DO NOT divide by scale here because
+        // Record is a Vec<i64> and integer division will destroy the decimal data.
+        // Use `decrypt_to_f64` if you need the real-world floats.
+        vec![
+            grid_point[0] + self.offset[0],
+            grid_point[1] + self.offset[1],
+        ]
+    }
+
     fn get_universe(&self) -> Vec<Value> {
         self.encrypted_db.clone()
     }
@@ -142,7 +211,7 @@ impl Searchable for CaliMap50 {
 fn test_search_covers_entire_universe() {
     // Initialize the map
     let path = "/home/yelnat/Nextcloud/10TB-STHDD/Sync-Folder-STHDD/programmin/frequency_analysis_limits/databases/cali_50/cali_50.json";
-    let map = CaliMap50::new(path).expect("Failed to initialize CaliMap50");
+    let map = TwoDMap::new(path, "temp", 10.0).expect("Failed to initialize CaliMap50");
 
     // Get the domain boundaries
     let (lower, upper) = map.get_dom_pair();

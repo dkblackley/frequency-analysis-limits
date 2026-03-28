@@ -1,4 +1,4 @@
-use crate::dataloader::{flatten_nd, Searchable};
+use crate::dataloader::{flatten_nd, unflatten_nd, Searchable};
 use crate::{Coord, Record, Value};
 use ndarray::{s, Array2};
 use rand::RngExt;
@@ -91,6 +91,13 @@ impl Searchable for testDB {
     /// x/y/z/whatever)> expects first item to be lowest and second to be largest.
     fn get_dom_pair(&self) -> (Record, Record) {
         (self.lowest_val.clone(), self.upper_val.clone())
+    }
+
+    fn decrypt_point(&self, val: &Value) -> Record {
+        let grid_point = unflatten_nd(*val, &self.upper_val, &self.lowest_val);
+
+        // 2. Add the offset back to restore real-world coordinates
+        vec![grid_point[0], grid_point[1]]
     }
 
     fn get_universe(&self) -> Vec<Value> {

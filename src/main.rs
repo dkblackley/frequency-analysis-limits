@@ -1,6 +1,7 @@
 use clap::Parser;
 use frequency_analysis_limits::dataloader::datasets::CaliMap50;
 use frequency_analysis_limits::dataloader::{unflatten_nd, Searchable};
+use frequency_analysis_limits::plotting::plot::ReconstructionData2d;
 use frequency_analysis_limits::LAMA::selector::Selector;
 use frequency_analysis_limits::LAMA::solver::Solver;
 use frequency_analysis_limits::LAMA::translator::Translator;
@@ -80,29 +81,6 @@ fn main() {
         largest_rec: high_pair.clone(),
     };
 
-    //     match file_res {
-    //         Ok(mut file) => {
-    //             let writer = BufWriter::new(file);
-    //
-    //             info!("Writing dom pair to freq map to {full_datapath}");
-    //             bincode::serialize_into(writer, &dom_pair_freq)
-    //                 .inspect_err(|e| {
-    //                     error!(
-    //                         "bincode failed to write dom pair freq map to {}: {}",
-    //                         filename, e
-    //                     )
-    //                 })
-    //                 .ok();
-    //         }
-    //         Err(e) => {
-    //             error!(
-    //                 "Error occurred when writing dom pair freq map to {}: {}",
-    //                 filename, e
-    //             );
-    //         }
-    //     }
-    // }
-
     info!("Selector computing values");
 
     info!("Beginning to bruteforce all DomPair->Freq mappings");
@@ -181,7 +159,7 @@ fn main() {
     let mut incorrect = 0;
 
     //Key is actually the true value.
-    for (key, val) in responses {
+    for (key, val) in responses.clone() {
         if key == val {
             correct = correct + 1
         } else {
@@ -189,5 +167,42 @@ fn main() {
         }
     }
 
+    save_reconstruction_data(
+        &responses,
+        format!("{full_datapath}/reconstruction.json",).as_str(),
+        loaded_db,
+    );
+
     info!("morituri te salutant or morituri te salutamus");
+}
+
+pub fn save_reconstruction_data(
+    responses: &HashMap<i64, i64>,
+    file_path: &str,
+    loaded_db: Box<dyn Searchable>,
+) {
+    // Pre-allocate the vectors using the length of the hashmap to avoid reallocations
+    let mut data = ReconstructionData2d {
+        true_points: Vec::with_capacity(responses.len()),
+        reconstructed_points: Vec::with_capacity(responses.len()),
+    };
+
+    // Iterate over the HashMap
+    for (&encrypted_true, &encrypted_recon) in responses {
+        let true_vec = loaded_db.decrypt_point(&encrypted_true);
+        let recon_vec = loaded_db.decrypt_point(&encrypted_recon);
+
+        if true_vec.len() >= 2 && recon_vec.len() >= 2 {
+            data.true_points
+                .push((true_vec[0] as f64, true_vec[1] as f64));
+            data.reconstructed_points
+                .push((recon_vec[0] as f64, recon_vec[1] as f64));
+        }
+    }
+
+    // Create the file and wrap it in a BufWriter for better performance
+    let file = File::create(file_path).unwrap();
+    let writer = BufWriter::new(file);
+
+    serde_json::to_writer_pretty(writer, &data).unwrap();
 }

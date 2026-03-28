@@ -59,7 +59,7 @@ for name in "${NAMES[@]}"; do
     echo "========================================"
 
     $SG_RUN ./target/release/frequency_analysis_limits \
-        --dir-path "$DATA_DIR/$name" \
+        --dir-path "$DATA_DIR/$name/" \
         --name "$name" \
         --save \
         --plot

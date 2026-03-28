@@ -15,6 +15,7 @@ module --quiet purge
 module load hosts/hopper
 module load singularity
 
+# Force Singularity to pass your OR-Tools paths into the container's isolated environment
 export SINGULARITYENV_ORTOOLS_PREFIX="/scratch/dblackle/ortools"
 export SINGULARITYENV_LD_LIBRARY_PATH="/scratch/dblackle/ortools/lib"
 export SINGULARITYENV_LIBRARY_PATH="/scratch/dblackle/ortools/lib"
@@ -22,8 +23,10 @@ export SINGULARITYENV_LIBRARY_PATH="/scratch/dblackle/ortools/lib"
 CONTAINER="/scratch/dblackle/rust_env.sif"
 SG_RUN="singularity exec --bind /scratch/dblackle --bind /scratch/dblackle/cargo:/usr/local/cargo $CONTAINER"
 
+echo "Cleaning previous cached builds..."
+$SG_RUN cargo clean
+
 echo "Building project inside container..."
-# Use cargo rustc to link protobuf only to the final executable
 $SG_RUN cargo rustc --release -- -Clink-arg=-lprotobuf
 
 NAMES=("paris" "manhattan" "shanghai" "amsterdam" "spitz" "cali")

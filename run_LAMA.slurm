@@ -15,10 +15,23 @@ module --quiet purge
 module load hosts/hopper
 module load singularity
 
-# Force Singularity to pass your OR-Tools paths into the container's isolated environment
-export SINGULARITYENV_ORTOOLS_PREFIX="/scratch/dblackle/ortools"
-export SINGULARITYENV_LD_LIBRARY_PATH="/scratch/dblackle/ortools/lib"
-export SINGULARITYENV_LIBRARY_PATH="/scratch/dblackle/ortools/lib"
+# --- 1. Download and Unpack OR-Tools ---
+ORTOOLS_DIR="/scratch/dblackle/ortools"
+echo "Setting up OR-Tools..."
+rm -rf "$ORTOOLS_DIR"
+mkdir -p "$ORTOOLS_DIR"
+cd "$ORTOOLS_DIR"
+
+wget -q https://github.com/google/or-tools/releases/download/v9.14/or-tools_amd64_debian-12_cpp_v9.14.6206.tar.gz
+tar -xf or-tools_amd64_debian-12_cpp_v9.14.6206.tar.gz --strip-components=1
+rm or-tools_amd64_debian-12_cpp_v9.14.6206.tar.gz
+
+cd "$SLURM_SUBMIT_DIR"
+# ---------------------------------------
+
+export SINGULARITYENV_ORTOOLS_PREFIX="$ORTOOLS_DIR"
+export SINGULARITYENV_LD_LIBRARY_PATH="$ORTOOLS_DIR/lib"
+export SINGULARITYENV_LIBRARY_PATH="$ORTOOLS_DIR/lib"
 
 CONTAINER="/scratch/dblackle/rust_env.sif"
 SG_RUN="singularity exec --bind /scratch/dblackle --bind /scratch/dblackle/cargo:/usr/local/cargo $CONTAINER"
@@ -27,7 +40,8 @@ echo "Cleaning previous cached builds..."
 $SG_RUN cargo clean
 
 echo "Building project inside container..."
-$SG_RUN cargo rustc --release -- -Clink-arg=-lprotobuf
+# Specify the exact binary target to apply the linker arguments to
+$SG_RUN cargo rustc --bin frequency_analysis_limits --release -- -Clink-arg=-lprotobuf
 
 NAMES=("paris" "manhattan" "shanghai" "amsterdam" "spitz" "cali")
 DATA_DIR="./databases"

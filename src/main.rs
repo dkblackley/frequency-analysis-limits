@@ -1,7 +1,8 @@
 use clap::Parser;
-use frequency_analysis_limits::dataloader::datasets::CaliMap50;
+use frequency_analysis_limits::dataloader::datasets::TwoDMap;
+use frequency_analysis_limits::dataloader::tester::testDB;
 use frequency_analysis_limits::dataloader::{unflatten_nd, Searchable};
-use frequency_analysis_limits::plotting::plot::ReconstructionData2d;
+use frequency_analysis_limits::plotting::plot::{process_data_directories, ReconstructionData2d};
 use frequency_analysis_limits::LAMA::selector::Selector;
 use frequency_analysis_limits::LAMA::solver::Solver;
 use frequency_analysis_limits::LAMA::translator::Translator;
@@ -29,11 +30,15 @@ struct Args {
     /// The identifier for the specific function to load the file
     #[arg(short, long)]
     name: String,
+
+    /// Make plots and save to disk
+    #[arg(short, long)]
+    plot: bool,
 }
 
 fn main() {
     let args = Args::parse();
-    let loaded_db: Box<dyn Searchable + Sync>;
+    let mut loaded_db: Box<dyn Searchable + Sync>;
     env_logger::builder()
         .is_test(false)
         .filter_level(log::LevelFilter::Debug)
@@ -41,16 +46,31 @@ fn main() {
         .expect("Logger failed to init!");
     let full_datapath = format!("{0}{1}", args.dir_path, args.name);
 
-    match args.name.as_str() {
-        "cali_50" => {
-            loaded_db = Box::new(
-                CaliMap50::new(&format!("{0}/{1}.json", full_datapath, args.name)).unwrap(),
-            );
-        }
-        _ => {
-            error!("Unknown dataset name: {0}", args.name);
-            std::process::exit(1);
-        }
+    if args.name.as_str() == "cali" || args.name.as_str() == "paris" {
+        loaded_db = Box::new(
+            TwoDMap::new(
+                &format!("{0}/{1}.json", full_datapath, args.name),
+                args.name.as_str(),
+                100.0,
+                Some((50, 50)),
+            )
+            .unwrap(),
+        );
+    } else if args.name.as_str() == "grid" {
+        loaded_db = Box::new(testDB::new(15, 15, 80));
+    } else if args.name.as_str() == "spitz" {
+        loaded_db = Box::new(
+            TwoDMap::new(
+                &format!("{0}/{1}.json", full_datapath, args.name),
+                args.name.as_str(),
+                10.0,
+                None,
+            )
+            .unwrap(),
+        );
+    } else {
+        error!("Unidentified DB!");
+        return;
     }
 
     info!(
@@ -66,8 +86,8 @@ fn main() {
     let dist = "uniform";
 
     let dim = loaded_db.get_dims();
-    // let t = loaded_db.get_dims() * 2;
-    let t = 3;
+    //let t = loaded_db.get_dims() * 2;
+    let t = 2;
 
     let (low_pair, high_pair) = loaded_db.get_dom_pair();
     let binding = loaded_db.get_universe();
@@ -140,7 +160,7 @@ fn main() {
 
     let universe = loaded_db.get_universe();
 
-    for i in 2..t {
+    for i in 2..(t + 1) {
         info!("Recursively computing frequencies for {i} tuples");
         translator.process_t_greater_than_1(
             i as usize,
@@ -167,11 +187,19 @@ fn main() {
         }
     }
 
+    info!("Saving to {full_datapath}/reconstruction.json");
     save_reconstruction_data(
         &responses,
         format!("{full_datapath}/reconstruction.json",).as_str(),
         loaded_db,
     );
+
+    if args.plot {
+        info!("Plotting data");
+        let dir = args.dir_path;
+
+        process_data_directories(&[format!("{dir}/spitz")], true).unwrap();
+    }
 
     info!("morituri te salutant or morituri te salutamus");
 }
@@ -189,8 +217,8 @@ pub fn save_reconstruction_data(
 
     // Iterate over the HashMap
     for (&encrypted_true, &encrypted_recon) in responses {
-        let true_vec = loaded_db.decrypt_point(&encrypted_true);
-        let recon_vec = loaded_db.decrypt_point(&encrypted_recon);
+        let true_vec = loaded_db.decrypt_point_f64(&encrypted_true);
+        let recon_vec = loaded_db.decrypt_point_f64(&encrypted_recon);
 
         if true_vec.len() >= 2 && recon_vec.len() >= 2 {
             data.true_points

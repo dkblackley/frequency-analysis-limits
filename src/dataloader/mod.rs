@@ -16,7 +16,8 @@ pub trait Searchable: Sync {
     /// you can think of this as the 'largest dominating pair value'
     fn get_dom_pair(&self) -> (Record, Record);
 
-    fn decrypt_point(&self, &Value) -> Record;
+    fn decrypt_point(&self, enc_point: &Value) -> Record;
+    fn decrypt_point_f64(&self, enc_point: &Value) -> Vec<f64>;
 
     /// Returns all individual encrypted records.
     fn get_universe(&self) -> Vec<Value>;
@@ -63,7 +64,7 @@ pub fn unflatten_nd(mut index: i64, upper: &[i64], lower: &[i64]) -> Record {
 }
 
 fn get_bounding_box<T, const D: usize>(
-    points: impl Iterator<Item=[T; D]>,
+    points: impl Iterator<Item = [T; D]>,
 ) -> Option<([T; D], [T; D])>
 where
     T: PartialOrd + Copy,

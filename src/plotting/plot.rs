@@ -94,7 +94,7 @@ pub fn print_results_table(results: &[DbResult]) {
             Cell::new(&res.method),
             Cell::new(res.dims),
             Cell::new(acc_str).fg(acc_color),
-            Cell::new(res.number_of_reconstructions),
+            Cell::new(res.number_of_reconstructions.clone()),
             Cell::new(format!("{:.4}", res.time_taken)),
             Cell::new(res.total_db_size),
         ]);

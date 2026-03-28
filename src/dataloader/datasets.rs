@@ -150,17 +150,6 @@ impl TwoDMap {
             offset,
         })
     }
-
-    /// Helper to get the actual float coordinates back out, bypassing
-    /// the integer truncation that happens in `decrypt_point`.
-    pub fn decrypt_to_f64(&self, val: &Value) -> Vec<f64> {
-        let grid_point = unflatten_nd(*val, &self.upper, &self.lower);
-
-        vec![
-            (grid_point[0] + self.offset[0]) as f64 / self.scale,
-            (grid_point[1] + self.offset[1]) as f64 / self.scale,
-        ]
-    }
 }
 
 impl Searchable for TwoDMap {
@@ -204,6 +193,15 @@ impl Searchable for TwoDMap {
 
     fn get_universe(&self) -> Vec<Value> {
         self.encrypted_db.clone()
+    }
+
+    fn decrypt_point_f64(&self, val: &Value) -> Vec<f64> {
+        let grid_point = unflatten_nd(*val, &self.upper, &self.lower);
+
+        vec![
+            (grid_point[0] + self.offset[0]) as f64 / self.scale,
+            (grid_point[1] + self.offset[1]) as f64 / self.scale,
+        ]
     }
 }
 

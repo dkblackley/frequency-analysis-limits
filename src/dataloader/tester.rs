@@ -100,6 +100,12 @@ impl Searchable for testDB {
         vec![grid_point[0], grid_point[1]]
     }
 
+    fn decrypt_point_f64(&self, val: &Value) -> Vec<f64> {
+        let grid_point = unflatten_nd(*val, &self.upper_val, &self.lowest_val);
+
+        vec![grid_point[0] as f64, grid_point[1] as f64]
+    }
+
     fn get_universe(&self) -> Vec<Value> {
         let (lower_bound, upper_bound) = self.get_dom_pair();
 

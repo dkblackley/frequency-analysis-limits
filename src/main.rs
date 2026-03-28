@@ -33,6 +33,10 @@ struct Args {
     #[arg(short, long)]
     name: String,
 
+    // The identifier for the specific function to load the file
+    #[arg(short, long)]
+    t: u64,
+
     /// Make plots and save to disk
     #[arg(short, long)]
     plot: bool,
@@ -100,8 +104,7 @@ fn do_attack(args: Args) {
     let dist = "uniform";
 
     let dim = loaded_db.get_dims();
-    let t = loaded_db.get_dims() * 2;
-    //let t = 3;
+    let t = args.t;
 
     let start = Instant::now();
 

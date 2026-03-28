@@ -6,7 +6,7 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=128
-#SBATCH --mem=512G
+#SBATCH --mem=750G
 #SBATCH --time=2-00:30:00
 
 cd "$SLURM_SUBMIT_DIR"
@@ -54,6 +54,8 @@ DATA_DIR="$SLURM_SUBMIT_DIR/databases"
 
 echo "Starting batch processing..."
 
+FAILED_NAMES=()
+
 for name in "${NAMES[@]}"; do
     echo "========================================"
     echo "Running configuration for: $name"
@@ -62,13 +64,38 @@ for name in "${NAMES[@]}"; do
     $SG_RUN ./target/release/frequency_analysis_limits \
         --dir-path "$DATA_DIR/" \
         --name "$name" \
+        --t 4 \
         --plot
 
     if [ $? -ne 0 ]; then
-        echo "Error: Run failed for $name"
+        echo "Error: Initial run failed for $name. Retrying..."
+        
+        # Try one more time
+        $SG_RUN ./target/release/frequency_analysis_limits \
+                --dir-path "$DATA_DIR/" \
+                --name "$name" \
+                --t 3 \
+                --plot
+        
+        if [ $? -ne 0 ]; then
+            echo "Error: Retry failed for $name."
+            FAILED_NAMES+=("$name")
+        else
+            echo "Successfully completed $name on retry"
+        fi
     else
         echo "Successfully completed $name"
     fi
 done
 
 echo "All runs completed."
+
+if [ ${#FAILED_NAMES[@]} -ne 0 ]; then
+    echo "The following datasets failed to process:"
+    for failed in "${FAILED_NAMES[@]}"; do
+        echo "  - $failed"
+    done
+    exit 1
+else
+    echo "All datasets processed successfully."
+fi

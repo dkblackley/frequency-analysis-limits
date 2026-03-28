@@ -55,7 +55,7 @@ for name in "${NAMES[@]}"; do
     # Execute the binary.
     # Note: --save and --plot are included to set those boolean flags to true.
     # Add --load here if you also want to load checkpoints.
-    ./target/release/your_rust_binary \
+    ./target/release/frequency_analysis_limits \
         --dir-path "$DATA_DIR" \
         --name "$name" \
         --save \

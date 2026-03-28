@@ -42,7 +42,7 @@ for name in "${NAMES[@]}"; do
     # Run the compiled binary inside the container
     # Notice we append /$name to the DATA_DIR so the Rust code evaluates to databases/cali/cali.json
     $SG_RUN ./target/release/frequency_analysis_limits \
-        --dir-path "$DATA_DIR/$name" \
+        --dir-path "$DATA_DIR/$name/" \
         --name "$name" \
         --save \
         --plot

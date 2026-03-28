@@ -1,5 +1,6 @@
 use crate::dataloader::{flatten_nd, unflatten_nd, Searchable};
 use crate::{Record, Value};
+use log::info;
 use ndarray::{s, Array2};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
@@ -40,6 +41,7 @@ impl TwoDMap {
         scale_factor: f64,
         target_grid: Option<(Value, Value)>,
     ) -> Result<Self, std::io::Error> {
+        info!("About to load {name} from {file_path}");
         let locations = Self::load_locations_from_file(file_path)?;
 
         // 1. Scale floats and cast to Value (i64)

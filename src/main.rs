@@ -45,6 +45,8 @@ fn do_attack(args: Args) {
         .expect("Logger failed to init!");
     let full_datapath = format!("{0}{1}", args.dir_path, args.name);
 
+    info!("Starting LAMA attack");
+
     if args.name.as_str() == "paris"
         || args.name.as_str() == "manhattan"
         || args.name.as_str() == "shanghai"

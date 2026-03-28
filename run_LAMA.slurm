@@ -33,6 +33,10 @@ export SINGULARITYENV_ORTOOLS_PREFIX="$ORTOOLS_DIR"
 export SINGULARITYENV_LD_LIBRARY_PATH="$ORTOOLS_DIR/lib"
 export SINGULARITYENV_LIBRARY_PATH="$ORTOOLS_DIR/lib"
 
+# Enable Rust logging and backtraces
+export SINGULARITYENV_RUST_LOG="debug"
+export SINGULARITYENV_RUST_BACKTRACE="1"
+
 CONTAINER="/scratch/dblackle/rust_env.sif"
 SG_RUN="singularity exec --bind /scratch/dblackle --bind /scratch/dblackle/cargo:/usr/local/cargo $CONTAINER"
 
@@ -40,11 +44,12 @@ echo "Cleaning previous cached builds..."
 $SG_RUN cargo clean
 
 echo "Building project inside container..."
-# Specify the exact binary target to apply the linker arguments to
 $SG_RUN cargo rustc --bin frequency_analysis_limits --release -- -Clink-arg=-lprotobuf
 
 NAMES=("paris" "manhattan" "shanghai" "amsterdam" "spitz" "cali")
-DATA_DIR="./databases"
+
+# Use an absolute path to guarantee file resolution inside the container
+DATA_DIR="$SLURM_SUBMIT_DIR/databases"
 
 echo "Starting batch processing..."
 

@@ -236,7 +236,7 @@ fn do_attack(args: Args) {
 
 fn main() {
     let args = Args::parse();
-    // do_attack(args.clone());
+    do_attack(args.clone());
     if args.plot {
         info!("Plotting data");
         let dir = args.dir_path;

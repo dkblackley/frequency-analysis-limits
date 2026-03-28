@@ -34,7 +34,7 @@ impl Solver {
         let mut params = SatParameters::default();
 
         if get_one {
-            params.num_workers = Some(8);
+            params.num_workers = Some(128);
         } else {
             params.enumerate_all_solutions = Some(true);
             params.fill_additional_solutions_in_response = Some(true);

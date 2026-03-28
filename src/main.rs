@@ -125,6 +125,7 @@ fn do_attack(args: Args) {
     };
 
     info!("Selector computing values");
+    let duration = start.elapsed();
 
     info!("Beginning to bruteforce all DomPair->Freq mappings");
     // This is a bruteforce calculation of the TRUE frequency of all dompairs.
@@ -201,7 +202,6 @@ fn do_attack(args: Args) {
 
     let responses = solver.solve(&mut translator.get_proto_model(), true);
 
-    let duration = start.elapsed();
     let mut correct = 0;
     let mut incorrect = 0;
 

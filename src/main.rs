@@ -40,11 +40,6 @@ struct Args {
 
 fn do_attack(args: Args) {
     let mut loaded_db: Box<dyn Searchable + Sync>;
-    env_logger::builder()
-        .is_test(false)
-        .filter_level(log::LevelFilter::Debug)
-        .try_init()
-        .expect("Logger failed to init!");
     let full_datapath = format!("{0}{1}", args.dir_path, args.name);
 
     info!("Starting LAMA attack");
@@ -236,7 +231,13 @@ fn do_attack(args: Args) {
 
 fn main() {
     let args = Args::parse();
-    do_attack(args.clone());
+
+    env_logger::builder()
+        .is_test(false)
+        .filter_level(log::LevelFilter::Debug)
+        .try_init()
+        .expect("Logger failed to init!");
+    // do_attack(args.clone());
     if args.plot {
         info!("Plotting data");
         let dir = args.dir_path;

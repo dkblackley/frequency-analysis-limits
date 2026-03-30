@@ -296,10 +296,12 @@ impl Translator {
 
         for i in 0..prev_keys.len() {
             for j in i + 1..prev_keys.len() {
+                // Take the first 'outer key'
                 let k1 = &prev_keys[i];
+                // Check for ALL possible inner keys.
                 let k2 = &prev_keys[j];
 
-                // If the first (t-2) elements match, we can join the last elements!
+                // If the first (t-2) elements match, we can join the last elements
                 if k1[..t - 2] == k2[..t - 2] {
                     let mut candidate = Vec::with_capacity(t);
                     candidate.extend_from_slice(&k1[..t - 2]);
@@ -324,7 +326,7 @@ impl Translator {
             pb.inc(1);
         }
         pb.finish_with_message("found candidates");
-        //TODO: THis might be removing the reflections
+        //TODO: THis might be removing the reflections (?)
         candidates.sort_unstable();
         candidates.dedup();
         candidates
@@ -347,7 +349,7 @@ impl Translator {
             .filter_map(|enc_t_tuple| {
                 let t = enc_t_tuple.len();
 
-                // 1. APPLY T-1 PRUNING FIRST!
+                // 1. APPLY T-1 PRUNING FIRST! (Made when running apriori candidates?)
                 for sub_tuple in enc_t_tuple.iter().copied().combinations(t - 1) {
                     if !prev_t_cache.contains_key(&sub_tuple) {
                         return None;
@@ -526,7 +528,7 @@ impl Translator {
             .collect()
     }
 
-    /// Recursive Case: t > 1. Iterative Pruning via Batched DFS.
+    /// Recursive Case: t > 1.
     pub fn process_t_greater_than_1<O, E>(
         &mut self,
         t: usize,

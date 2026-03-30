@@ -5,7 +5,7 @@ use crate::LAMA::utility::{
     Distribution,
 };
 use crate::{Coord, DomPair, Frequency, Record, Value};
-use indicatif::{ProgressBar, ProgressStyle};
+use indicatif::{ProgressBar, ProgressIterator, ProgressStyle};
 
 use itertools::Itertools;
 use log::info;
@@ -63,208 +63,17 @@ impl PartialOrd for HeapItem {
 }
 
 impl Selector<'_> {
-    pub fn precompute_sorted_to_disk(
-        &self,
-        t: usize,
-        final_output_filepath: &str,
-        chunk_limit: usize,
-    ) {
-        // chunk_limit = 5_000_000 for 5GB
-        let lowest_rec = self.lowest_rec.clone();
-        let largest_rec = self.largest_rec.clone();
-        let dist_enum = Distribution::from_str(&self.dist).unwrap_or(Distribution::Uniform);
-
-        let mut vals: Vec<Record> = lowest_rec
-            .iter()
-            .zip(largest_rec.iter())
-            .map(|(&low, &high)| low..=high)
-            .multi_cartesian_product()
-            .collect();
-        vals.sort();
-
-        let n = vals.len();
-        let total_combinations = binomial_coefficient(n, t);
-
-        let pb = ProgressBar::new(total_combinations);
-        pb.set_style(
-            ProgressStyle::default_bar()
-                .template("{spinner:.green} [{elapsed_precise}] [{wide_bar:.cyan/blue}] {pos}/{len} ({eta})").unwrap()
-        );
-
-        let mut processed_count = AtomicU64::new(0);
-
-        // Channel for streaming computed tuples to the chunk manager
-        let (sender, receiver) = sync_channel::<(u64, Vec<i64>)>(50_000);
-
-        // --- PHASE 1: CHUNK GENERATION & IN-MEMORY SORTING ---
-        let chunk_thread = thread::spawn(move || {
-            let mut buffer: Vec<(u64, Vec<i64>)> = Vec::new();
-            let mut chunk_files = Vec::new();
-            let mut chunk_counter = 0;
-
-            while let Ok(item) = receiver.recv() {
-                buffer.push(item);
-
-                if buffer.len() >= chunk_limit {
-                    buffer.sort_unstable_by_key(|k| k.0);
-
-                    let filename = format!("temp_chunk_{}.bin", chunk_counter);
-                    let file = File::create(&filename).expect("Failed to create chunk");
-                    let mut writer = BufWriter::new(file);
-
-                    for buf_item in &buffer {
-                        bincode::serialize_into(&mut writer, buf_item).unwrap();
-                    }
-
-                    chunk_files.push(filename);
-                    chunk_counter += 1;
-                    buffer.clear();
-                }
-            }
-
-            // Process the final partial chunk
-            if !buffer.is_empty() {
-                buffer.sort_unstable_by_key(|k| k.0);
-                let filename = format!("temp_chunk_{}.bin", chunk_counter);
-                let file = File::create(&filename).expect("Failed to create chunk");
-                let mut writer = BufWriter::new(file);
-                for buf_item in &buffer {
-                    bincode::serialize_into(&mut writer, buf_item).unwrap();
-                }
-                chunk_files.push(filename);
-            }
-
-            chunk_files
-        });
-
-        // Compute combinations in parallel
-        vals.into_iter()
-            .combinations(t)
-            .par_bridge()
-            .for_each_with(sender, |s, val_tuple| {
-                let bounding_pair = get_mbq(&val_tuple);
-                let freq =
-                    compute_pair_weight(&bounding_pair, &dist_enum, &lowest_rec, &largest_rec);
-                let flattened: Vec<i64> = val_tuple
-                    .iter()
-                    .map(|rec| flatten_nd(rec, &largest_rec, &lowest_rec))
-                    .collect();
-
-                s.send((freq, flattened)).ok();
-
-                let current = processed_count.fetch_add(1, AtomicOrdering::Relaxed);
-                if current % 10_000 == 0 {
-                    pb.set_position(current);
-                }
-            });
-
-        pb.finish_with_message("Done generating. Merging chunks...");
-
-        let chunk_files = chunk_thread.join().unwrap();
-
-        // --- PHASE 2: K-WAY MERGE INTO FINAL FILE ---
-        let mut min_heap = BinaryHeap::new();
-        let mut readers = Vec::new();
-
-        // Open all chunk files for reading
-        for (idx, filename) in chunk_files.iter().enumerate() {
-            let file = File::open(filename).unwrap();
-            let mut reader = BufReader::with_capacity(1024 * 1024 * 50, file); // 50MB buffer per file
-
-            // Read the first item from each file to seed the heap
-            if let Ok((freq, tuple)) = bincode::deserialize_from::<_, (u64, Vec<i64>)>(&mut reader)
-            {
-                min_heap.push(HeapItem {
-                    freq,
-                    tuple,
-                    chunk_idx: idx,
-                });
-            }
-            readers.push(reader);
-        }
-
-        let final_file = File::create(final_output_filepath).expect("Failed to create final file");
-        let mut final_writer = BufWriter::with_capacity(16 * 1024 * 1024, final_file);
-
-        // Continuously pop the minimum frequency and pull the next item from that specific chunk
-        while let Some(min_item) = min_heap.pop() {
-            let output_tuple = (min_item.freq, min_item.tuple);
-            bincode::serialize_into(&mut final_writer, &output_tuple).unwrap();
-
-            // Read the next item from the file we just pulled from
-            let idx = min_item.chunk_idx;
-            if let Ok((next_freq, next_tuple)) =
-                bincode::deserialize_from::<_, (u64, Vec<i64>)>(&mut readers[idx])
-            {
-                min_heap.push(HeapItem {
-                    freq: next_freq,
-                    tuple: next_tuple,
-                    chunk_idx: idx,
-                });
-            }
-        }
-
-        final_writer.flush().unwrap();
-
-        // Cleanup temporary files
-        for filename in chunk_files {
-            std::fs::remove_file(filename).unwrap();
-        }
-    }
-
-    pub fn precompute_ram_sorted_to_disk(
-        &self,
-        t: usize,
-        output_filepath: &str,
-        secret_map: HashMap<i64, i64>,
-    ) {
-        let lowest_rec = self.lowest_rec.clone();
-        let largest_rec = self.largest_rec.clone();
-        let dist_enum = Distribution::from_str(&self.dist).unwrap_or(Distribution::Uniform);
-
-        let mut vals: Vec<Record> = lowest_rec
-            .iter()
-            .zip(largest_rec.iter())
-            .map(|(&low, &high)| low..=high)
-            .multi_cartesian_product()
-            .collect();
-        vals.sort();
-
-        //TODO: Option for either enc or unenc (probably in flatten_nd)
-        let mut encrypted_tuples: Vec<(u64, Vec<i64>)> = vals
-            .into_iter()
-            .combinations(t)
-            .map(|val_tuple| {
-                let bounding_pair = get_mbq(&val_tuple);
-                let freq =
-                    compute_pair_weight(&bounding_pair, &dist_enum, &lowest_rec, &largest_rec);
-
-                let encrypted_flattened: Vec<i64> = val_tuple
-                    .iter()
-                    .map(|rec| {
-                        let true_flat_id = flatten_nd(rec, &largest_rec, &lowest_rec);
-                        // MASK THE ID HERE
-                        *secret_map
-                            .get(&true_flat_id)
-                            .expect("ID missing from universe")
-                    })
-                    .collect();
-
-                (freq, encrypted_flattened)
-            })
-            .collect();
-
-        encrypted_tuples.sort_unstable_by_key(|k| k.0);
-
-        // 3. Stream to disk sequentially
-        let file = File::create(output_filepath).expect("Failed to create file");
-        let mut writer = BufWriter::with_capacity(8 * 1024 * 1024, file);
-
-        for item in encrypted_tuples {
-            bincode::serialize_into(&mut writer, &item).unwrap();
-        }
-    }
-
+    /// Given A query distribution (DomPair -> frequency mapping) find the frequency of a t-tuple
+    /// of records. Note that this is NOT the frequency of the specific response that is exactly
+    /// that t-tuple. Instead, given t encrypted records, how frequently do we see these across ALL
+    ///
+    /// # Arguments
+    ///
+    /// # Returns
+    ///
+    /// A mapping from a Query (dominating pair) to the frequency we'd expect that Query to be
+    /// served.
+    ///
     pub fn precompute_t_observed(
         &self,
         t: usize,
@@ -345,21 +154,19 @@ impl Selector<'_> {
         freq_to_observed_map
     }
 
-    /// Precomputes and serializes TRUE frequencies for dominant pairs and t-tuples of values.
-    ///
-    /// This function iterates through the domain to calculate how many queries cover specific
-    /// point pairs (dominant pairs) and groups of $t$ points (t-tuples). The results are
-    /// saved as binary files using `bincode` for later use in frequency analysis.
-    ///
-    /// # Arguments
-    /// * `t` - The size of the value tuples to analyze. Should always be 2 * dimension
-    /// * `dim` - The dimensionality of the data.
-    /// * `dist` - The distribution type (e.g., "uniform").
+    /// Precomputes and serializes TRUE frequencies for dominant pairs using only the query
+    /// distribution. This function iterates through the domain to calculate how many queries cover
+    /// specific point pairs (dominant pairs). It doesn't say anything about how many records
+    /// are found/ the frequency of records. This is purely the Query Distribution.
     ///
     /// # Returns
     ///
+    /// A mapping from a Query (dominating pair) to the frequency we'd expect that Query to be
+    /// served.
+    ///
     pub fn get_dominant_pair_to_freq_map(&self) -> Result<HashMap<DomPair, Frequency>, LAMAError> {
         info!("Task 1: Computing dominant pair frequencies...");
+
         let timer = Instant::now();
         let lowest_rec = self.lowest_rec.clone();
         let largest_rec = self.largest_rec.clone();
@@ -573,10 +380,10 @@ impl Selector<'_> {
                     local_map.entry(freq).or_default().push(flattened_tuple);
 
                     // Update progress bar without causing thread lock contention
-                    let current = processed_count.fetch_add(1, AtomicOrdering::Relaxed);
-                    if current % 10_000 == 0 {
-                        pb.set_position(current);
-                    }
+                    // let current = processed_count.fetch_add(1, AtomicOrdering::Relaxed);
+                    // if current % 10_000 == 0 {
+                    //     pb.set_position(current);
+                    // }
 
                     local_map
                 },

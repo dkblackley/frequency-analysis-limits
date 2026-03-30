@@ -1,8 +1,9 @@
 use cp_sat::builder::{CpModelBuilder, IntVar};
 use cp_sat::ffi;
 use cp_sat::proto::CpSolverStatus;
-use cp_sat::proto::{CpModelProto, SatParameters};
+use cp_sat::proto::{CpModelProto, CpSolverSolution, SatParameters};
 use indicatif::{ProgressBar, ProgressStyle};
+use itertools::all;
 use log::{error, info};
 use std::cmp::max;
 use std::collections::HashMap;
@@ -30,7 +31,7 @@ impl Solver {
     ///
     /// # Returns
     ///
-    pub fn solve(&mut self, model: &mut CpModelProto, get_one: bool) -> HashMap<i64, i64> {
+    pub fn solve(&mut self, model: &mut CpModelProto, get_one: bool) -> HashMap<i64, Vec<i64>> {
         let mut params = SatParameters::default();
 
         if get_one {
@@ -52,7 +53,7 @@ impl Solver {
         );
 
         let pb = ProgressBar::new_spinner();
-        pb.enable_steady_tick(std::time::Duration::from_millis(800));
+        pb.enable_steady_tick(std::time::Duration::from_millis(500));
         pb.set_style(
             ProgressStyle::default_spinner()
                 .template("{spinner:.blue} [{elapsed_precise}] Solver thinking (no strict ETA for SAT problems)...")
@@ -61,9 +62,10 @@ impl Solver {
         let response = ffi::solve_with_parameters(&model, &params);
         pb.finish_with_message(format!("Solver finished in {:?}", pb.elapsed()));
         let status = response.status();
-        let mut reconstructed_db = HashMap::new();
+        let mut reconstructed_dbs = HashMap::new();
 
-        let total_solutions = response.additional_solutions.len();
+        let all_solutions: &Vec<CpSolverSolution> = &response.additional_solutions;
+        let total_solutions = all_solutions.len();
         info!("Found {} solutions!", max(total_solutions, 1));
 
         self.solution_stat = status.into();
@@ -71,23 +73,43 @@ impl Solver {
         if status == CpSolverStatus::Optimal || status == CpSolverStatus::Feasible {
             // Read the final chosen values out of the solver response
             for (intvar, ids) in &self.var_index_map {
-                let found_val = intvar.solution_value(&response);
+                let mut found_vals = Vec::new();
+                let orig_sol = intvar.solution_value(&response);
+                let mut orig_appear = false;
+
+                if get_one {
+                    orig_appear = true;
+                    found_vals.push(orig_sol);
+                }
+
+                for i in 0..total_solutions {
+                    let extra_sol =
+                        all_solutions[i].values[self.var_index_map.get(intvar).unwrap().0 as usize];
+                    if orig_sol == extra_sol {
+                        orig_appear = true;
+                    }
+                    found_vals.push(extra_sol);
+                }
+
+                if !orig_appear {
+                    panic!("Original response was not pushed to all solutions!")
+                }
                 // ids is the original 'encrypted' db. For convenience, the key is a true encoded
                 // val of the record.
-                reconstructed_db.insert(ids.1, found_val);
+                reconstructed_dbs.insert(ids.1, found_vals);
             }
         } else {
             let numb: i32 = status.into();
             error!("Solver failed to find a consistent reconstruction. Status: {numb}");
         }
 
-        reconstructed_db
+        reconstructed_dbs
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use cp_sat::builder::CpModelBuilder;
+    use cp_sat::builder::{Constraint, CpModelBuilder};
     use cp_sat::ffi;
     use cp_sat::proto::constraint_proto::Constraint;
     use cp_sat::proto::{ConstraintProto, CpSolverStatus, TableConstraintProto};

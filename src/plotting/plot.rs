@@ -19,12 +19,26 @@ pub struct DbResult {
     pub percent_queries_used: f64,
 }
 
+// #[derive(Debug, Serialize, Deserialize)]
+// pub struct ReconstructionData2d {
+//     #[serde(rename = "true")]
+//     pub true_points: Vec<(f64, f64)>,
+//     #[serde(rename = "reconstructed")]
+//     pub reconstructed_points: Vec<(f64, f64)>,
+// }
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct DataWrapper {
+    #[serde(rename = "mapping")]
+    pub mapping: Vec<ReconstructionData2dPoint>,
+}
+
 #[derive(Debug, Serialize, Deserialize)]
-pub struct ReconstructionData2d {
+pub struct ReconstructionData2dPoint {
     #[serde(rename = "true")]
-    pub true_points: Vec<(f64, f64)>,
+    pub true_points: (f64, f64),
     #[serde(rename = "reconstructed")]
-    pub reconstructed_points: Vec<(f64, f64)>,
+    pub reconstructed_points: (f64, f64),
 }
 
 pub struct Plotter {
@@ -61,9 +75,12 @@ impl Plotter {
             let recon_path = dir.join("reconstruction.json");
             if recon_path.exists() {
                 let content = fs::read_to_string(&recon_path).unwrap();
-                let data: ReconstructionData2d = serde_json::from_str(&content).unwrap();
+                let data: Vec<ReconstructionData2dPoint> = serde_json::from_str(&content).unwrap();
 
-                let mut reconstructed = data.reconstructed_points;
+                let (true_points, mut reconstructed): (Vec<_>, Vec<_>) = data
+                    .into_iter()
+                    .map(|p| (p.true_points, p.reconstructed_points))
+                    .unzip();
 
                 if dir_path.contains("lili") {
                     // 1. Find the current min and max for X and Y
@@ -112,7 +129,7 @@ impl Plotter {
 
                 let mut output_img = dir.join("reconstruction_plot.png");
                 self.plot_spatial_reconstruction(
-                    &data.true_points,
+                    &true_points,
                     &reconstructed,
                     output_img.to_str().unwrap(),
                     show_true_points,
@@ -120,8 +137,8 @@ impl Plotter {
                 .unwrap();
                 output_img = dir.join("original_plot.png");
                 self.plot_spatial_reconstruction(
-                    &data.true_points,
-                    &data.true_points,
+                    &true_points,
+                    &true_points,
                     output_img.to_str().unwrap(),
                     false,
                 )

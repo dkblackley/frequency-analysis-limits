@@ -46,8 +46,8 @@ $SG_RUN cargo clean
 echo "Building project inside container..."
 $SG_RUN cargo rustc --bin frequency_analysis_limits --release -- -Clink-arg=-lprotobuf
 
-NAMES=("paris" "manhattan" "shanghai" "amsterdam" "spitz" "cali")
-# NAMES=("spitz")
+# NAMES=("paris" "manhattan" "shanghai" "amsterdam" "spitz" "cali")
+NAMES=("spitz")
 
 # Use an absolute path to guarantee file resolution inside the container
 DATA_DIR="$SLURM_SUBMIT_DIR/databases"
@@ -64,7 +64,7 @@ for name in "${NAMES[@]}"; do
     $SG_RUN ./target/release/frequency_analysis_limits \
         --dir-path "$DATA_DIR/" \
         --name "$name" \
-        --t 4 \
+        --t 2 \
         --plot
 
     if [ $? -ne 0 ]; then

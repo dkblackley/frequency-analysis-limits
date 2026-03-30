@@ -180,16 +180,18 @@ pub fn lama_attack(db_name: &String, dir_path: &String, t: &u64, save: &bool) {
 
     let mut correct = 0;
     let mut incorrect = 0;
-    let mut correct_sol = HashMap::new();
+    let mut first_resp = HashMap::new();
 
     //Key is actually the true value.
     for (key, val) in responses.clone() {
-        correct_sol.insert(key, key);
-        for v in val {
-            if key == v {
-                correct = correct + 1
+        first_resp.insert(key, val[0]);
+
+        for i in 0..val.len() {
+            if key == val[i] {
+                correct = correct + 1;
+                incorrect = incorrect - (i - 1);
             } else {
-                incorrect = incorrect + 1
+                incorrect = incorrect + 1;
             }
         }
     }
@@ -197,7 +199,7 @@ pub fn lama_attack(db_name: &String, dir_path: &String, t: &u64, save: &bool) {
     debug!("{correct} correct, {incorrect} incorrect");
 
     info!("Saving correct solution to {full_datapath}/reconstruction.json");
-    save_reconstruction_data(&correct_sol, full_datapath.as_str(), &loaded_db);
+    save_reconstruction_data(&first_resp, full_datapath.as_str(), &loaded_db);
 
     let final_res = DbResult {
         name: loaded_db.get_name().parse().unwrap(),

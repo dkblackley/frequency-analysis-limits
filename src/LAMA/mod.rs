@@ -189,14 +189,11 @@ pub fn lama_attack(db_name: &String, dir_path: &String, t: &u64, save: &bool) {
         for i in 0..val.len() {
             if key == val[i] {
                 correct = correct + 1;
-                incorrect = incorrect - (i - 1);
-            } else {
-                incorrect = incorrect + 1;
             }
         }
     }
 
-    debug!("{correct} correct, {incorrect} incorrect");
+    debug!("{correct} correct, {} total", responses.len());
 
     info!("Saving correct solution to {full_datapath}/reconstruction.json");
     save_reconstruction_data(&first_resp, full_datapath.as_str(), &loaded_db);

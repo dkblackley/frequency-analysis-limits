@@ -200,9 +200,13 @@ impl Plotter {
         output_path: &str,
         show_true_points: bool,
     ) -> Result<(), Box<dyn Error>> {
+        // let root = BitMapBackend::new(output_path, (1200, 800)).into_drawing_area();
+        // let background_color = RGBColor(15, 16, 20);
+        // root.fill(&background_color)?;
+
         let root = BitMapBackend::new(output_path, (1200, 800)).into_drawing_area();
-        let background_color = RGBColor(15, 16, 20);
-        root.fill(&background_color)?;
+        let background_color = &TRANSPARENT;
+        root.fill(&background_color)?; // Replaces the dark background
 
         if true_coords.is_empty() && recon_coords.is_empty() {
             return Ok(());

@@ -1,13 +1,14 @@
 use clap::{arg, Parser};
 use frequency_analysis_limits::dataloader::Searchable;
-use frequency_analysis_limits::plotting::plot::{DbResult, Plotter};
+use frequency_analysis_limits::plotting::plot::{DbResult, Plotter, ReconstructionData2dPoint};
 use frequency_analysis_limits::plotting::post::export_to_geojson;
 use frequency_analysis_limits::LAMA::lama_attack;
 use log::info;
 use std::collections::HashMap;
+use std::fmt::format;
 use std::fs;
 use std::fs::File;
-use std::io::BufWriter;
+use std::io::{BufReader, BufWriter};
 
 #[derive(Parser, Debug, Clone)]
 #[command(version, about, long_about = None)]
@@ -52,6 +53,12 @@ fn main() {
     if !args.skip_lama {
         lama_attack(&args.name, &args.dir_path, &args.t, &args.save);
     }
+
+    quick_convert(
+        format!("{0}{1}/reconstruction.json", args.dir_path, args.name).as_str(),
+        format!("{0}{1}/reconstruction_geo.json", args.dir_path, args.name).as_str(),
+    );
+
     if args.plot {
         info!("Plotting data");
         let dir = args.dir_path;
@@ -89,4 +96,13 @@ fn main() {
         //
         // plotter.make_table(&dir_paths);
     }
+}
+
+fn quick_convert(file_path: &str, out_path: &str) {
+    // Pre-allocate the vectors using the length of the hashmap to avoid reallocations
+    let file = File::open(file_path).unwrap();
+    let reader = BufReader::new(file);
+    let data: Vec<ReconstructionData2dPoint> = serde_json::from_reader(reader).unwrap();
+
+    export_to_geojson(data, out_path).unwrap();
 }

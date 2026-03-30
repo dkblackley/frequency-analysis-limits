@@ -13,7 +13,7 @@ use log::{debug, error, info};
 use std::collections::HashMap;
 use std::env::args;
 use std::fs::File;
-use std::io::BufWriter;
+use std::io::{BufReader, BufWriter};
 use std::time::Instant;
 
 mod error;

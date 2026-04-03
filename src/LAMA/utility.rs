@@ -7,6 +7,19 @@ pub fn dominates(u: &[Coord], v: &[Coord]) -> bool {
     u.iter().zip(v.iter()).all(|(u_val, v_val)| u_val >= v_val)
 }
 
+/// Returns true if the 'outer' DomPair spatially encloses the 'inner' DomPair.
+pub fn encloses(outer: &DomPair, inner: &DomPair) -> bool {
+    // 1. Check Lower Bounds: outer.0 <= inner.0
+    // This is equivalent to: dominates(&inner.0, &outer.0)
+    let lower_check = dominates(&inner.0, &outer.0);
+
+    // 2. Check Upper Bounds: outer.1 >= inner.1
+    // This is equivalent to: dominates(&outer.1, &inner.1)
+    let upper_check = dominates(&outer.1, &inner.1);
+
+    lower_check && upper_check
+}
+
 // Helper for L1 distance calculation
 pub fn _l1_distance(p1: &[Coord], p2: &[Coord]) -> u64 {
     p1.iter().zip(p2.iter()).map(|(a, b)| a.abs_diff(*b)).sum()

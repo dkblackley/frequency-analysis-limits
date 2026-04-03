@@ -42,7 +42,7 @@ pub fn flatten_nd(point: &[i64], upper: &[i64], lower: &[i64]) -> i64 {
     index
 }
 
-pub fn unflatten_nd(mut index: i64, upper: &[i64], lower: &[i64]) -> Record {
+pub fn unflatten_nd(mut index: Value, upper: &[Value], lower: &[Value]) -> Record {
     let len = upper.len();
     let mut point = vec![0; len];
 

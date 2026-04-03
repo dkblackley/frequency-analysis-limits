@@ -27,6 +27,8 @@ use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
 
 use std::sync::mpsc::sync_channel;
 
+use crate::dataloader::tester::testDB;
+use rand::RngExt;
 use std::thread;
 use std::time::Instant;
 
@@ -40,8 +42,8 @@ pub struct Selector<'a> {
     pub lowest_rec: Record,
     pub largest_rec: Record,
     pub evc: usize,
-    epsilon: Value,
-    delta: Value,
+    pub(crate) epsilon: f64,
+    pub(crate) delta: f64,
 }
 
 // Struct for the Min-Heap used during the K-Way Merge
@@ -589,7 +591,7 @@ impl Selector<'_> {
         // Constraint 2: Union constraint -> y_i <= x_j for all j in A_i
         for (i, itemset) in itemsets.iter().enumerate() {
             for &j in itemset {
-                model = model.with(y[i] - x[j] << 0.0);
+                model = model.with(y[i] - x[j as usize] << 0.0);
             }
         }
 
@@ -631,46 +633,95 @@ impl Selector<'_> {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
     use crate::LAMA::selector::Selector;
-    use rand::RngExt;
-    use std::collections::HashSet;
+    use crate::LAMA::utility::encloses;
 
     #[test]
-    fn test_vc_bounds_and_empirical_reality() {
-        let num_items = 1000;
-        let confidence = 0.90; // 90% confidence
-        let delta = 1.0 - confidence; // delta = 0.10
-        let target_epsilon = 0.05; // 5% error margin
+    fn test_vc_bounds_and_empirical_reality_testdb() {
+        // 1. Setup a 10x10 test database at 50% density
+        let rows = 50;
+        let cols = 50;
+        let db = testDB::new(rows, cols, 100);
+        let boxed_db: Box<dyn Searchable + Sync> = Box::new(db);
 
-        // 1. Calculate how many queries we theoretically need to be 90% sure
-        // that NO subset deviates by more than 5%.
+        let selector = Selector {
+            dist: "uniform".to_string(),
+            encrypted_db: &boxed_db,
+            dim: 2,
+            lowest_rec: vec![0, 0],
+            largest_rec: vec![(rows - 1) as i64, (cols - 1) as i64],
+            evc: boxed_db.get_universe().len(),
+            epsilon: 0.05,
+            delta: 0.1,
+        };
+
+        // Universe size is the number of actual non-empty records in the DB
+        let universe_size = boxed_db.get_universe().len();
+
+        let target_epsilon = 0.15; // 5% error margin
+        let confidence = 0.70; // 90% confidence
+        let delta = 1.0 - confidence;
+
+        // Calculate theoretical required queries based on the universe size [cite: 145, 147]
         let required_samples =
-            Selector::calculate_required_samples(num_items, target_epsilon, delta);
+            Selector::calculate_required_samples(universe_size, target_epsilon, delta);
 
+        println!("Universe Size: {}", universe_size);
         println!(
-            "For {} items, to guarantee <= {} error with {} confidence:",
-            num_items, target_epsilon, confidence
+            "Theoretical queries required for <= 5% error: {}",
+            required_samples
         );
-        println!("Theoretical queries required: {}", required_samples);
 
-        // Verify the math reverses correctly
-        let calculated_eps = Selector::calculate_epsilon(num_items, required_samples, delta);
-        assert!((calculated_eps - target_epsilon).abs() < 1e-5);
+        let dom_freq_map = selector.get_dominant_pair_to_freq_map().unwrap();
+        let all_queries: Vec<DomPair> = dom_freq_map.keys().cloned().collect();
 
-        // 2. Empirical Simulation
-        // Let's create a single "target itemset" of 3 specific records we care about.
-        let target_itemset: HashSet<usize> = vec![42, 105, 999].into_iter().collect();
+        // Pick a random a response to act as our 'test'
 
-        // Let's assume our actual (hidden) distribution returns this exact subset 15% of the time.
-        let true_probability = 0.15;
+        let mut rng = rand::rng();
+        let target_response_idx = (rng.random::<u64>() % all_queries.len() as u64) as usize;
+        let target_response = boxed_db.do_search(
+            &all_queries[target_response_idx].0,
+            &all_queries[target_response_idx].1,
+        );
 
+        let mut true_tuples = Vec::new();
+
+        for tuple in target_response.iter() {
+            true_tuples.push(unflatten_nd(
+                *tuple,
+                &selector.largest_rec,
+                &selector.lowest_rec,
+            ))
+        }
+
+        // let target_response = all_responses
+        //     .iter()
+        //     .find(|r| !r.is_empty())
+        //     .unwrap()
+        //     .clone();
+
+        let dom_pair = get_mbq(&*true_tuples);
+        assert_eq!(dom_pair, all_queries[target_response_idx]); // This should be obvious. Keeping it as a sanity check
+
+        // Calculate the exact TRUE probability.
+        // Under a uniform distribution, this is the count of queries returning a superset
+        // divided by the total number of possible queries (dominating pairs).
+        let mut true_frequency = dom_freq_map.get(&dom_pair).unwrap();
+        let total_dom_pairs = dom_freq_map.len() as f64;
+        let true_probability: f64 = (true_frequency.clone() as f64) / total_dom_pairs;
+
+        // 3. Empirical Simulation
         let mut rng = rand::rng();
         let mut observed_hits = 0;
 
-        // Simulate drawing the required number of samples
         for _ in 0..required_samples {
-            // Did our query return a superset of the target itemset?
-            if rng.random_bool(true_probability) {
+            // Uniformly sample a query from the map
+            let random_query_idx: usize = (rng.random::<u64>() % all_queries.len() as u64) as usize;
+            let sampled_query = &all_queries[random_query_idx];
+
+            // If the sampled query dominates our target MBQ, it's a hit!
+            if encloses(sampled_query, &dom_pair) {
                 observed_hits += 1;
             }
         }
@@ -678,56 +729,58 @@ mod tests {
         let empirical_probability = observed_hits as f64 / required_samples as f64;
         let actual_error = (true_probability - empirical_probability).abs();
 
+        let empirical_probability = observed_hits as f64 / required_samples as f64;
+        let actual_error = (true_probability - empirical_probability).abs();
+
         println!("True Probability: {:.4}", true_probability);
-        println!(
-            "Empirical Probability from {} samples: {:.4}",
-            required_samples, empirical_probability
-        );
+        println!("Empirical Probability: {:.4}", empirical_probability);
         println!("Actual Empirical Error: {:.6}", actual_error);
-        println!("Theoretical Max Error (Epsilon): {:.6}", target_epsilon);
 
         // The empirical error should be vastly smaller than the worst-case epsilon bound.
         assert!(actual_error <= target_epsilon);
     }
 
     #[test]
-    fn test_sukp_disjoint_itemsets() {
-        // 10 items, each item is its own itemset
-        let num_items = 10;
-        let itemsets: Vec<Vec<usize>> = (0..num_items).map(|i| vec![i]).collect();
+    fn test_sukp_bound_on_testdb() {
+        // Create a 2x2 grid at 100% density.
+        // We know exactly how many geometric subsets this creates.
+        let rows = 2;
+        let cols = 2;
+        let db = testDB::new(rows, cols, 100);
+        let boxed_db: Box<dyn Searchable + Sync> = Box::new(db);
 
-        // Capacity 5: We should only be able to pick 5 itemsets
-        let capacity = 5;
-        let q = Selector::get_vc_sukp_bound(capacity, &itemsets, num_items);
+        let selector = Selector {
+            dist: "uniform".to_string(),
+            encrypted_db: &boxed_db,
+            dim: 2,
+            lowest_rec: vec![0, 0],
+            largest_rec: vec![(rows - 1) as i64, (cols - 1) as i64],
+            evc: 0,
+            epsilon: 0.0,
+            delta: 0.0,
+        };
 
-        // Profit should be exactly 5.0
-        assert!((q - 5.0).abs() < 1e-5);
+        // For a dense 2x2 grid:
+        // - Universe size (capacity) = 4 items.
+        // - Total possible bounding boxes (responses) = 9
+        //   (Four 1x1s, two 1x2s, two 2x1s, one 2x2).
+        // Since every response contains only a subset of the 4 universe items,
+        // the Set-Union Knapsack Problem can pick ALL 9 itemsets without
+        // exceeding the weight capacity of 4 items.
 
-        // VC-bound b = floor(log2(5)) + 1 = 2 + 1 = 3
+        let q = selector.get_vc_sukp_bound();
+
+        // The maximum profit 'q' should be exactly 9.0.
+        assert!(
+            (q - 9.0).abs() < 1e-5,
+            "Expected SUKP profit of 9.0, got {}",
+            q
+        );
+
+        // VC-bound b = floor(log2(q)) + 1
+        // floor(log2(9)) = 3.
+        // b = 3 + 1 = 4.
         let b = q.log2().floor() + 1.0;
-        assert_eq!(b, 3.0);
-    }
-    #[test]
-    fn test_sukp_power_set() {
-        let num_items = 3;
-        // All non-empty subsets of {0, 1, 2}
-        let itemsets = vec![
-            vec![0],
-            vec![1],
-            vec![2], // Size 1
-            vec![0, 1],
-            vec![0, 2],
-            vec![1, 2],    // Size 2
-            vec![0, 1, 2], // Size 3
-        ];
-
-        // Capacity 3: We can include everything
-        let q = get_vc_sukp_bound(3, &itemsets, num_items);
-        assert!((q - 7.0).abs() < 1e-5);
-
-        // Capacity 2: We can pick {0}, {1}, {0,1} but not anything containing {2}
-        let q_limited = get_vc_sukp_bound(2, &itemsets, num_items);
-        // Best is to pick all subsets of any 2 items: {0}, {1}, {0,1} -> Profit 3
-        assert!((q_limited - 3.0).abs() < 1e-5);
+        assert_eq!(b, 4.0);
     }
 }

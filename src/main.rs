@@ -65,7 +65,7 @@ fn main() {
 
         let reader = BufReader::new(file);
         let data: Vec<ReconstructionData2dPoint> = serde_json::from_reader(reader).unwrap();
-        let out = procrustes_align(&*data);
+        let out = procrustes_align(&*data, true, true, false);
         let new_vec = out.0;
         let mse = out.1;
 

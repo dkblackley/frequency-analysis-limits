@@ -22,11 +22,19 @@ pub mod solver;
 pub mod translator;
 pub mod utility;
 
-pub fn lama_attack(db_name: &String, dir_path: &String, t: &u64, save: &bool) {
+pub fn lama_attack(
+    db_name: &String,
+    dir_path: &String,
+    t: &u64,
+    save: &bool,
+    eps: &f64,
+    delt: &f64,
+) {
     let mut loaded_db: Box<dyn Searchable + Sync>;
     let full_datapath = format!("{0}{1}", dir_path, db_name);
 
     info!("Starting LAMA attack using {} dataset", db_name);
+    let loaded_locs = TwoDMap::load_array_locations_from_file(&full_datapath).unwrap();
 
     if db_name.as_str() == "paris"
         || db_name.as_str() == "manhattan"
@@ -35,7 +43,7 @@ pub fn lama_attack(db_name: &String, dir_path: &String, t: &u64, save: &bool) {
     {
         loaded_db = Box::new(
             TwoDMap::new(
-                &format!("{0}/{1}.json", full_datapath, db_name),
+                loaded_locs,
                 db_name.as_str(),
                 100.0,
                 // Some((250, 250)),
@@ -46,19 +54,11 @@ pub fn lama_attack(db_name: &String, dir_path: &String, t: &u64, save: &bool) {
     } else if db_name.as_str() == "grid" {
         loaded_db = Box::new(testDB::new(10, 10, 80));
     } else if db_name.as_str() == "spitz" {
-        loaded_db = Box::new(
-            TwoDMap::new(
-                &format!("{0}/{1}.json", full_datapath, db_name),
-                db_name.as_str(),
-                100.0,
-                None,
-            )
-            .unwrap(),
-        );
+        loaded_db = Box::new(TwoDMap::new(loaded_locs, db_name.as_str(), 100.0, None).unwrap());
     } else if db_name.as_str() == "cali" {
         loaded_db = Box::new(
             TwoDMap::new(
-                &format!("{0}/{1}.json", full_datapath, db_name),
+                loaded_locs,
                 db_name.as_str(),
                 10.0,
                 // Some((250, 250)),
@@ -97,6 +97,9 @@ pub fn lama_attack(db_name: &String, dir_path: &String, t: &u64, save: &bool) {
         dim,
         lowest_rec: low_pair.clone(),
         largest_rec: high_pair.clone(),
+        evc: loaded_db.get_universe().len(),
+        epsilon: eps.clone(),
+        delta: delt.clone(),
     };
 
     info!("Selector computing values");

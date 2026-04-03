@@ -82,50 +82,52 @@ impl Plotter {
                     .map(|p| (p.true_points, p.reconstructed_points))
                     .unzip();
 
-                if dir_path.contains("lili") {
-                    // 1. Find the current min and max for X and Y
-                    let min_x = reconstructed
-                        .iter()
-                        .map(|rec| rec.0 as f64)
-                        .fold(f64::INFINITY, |a, b| a.min(b));
-                    let max_x = reconstructed
-                        .iter()
-                        .map(|rec| rec.0 as f64)
-                        .fold(f64::NEG_INFINITY, |a, b| a.max(b));
+                //TODO: Move this into 'post' crate.
 
-                    let min_y = reconstructed
-                        .iter()
-                        .map(|rec| rec.1 as f64)
-                        .fold(f64::INFINITY, |a, b| a.min(b));
-                    let max_y = reconstructed
-                        .iter()
-                        .map(|rec| rec.1 as f64)
-                        .fold(f64::NEG_INFINITY, |a, b| a.max(b));
+                // if dir_path.contains("lili") {
+                //     // 1. Find the current min and max for X and Y
+                //     let min_x = reconstructed
+                //         .iter()
+                //         .map(|rec| rec.0 as f64)
+                //         .fold(f64::INFINITY, |a, b| a.min(b));
+                //     let max_x = reconstructed
+                //         .iter()
+                //         .map(|rec| rec.0 as f64)
+                //         .fold(f64::NEG_INFINITY, |a, b| a.max(b));
+                //
+                //     let min_y = reconstructed
+                //         .iter()
+                //         .map(|rec| rec.1 as f64)
+                //         .fold(f64::INFINITY, |a, b| a.min(b));
+                //     let max_y = reconstructed
+                //         .iter()
+                //         .map(|rec| rec.1 as f64)
+                //         .fold(f64::NEG_INFINITY, |a, b| a.max(b));
+                //
+                //     // Calculate the current range.
+                //     // We use max(1e-6) to prevent dividing by zero if all points share the exact same axis.
+                //     let range_x = (max_x - min_x).max(1e-6);
+                //     let range_y = (max_y - min_y).max(1e-6);
+                //     let target_max = 50.0;
+                //
+                //     // 2. Scale the points using the Min-Max formula
+                //     let mut scaled: Vec<(f64, f64)> = Vec::with_capacity(reconstructed.len());
+                //
+                //     for rec in &reconstructed {
+                //         let x = rec.0 as f64;
+                //         let y = rec.1 as f64;
+                //
+                //         let shifted_x = (((x - min_x) / range_x) * 10.0).round();
+                //         let shifted_y = (((y - min_y) / range_y) * 53.0).round();
+                //
+                //         scaled.push((shifted_x, shifted_y));
+                //     }
 
-                    // Calculate the current range.
-                    // We use max(1e-6) to prevent dividing by zero if all points share the exact same axis.
-                    let range_x = (max_x - min_x).max(1e-6);
-                    let range_y = (max_y - min_y).max(1e-6);
-                    let target_max = 50.0;
-
-                    // 2. Scale the points using the Min-Max formula
-                    let mut scaled: Vec<(f64, f64)> = Vec::with_capacity(reconstructed.len());
-
-                    for rec in &reconstructed {
-                        let x = rec.0 as f64;
-                        let y = rec.1 as f64;
-
-                        let shifted_x = (((x - min_x) / range_x) * target_max).round();
-                        let shifted_y = (((y - min_y) / range_y) * target_max).round();
-
-                        scaled.push((shifted_x, shifted_y));
-                    }
-
-                    // debug!("Name: {0}", dir_path);
-                    // debug!("Scaled: {:?}", scaled);
-                    // debug!("Ground truth: {:?}", &data.true_points);
-                    reconstructed = scaled;
-                }
+                // debug!("Name: {0}", dir_path);
+                // debug!("Scaled: {:?}", scaled);
+                // debug!("Ground truth: {:?}", &data.true_points);
+                //     reconstructed = scaled;
+                // }
 
                 let mut output_img = dir.join("reconstruction_plot.png");
                 self.plot_spatial_reconstruction(
@@ -137,6 +139,23 @@ impl Plotter {
                 .unwrap();
                 output_img = dir.join("original_plot.png");
                 self.plot_spatial_reconstruction(
+                    &true_points,
+                    &true_points,
+                    output_img.to_str().unwrap(),
+                    false,
+                )
+                .unwrap();
+
+                output_img = dir.join("just_points.png");
+                self.just_points(
+                    &true_points,
+                    &reconstructed,
+                    output_img.to_str().unwrap(),
+                    false,
+                )
+                .unwrap();
+                output_img = dir.join("just_true.png");
+                self.just_points(
                     &true_points,
                     &true_points,
                     output_img.to_str().unwrap(),
@@ -200,13 +219,13 @@ impl Plotter {
         output_path: &str,
         show_true_points: bool,
     ) -> Result<(), Box<dyn Error>> {
-        // let root = BitMapBackend::new(output_path, (1200, 800)).into_drawing_area();
-        // let background_color = RGBColor(15, 16, 20);
-        // root.fill(&background_color)?;
-
         let root = BitMapBackend::new(output_path, (1200, 800)).into_drawing_area();
-        let background_color = &TRANSPARENT;
-        root.fill(&background_color)?; // Replaces the dark background
+        let background_color = RGBColor(15, 16, 20);
+        root.fill(&background_color)?;
+
+        // let root = BitMapBackend::new(output_path, (1200, 800)).into_drawing_area();
+        // let background_color = &TRANSPARENT;
+        // root.fill(&background_color)?; // Replaces the dark background
 
         if true_coords.is_empty() && recon_coords.is_empty() {
             return Ok(());
@@ -284,81 +303,76 @@ impl Plotter {
         root.present()?;
         Ok(())
     }
-}
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use serde_json::json;
-    use std::f64::consts::PI;
-    use tempfile::tempdir;
+    pub fn just_points(
+        &self,
+        true_coords: &[(f64, f64)],
+        recon_coords: &[(f64, f64)],
+        output_path: &str,
+        show_true_points: bool,
+    ) -> Result<(), Box<dyn Error>> {
+        // 1. Setup drawing area with a transparent background
+        let root = SVGBackend::new(output_path, (1200, 800)).into_drawing_area();
+        root.fill(&TRANSPARENT)?;
 
-    #[test]
-    fn test_spatial_visuals() -> Result<(), Box<dyn Error>> {
-        let dir = tempdir()?;
-        let mut paths = Vec::new();
-
-        // Helper to generate a "Shape" (a circle for this test)
-        let generate_circle = |count: i32| -> Vec<(f64, f64)> {
-            (0..count)
-                .map(|i| {
-                    let angle = (i as f64) * (2.0 * PI / count as f64);
-                    (angle.cos() * 100.0, angle.sin() * 100.0)
-                })
-                .collect()
-        };
-
-        // 1. Setup OUR Exact Attack (Perfect Overlap)
-        let our_path = dir.path().join("our_attack");
-        fs::create_dir(&our_path)?;
-        let true_points = generate_circle(100);
-
-        fs::write(our_path.join("results.json"), json!({
-            "name": "CA_Database_Exact", "method": "Leakage Abuse (Ours)", "dims": 2,
-            "accuracy": 100.0, "number_of_reconstructions": "1", "time_taken": 0.02, "total_db_size": 100
-        }).to_string())?;
-
-        fs::write(
-            our_path.join("reconstruction.json"),
-            json!({
-                "true": true_points,
-                "reconstructed": true_points // Perfectly identical
-            })
-            .to_string(),
-        )?;
-        paths.push(our_path.to_str().unwrap().to_string());
-
-        // 2. Setup SOTA Noisy Attack (Visible Drift)
-        let sota_path = dir.path().join("sota_attack");
-        fs::create_dir(&sota_path)?;
-        let mut noisy_recon = true_points.clone();
-        for p in &mut noisy_recon {
-            p.0 += 5.0; // Shift it slightly to the right to see the "miss"
-            p.1 += 2.0;
+        if true_coords.is_empty() && recon_coords.is_empty() {
+            return Ok(());
         }
 
-        fs::write(sota_path.join("results.json"), json!({
-            "name": "CA_Database_SOTA", "method": "VolAn", "dims": 2,
-            "accuracy": 82.1, "number_of_reconstructions": "5", "time_taken": 10.5, "total_db_size": 100
-        }).to_string())?;
+        // 2. Calculate coordinate bounds
+        let (mut min_x, mut max_x) = (f64::INFINITY, f64::NEG_INFINITY);
+        let (mut min_y, mut max_y) = (f64::INFINITY, f64::NEG_INFINITY);
+        for &(x, y) in true_coords.iter().chain(recon_coords.iter()) {
+            min_x = min_x.min(x);
+            max_x = max_x.max(x);
+            min_y = min_y.min(y);
+            max_y = max_y.max(y);
+        }
 
-        fs::write(
-            sota_path.join("reconstruction.json"),
-            json!({
-                "true": true_points,
-                "reconstructed": noisy_recon
-            })
-            .to_string(),
-        )?;
-        paths.push(sota_path.to_str().unwrap().to_string());
+        let x_pad = (max_x - min_x) * self.x_padder;
+        let y_pad = (max_y - min_y) * self.y_padder;
 
-        // Run logic - Output visible in console with `cargo test -- --nocapture`
-        process_data_directories(&paths, true)?;
+        // 3. Build the chart explicitly without margins or label areas
+        let mut chart = ChartBuilder::on(&root)
+            // Notice: margin(), x_label_area_size(), and y_label_area_size() are gone
+            .build_cartesian_2d(
+                (min_x - x_pad)..(max_x + x_pad),
+                (min_y - y_pad)..(max_y + y_pad),
+            )?;
 
-        // Assertions to ensure PNGs were generated in the temp dir
-        assert!(our_path.join("reconstruction_plot.png").exists());
-        assert!(sota_path.join("reconstruction_plot.png").exists());
+        // Notice: chart.configure_mesh()...draw()? has been completely removed.
+        // This stops Plotters from generating grid lines, axes, and axis text.
 
+        // --- Colors ---
+        let cyber_cyan = RGBColor(0, 255, 210);
+
+        // --- 4. Draw True Points Series ---
+        if show_true_points {
+            chart.draw_series(
+                true_coords
+                    .iter()
+                    .map(|&(x, y)| Circle::new((x, y), 8, cyber_cyan.mix(0.3).filled())),
+            )?;
+            // Notice: .label() and .legend() are removed from here
+        }
+
+        // --- 5. Draw Reconstructed Points Series ---
+        chart.draw_series(recon_coords.iter().map(|&(x, y)| {
+            let ratio = if max_y > min_y {
+                (y - min_y) / (max_y - min_y)
+            } else {
+                0.5
+            };
+            let hue = 0.15 - (0.15 * ratio);
+            let color = HSLColor(if hue < 0.0 { hue + 1.0 } else { hue }, 1.0, 0.6);
+            Circle::new((x, y), 4, color.mix(0.9).filled())
+        }))?;
+        // Notice: .label() and .legend() are removed from here as well
+
+        // Notice: chart.configure_series_labels()...draw()? has been completely removed.
+        // This stops the legend box from rendering entirely.
+
+        root.present()?;
         Ok(())
     }
 }

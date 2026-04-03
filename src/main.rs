@@ -1,14 +1,14 @@
 use clap::{arg, Parser};
 use frequency_analysis_limits::dataloader::Searchable;
 use frequency_analysis_limits::plotting::plot::{DbResult, Plotter, ReconstructionData2dPoint};
-use frequency_analysis_limits::plotting::post::export_to_geojson;
+use frequency_analysis_limits::plotting::post::{export_to_geojson, procrustes_align};
 use frequency_analysis_limits::LAMA::lama_attack;
 use log::info;
 use std::collections::HashMap;
 use std::fmt::format;
 use std::fs;
 use std::fs::File;
-use std::io::{BufReader, BufWriter};
+use std::io::{BufReader, BufWriter, Write};
 
 #[derive(Parser, Debug, Clone)]
 #[command(version, about, long_about = None)]
@@ -33,12 +33,16 @@ pub struct Args {
     name: String,
 
     // The identifier for the specific function to load the file
-    #[arg(short, long)]
+    #[arg(long)]
     t: u64,
 
     /// Make plots and save to disk
     #[arg(short, long)]
     plot: bool,
+
+    /// If true, do 'post-processing' - Calculate the best possible scale/etc. for MSE minimization
+    #[arg(long)]
+    post: bool,
 }
 
 fn main() {
@@ -54,10 +58,34 @@ fn main() {
         lama_attack(&args.name, &args.dir_path, &args.t, &args.save);
     }
 
-    quick_convert(
-        format!("{0}{1}/reconstruction.json", args.dir_path, args.name).as_str(),
-        format!("{0}{1}/reconstruction_geo.json", args.dir_path, args.name).as_str(),
-    );
+    if args.post {
+        let file =
+            File::open(format!("{0}{1}/reconstruction.json", args.dir_path, args.name).as_str())
+                .unwrap();
+
+        let reader = BufReader::new(file);
+        let data: Vec<ReconstructionData2dPoint> = serde_json::from_reader(reader).unwrap();
+        let out = procrustes_align(&*data);
+        let new_vec = out.0;
+        let mse = out.1;
+
+        info!("MSE of new plot: {mse}");
+
+        let mut output_file =
+            File::create(format!("{0}{1}/reconstruction.json", args.dir_path, args.name).as_str())
+                .unwrap();
+        let procrus = serde_json::to_string_pretty(&new_vec).unwrap();
+        output_file.write_all(procrus.as_bytes()).unwrap();
+
+        quick_convert(
+            format!("{0}{1}/reconstruction.json", args.dir_path, args.name).as_str(),
+            format!(
+                "{0}{1}/reconstruction_{2}.geojson",
+                args.dir_path, args.name, args.name
+            )
+            .as_str(),
+        )
+    }
 
     if args.plot {
         info!("Plotting data");

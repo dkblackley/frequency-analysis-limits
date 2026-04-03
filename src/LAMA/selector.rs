@@ -5,6 +5,9 @@ use crate::LAMA::utility::{
     Distribution,
 };
 use crate::{Coord, DomPair, Frequency, Record, Value};
+use good_lp::{
+    default_solver, variable, Constraint, Expression, ProblemVariables, Solution, SolverModel,
+};
 use indicatif::{ProgressBar, ProgressIterator, ProgressStyle};
 
 use itertools::Itertools;
@@ -28,7 +31,7 @@ use std::thread;
 use std::time::Instant;
 
 /// Selector: Choosing Record-Retrieval Events.
-/// This component determines which record-retrieval set expressions are used.
+/// This component determines which record-retriewval set expressions are used.
 /// Specifically, it generates the frequencies of dominating pairs, as it corresponds to some dist
 pub struct Selector<'a> {
     pub dist: String,
@@ -36,6 +39,9 @@ pub struct Selector<'a> {
     pub dim: Value,
     pub lowest_rec: Record,
     pub largest_rec: Record,
+    pub evc: usize,
+    epsilon: Value,
+    delta: Value,
 }
 
 // Struct for the Min-Heap used during the K-Way Merge
@@ -402,7 +408,326 @@ impl Selector<'_> {
 
         theoretical_dict
     }
+
+    pub fn get_dom_pairs(&self) -> Vec<DomPair> {
+        info!("Finding all possible responses...");
+
+        let lowest_rec = self.lowest_rec.clone();
+        let largest_rec = self.largest_rec.clone();
+
+        // Product of (max - min + 1) for each dimension
+        let space_size: f64 = lowest_rec
+            .iter()
+            .zip(largest_rec.iter())
+            .map(|(&low, &high)| (high - low + 1) as f64)
+            .product();
+
+        let total_pairs = space_size.powi(2);
+        let total_dom_pairs = (total_pairs / 2_f64.powi((self.dim - 1) as i32)) as u64;
+
+        let domain_iter = lowest_rec
+            .iter()
+            .zip(largest_rec.iter())
+            .map(|(&low, &high)| low..=high)
+            .multi_cartesian_product();
+
+        let pb = ProgressBar::new(total_dom_pairs / 2);
+        pb.set_style(
+            ProgressStyle::default_bar()
+                .template("{spinner:.green} [{elapsed_precise}] [{wide_bar:.cyan/blue}] {pos}/{len} ({eta})").unwrap()
+                .progress_chars("#>-"),
+        );
+        let processed_count = AtomicU64::new(0);
+
+        let largest_rec_ref = &largest_rec;
+        let processed_count_ref = &processed_count;
+
+        let pair_vec: Vec<DomPair> = domain_iter
+            .par_bridge() // Parallelize the outer loop
+            .flat_map(|v| {
+                // Build the iterator lazily without allocating a Vec
+                let dom_iter = v
+                    .iter()
+                    .zip(largest_rec_ref.iter())
+                    .map(|(&v_val, &max_val)| v_val..=max_val)
+                    .multi_cartesian_product();
+                let pb_inner = pb.clone();
+
+                // Bridge the inner iterator to run concurrently as well
+                dom_iter.par_bridge().map({
+                    // Clone `v` once per outer iteration so the inner closure can own its own copy
+                    let v_clone = v.clone();
+                    move |dv| {
+                        let count = processed_count_ref.fetch_add(1, AtomicOrdering::Relaxed);
+                        if count % 100_000 == 0 {
+                            pb_inner.set_position(count);
+                        }
+                        (v_clone.clone(), dv)
+                    }
+                })
+            })
+            .collect();
+
+        pb.finish_with_message("Done computing dominant pair frequencies");
+        pair_vec
+    }
+
+    // TODO: Sample instead.
+
+    pub fn get_all_possible_responses(&self) -> Vec<Vec<Value>> {
+        info!("Finding all possible responses...");
+
+        let timer = Instant::now();
+        let lowest_rec = self.lowest_rec.clone();
+        let largest_rec = self.largest_rec.clone();
+        let dist = self.dist.clone();
+
+        let dom_pairs = self.get_dom_pairs();
+
+        let pb = ProgressBar::new(dom_pairs.len() as u64);
+        pb.set_style(
+            ProgressStyle::default_bar()
+                .template("{spinner:.green} [{elapsed_precise}] [{wide_bar:.cyan/blue}] {pos}/{len} ({eta})").unwrap()
+                .progress_chars("#>-"),
+        );
+        let processed_count = AtomicU64::new(0);
+
+        let processed_count_ref = &processed_count;
+
+        let responses: Vec<Vec<i64>> = dom_pairs
+            .par_iter()
+            .map(|pair| {
+                let resp = self.encrypted_db.do_search(&pair.0, &pair.1);
+
+                let count = processed_count.fetch_add(1, AtomicOrdering::Relaxed);
+                if count % 100_000 == 0 {
+                    pb.set_position(count);
+                }
+                resp
+            })
+            .collect();
+
+        pb.finish_with_message("Getting all possible responses");
+
+        info!("Finished getting all responses in {:?}", timer.elapsed());
+        responses
+    }
+
+    /// Evaluates the SUKP to find the bounding profit `q` for empirical VC-dimension.
+    /// `capacity`: The maximum transaction length (l)
+    /// `itemsets`: A slice of vectors, where each vector contains the indices of items in that set.
+    /// `num_items`: The total number of unique items in the universe |U|.
+    pub fn get_vc_sukp_bound(&self) -> f64 {
+        let responses = self.get_all_possible_responses();
+        // The size of the largest response
+        let largest_resp = self
+            .encrypted_db
+            .do_search(
+                &self.encrypted_db.get_dom_pair().0,
+                &self.encrypted_db.get_dom_pair().1,
+            )
+            .len();
+        let universe_size: usize = largest_resp;
+        let capacity = largest_resp;
+
+        // 1. Calculate Upper Bound via LP Relaxation
+        let q_upper = Self::solve_sukp_internal(capacity, &responses, universe_size, false);
+
+        // Simple heuristic for lower bound (e.g., just count itemsets smaller than capacity)
+        // In a real implementation, you might want a slightly smarter greedy heuristic here.
+        let q_lower = responses.iter().filter(|s| s.len() <= capacity).count() as f64;
+
+        // The Power of 2 check
+        let b_upper = q_upper.log2().floor();
+        let b_lower = q_lower.log2().floor();
+
+        if b_upper == b_lower {
+            // We proved no power of 2 exists between the bounds.
+            return q_upper;
+        }
+
+        // 2. Fallback to exact MILP if the bounds straddle a power of 2
+        Self::solve_sukp_internal(capacity, &responses, universe_size, true)
+    }
+
+    fn solve_sukp_internal(
+        capacity: usize,
+        itemsets: &[Vec<Value>],
+        num_items: usize,
+        is_integer: bool,
+    ) -> f64 {
+        let mut vars = ProblemVariables::new();
+
+        // x_j: 1 if item j is included in the knapsack capacity
+        let mut x = Vec::with_capacity(num_items);
+        for _ in 0..num_items {
+            let mut var = variable().min(0.0).max(1.0);
+            if is_integer {
+                var = var.integer();
+            }
+            x.push(vars.add(var));
+        }
+
+        // y_i: 1 if itemset i is fully included
+        let mut y = Vec::with_capacity(itemsets.len());
+        for _ in 0..itemsets.len() {
+            let mut var = variable().min(0.0).max(1.0);
+            if is_integer {
+                var = var.integer();
+            }
+            y.push(vars.add(var));
+        }
+
+        // Objective: Maximize sum(y_i)
+        let objective: Expression = y.iter().sum();
+        let mut model = vars.maximise(objective).using(default_solver);
+
+        // Constraint 1: Capacity limit -> sum(x_j) <= l
+        let weight_expr: Expression = x.iter().sum();
+        model = model.with(weight_expr << capacity as f64);
+
+        // Constraint 2: Union constraint -> y_i <= x_j for all j in A_i
+        for (i, itemset) in itemsets.iter().enumerate() {
+            for &j in itemset {
+                model = model.with(y[i] - x[j] << 0.0);
+            }
+        }
+
+        let solution = model.solve().unwrap();
+        solution.eval(y.iter().sum::<Expression>())
+    }
+
+    /// Calculates the guaranteed error bound (epsilon) for a given sample size.
+    ///
+    /// Ref: "Finding the True Frequent Itemsets" (Riondato & Vandin, 2014)
+    pub fn calculate_epsilon(num_items: usize, num_samples: usize, delta: f64) -> f64 {
+        // Corollary 2: The absolute worst-case VC-dimension for the power set of items.
+        // VC(R(2^I)) <= |I| - 1
+        let d = (num_items - 1) as f64;
+
+        let l = num_samples as f64;
+
+        // Theorem 1[cite: 147, 148]: Universal constant c is estimated to be <= 0.5
+        let c = 0.5;
+
+        // Equation 1[cite: 145]: epsilon = sqrt( (c / l) * (d + ln(1 / delta)) )
+        // Note: We use natural log (.ln()) as is standard for Chernoff/VC bounds.
+        let epsilon = ((c / l) * (d + (1.0 / delta).ln())).sqrt();
+
+        epsilon
+    }
+
+    /// Calculates the number of samples required to hit a target epsilon and delta.
+    pub fn calculate_required_samples(num_items: usize, target_epsilon: f64, delta: f64) -> usize {
+        let d = (num_items - 1) as f64;
+        let c = 0.5;
+
+        // Algebraic rearrangement of Equation 1 [cite: 145] to solve for l
+        let l = (c / target_epsilon.powi(2)) * (d + (1.0 / delta).ln());
+
+        l.ceil() as usize
+    }
 }
 
 #[cfg(test)]
-mod tests {}
+mod tests {
+    use crate::LAMA::selector::Selector;
+    use rand::RngExt;
+    use std::collections::HashSet;
+
+    #[test]
+    fn test_vc_bounds_and_empirical_reality() {
+        let num_items = 1000;
+        let confidence = 0.90; // 90% confidence
+        let delta = 1.0 - confidence; // delta = 0.10
+        let target_epsilon = 0.05; // 5% error margin
+
+        // 1. Calculate how many queries we theoretically need to be 90% sure
+        // that NO subset deviates by more than 5%.
+        let required_samples =
+            Selector::calculate_required_samples(num_items, target_epsilon, delta);
+
+        println!(
+            "For {} items, to guarantee <= {} error with {} confidence:",
+            num_items, target_epsilon, confidence
+        );
+        println!("Theoretical queries required: {}", required_samples);
+
+        // Verify the math reverses correctly
+        let calculated_eps = Selector::calculate_epsilon(num_items, required_samples, delta);
+        assert!((calculated_eps - target_epsilon).abs() < 1e-5);
+
+        // 2. Empirical Simulation
+        // Let's create a single "target itemset" of 3 specific records we care about.
+        let target_itemset: HashSet<usize> = vec![42, 105, 999].into_iter().collect();
+
+        // Let's assume our actual (hidden) distribution returns this exact subset 15% of the time.
+        let true_probability = 0.15;
+
+        let mut rng = rand::rng();
+        let mut observed_hits = 0;
+
+        // Simulate drawing the required number of samples
+        for _ in 0..required_samples {
+            // Did our query return a superset of the target itemset?
+            if rng.random_bool(true_probability) {
+                observed_hits += 1;
+            }
+        }
+
+        let empirical_probability = observed_hits as f64 / required_samples as f64;
+        let actual_error = (true_probability - empirical_probability).abs();
+
+        println!("True Probability: {:.4}", true_probability);
+        println!(
+            "Empirical Probability from {} samples: {:.4}",
+            required_samples, empirical_probability
+        );
+        println!("Actual Empirical Error: {:.6}", actual_error);
+        println!("Theoretical Max Error (Epsilon): {:.6}", target_epsilon);
+
+        // The empirical error should be vastly smaller than the worst-case epsilon bound.
+        assert!(actual_error <= target_epsilon);
+    }
+
+    #[test]
+    fn test_sukp_disjoint_itemsets() {
+        // 10 items, each item is its own itemset
+        let num_items = 10;
+        let itemsets: Vec<Vec<usize>> = (0..num_items).map(|i| vec![i]).collect();
+
+        // Capacity 5: We should only be able to pick 5 itemsets
+        let capacity = 5;
+        let q = Selector::get_vc_sukp_bound(capacity, &itemsets, num_items);
+
+        // Profit should be exactly 5.0
+        assert!((q - 5.0).abs() < 1e-5);
+
+        // VC-bound b = floor(log2(5)) + 1 = 2 + 1 = 3
+        let b = q.log2().floor() + 1.0;
+        assert_eq!(b, 3.0);
+    }
+    #[test]
+    fn test_sukp_power_set() {
+        let num_items = 3;
+        // All non-empty subsets of {0, 1, 2}
+        let itemsets = vec![
+            vec![0],
+            vec![1],
+            vec![2], // Size 1
+            vec![0, 1],
+            vec![0, 2],
+            vec![1, 2],    // Size 2
+            vec![0, 1, 2], // Size 3
+        ];
+
+        // Capacity 3: We can include everything
+        let q = get_vc_sukp_bound(3, &itemsets, num_items);
+        assert!((q - 7.0).abs() < 1e-5);
+
+        // Capacity 2: We can pick {0}, {1}, {0,1} but not anything containing {2}
+        let q_limited = get_vc_sukp_bound(2, &itemsets, num_items);
+        // Best is to pick all subsets of any 2 items: {0}, {1}, {0,1} -> Profit 3
+        assert!((q_limited - 3.0).abs() < 1e-5);
+    }
+}

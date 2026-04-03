@@ -33,16 +33,45 @@ impl TwoDMap {
         Ok(locations)
     }
 
+    /// NEW: Loads locations from a JSON file formatted as an array of arrays: [[lat, long], ...]
+    pub fn load_array_locations_from_file(filepath: &str) -> Result<Vec<Location>, std::io::Error> {
+        let file = File::open(filepath)?;
+        let reader = BufReader::new(file);
+
+        // Deserialize into a temporary Vec of [f64; 2] arrays
+        let raw_data: Vec<[f64; 2]> = serde_json::from_reader(reader)?;
+
+        // Map the arrays into the Location struct (index 0 is lat, index 1 is long)
+        let locations = raw_data
+            .into_iter()
+            .map(|arr| Location {
+                latitude: arr[0],
+                longitude: arr[1],
+            })
+            .collect();
+
+        Ok(locations)
+    }
+
+    /// NEW: Loads locations from a statically embedded Rust array: [[Value; 2]; N]
+    pub fn load_from_embedded(data: &[[Value; 2]]) -> Vec<Location> {
+        data.iter()
+            .map(|arr| Location {
+                latitude: arr[0] as f64,
+                longitude: arr[1] as f64,
+            })
+            .collect()
+    }
+
     /// `scale_factor` preserves decimal places before integer cast (e.g., 100.0).
     /// `target_grid` allows squishing the map into a bounded space, e.g., Some((50, 50)).
     pub fn new(
-        file_path: &str,
+        locations: Vec<Location>,
         name: &str,
         scale_factor: f64,
         target_grid: Option<(Value, Value)>,
     ) -> Result<Self, std::io::Error> {
-        info!("About to load {name} from {file_path}");
-        let locations = Self::load_locations_from_file(file_path)?;
+        info!("Loaded DB {name}");
 
         // 1. Scale floats and cast to Value (i64)
         let scaled_points: Vec<[Value; 2]> = locations
@@ -211,7 +240,13 @@ impl Searchable for TwoDMap {
 fn test_search_covers_entire_universe() {
     // Initialize the map
     let path = "/home/yelnat/Nextcloud/10TB-STHDD/Sync-Folder-STHDD/programmin/frequency_analysis_limits/databases/cali_50/cali_50.json";
-    let map = TwoDMap::new(path, "temp", 10.0).expect("Failed to initialize CaliMap50");
+    let map = TwoDMap::new(
+        TwoDMap::load_array_locations_from_file(path).unwrap(),
+        "temp",
+        10.0,
+        None,
+    )
+    .expect("Failed to initialize CaliMap50");
 
     // Get the domain boundaries
     let (lower, upper) = map.get_dom_pair();

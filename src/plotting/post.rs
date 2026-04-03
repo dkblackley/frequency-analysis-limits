@@ -8,6 +8,9 @@ use std::io::Write;
 /// analytically, returning the aligned dataset and the minimized global MSE.
 pub fn procrustes_align(
     data: &[ReconstructionData2dPoint],
+    scale: bool,
+    rotate: bool,
+    shift: bool,
 ) -> (Vec<ReconstructionData2dPoint>, f64) {
     let n = data.len() as f64;
     if n == 0.0 {
@@ -48,7 +51,29 @@ pub fn procrustes_align(
 
     // 3. Solve for combined scale and rotation factors (u = s*cos(theta), v = s*sin(theta))
     let (u, v) = if var_recon > 1e-12 {
-        (numerator_a / var_recon, numerator_b / var_recon)
+        match (scale, rotate) {
+            (true, true) => {
+                // Full Procrustes (Optimal Scale + Optimal Rotation)
+                (numerator_a / var_recon, numerator_b / var_recon)
+            }
+            (false, true) => {
+                // Rotation only (Scale is constrained to 1.0)
+                let norm = (numerator_a.powi(2) + numerator_b.powi(2)).sqrt();
+                if norm > 1e-12 {
+                    (numerator_a / norm, numerator_b / norm)
+                } else {
+                    (1.0, 0.0)
+                }
+            }
+            (true, false) => {
+                // Scale only (Rotation is constrained to 0 degrees)
+                (numerator_a / var_recon, 0.0)
+            }
+            (false, false) => {
+                // Identity transformation
+                (1.0, 0.0)
+            }
+        }
     } else {
         (1.0, 0.0)
     };
@@ -59,22 +84,36 @@ pub fn procrustes_align(
     let aligned_data = data
         .iter()
         .map(|p| {
+            let tx = p.true_points.0 - mean_true_x;
+            let ty = p.true_points.1 - mean_true_y;
             let rx = p.reconstructed_points.0 - mean_recon_x;
             let ry = p.reconstructed_points.1 - mean_recon_y;
 
             let scaled_rotated_x = rx * u - ry * v;
             let scaled_rotated_y = rx * v + ry * u;
 
-            let final_x = scaled_rotated_x + mean_true_x;
-            let final_y = scaled_rotated_y + mean_true_y;
+            // Determine final placement based on the `shift` parameter
+            let (final_true_x, final_true_y, final_recon_x, final_recon_y) = if shift {
+                // Shift reconstructed points to match the center of the original true points.
+                // Leave the true points untouched.
+                (
+                    p.true_points.0,
+                    p.true_points.1,
+                    scaled_rotated_x + mean_true_x,
+                    scaled_rotated_y + mean_true_y,
+                )
+            } else {
+                // Align both graphs to the origin (0,0) without shifting back to target center
+                (tx, ty, scaled_rotated_x, scaled_rotated_y)
+            };
 
-            let diff_x = p.true_points.0 - final_x;
-            let diff_y = p.true_points.1 - final_y;
+            let diff_x = final_true_x - final_recon_x;
+            let diff_y = final_true_y - final_recon_y;
             total_mse += diff_x * diff_x + diff_y * diff_y;
 
             ReconstructionData2dPoint {
-                true_points: p.true_points,
-                reconstructed_points: (final_x, final_y),
+                true_points: (final_true_x, final_true_y),
+                reconstructed_points: (final_recon_x, final_recon_y),
             }
         })
         .collect();
@@ -343,7 +382,7 @@ mod tests {
             .collect();
 
         // Run the alignment
-        let (aligned_data, mse) = procrustes_align(&data);
+        let (aligned_data, mse) = procrustes_align(&data, true, true, true);
 
         // Float comparison: MSE should be practically zero
         assert!(mse < 1e-10, "MSE is not zero: {}", mse);

@@ -14,6 +14,7 @@ cd "$SLURM_SUBMIT_DIR"
 module --quiet purge
 module load hosts/hopper
 module load singularity
+module load cmake
 
 # --- 1. Download and Unpack OR-Tools ---
 ORTOOLS_DIR="/scratch/dblackle/ortools"
@@ -38,7 +39,7 @@ export SINGULARITYENV_RUST_LOG="debug"
 export SINGULARITYENV_RUST_BACKTRACE="1"
 
 CONTAINER="/scratch/dblackle/rust_env.sif"
-SG_RUN="singularity exec --bind /scratch/dblackle --bind /scratch/dblackle/cargo:/usr/local/cargo $CONTAINER"
+SG_RUN="singularity exec --bind /opt/sw --bind /scratch/dblackle --bind /scratch/dblackle/cargo:/usr/local/cargo $CONTAINER"
 
 echo "Wiping corrupted global Cargo registry cache..."
 rm -rf /scratch/dblackle/cargo/registry

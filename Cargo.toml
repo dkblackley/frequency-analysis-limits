@@ -1,7 +1,7 @@
 [package]
 name = "frequency_analysis_limits"
 version = "0.1.0"
-edition = "2024"
+edition = "2021"
 
 [dependencies]
 itertools = "0.14.0"
@@ -16,12 +16,14 @@ thiserror = "2.0.18"
 serde_json = "1.0.149"
 sha2 = "0.11.0-rc.5"
 ndarray = { version = "0.17.2", features = ["rayon"] }
-rand = "0.10.0"
+rand = "0.8.5"
 rayon = "1.11.0"
 clap = { version = "4.5", features = ["derive"] }
 comfy-table = "7.2.2"
 plotters = "0.3.7"
 good_lp = { version = "1.15.0", features = ["highs"] }
+statrs = "0.18.0"
+rustc-hash = "2.1.2"
 
 [dev-dependencies]
 num-rational = "0.4"

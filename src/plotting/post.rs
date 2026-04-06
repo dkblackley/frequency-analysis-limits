@@ -1,6 +1,8 @@
 use crate::plotting::plot::ReconstructionData2dPoint;
 use serde_json::json;
+use std::collections::{HashMap, HashSet};
 use std::error::Error;
+use std::fs;
 use std::fs::File;
 use std::io::Write;
 
@@ -114,6 +116,7 @@ pub fn procrustes_align(
             ReconstructionData2dPoint {
                 true_points: (final_true_x, final_true_y),
                 reconstructed_points: (final_recon_x, final_recon_y),
+                unscaled_points: None,
             }
         })
         .collect();
@@ -201,6 +204,7 @@ fn apply_transform(
             ReconstructionData2dPoint {
                 true_points: p.true_points,
                 reconstructed_points: (rot_x + dx, rot_y + dy),
+                unscaled_points: None,
             }
         })
         .collect()
@@ -298,10 +302,7 @@ pub fn combined_search(
     (best_vec, all_mses)
 }
 
-pub fn export_to_geojson(
-    data: Vec<ReconstructionData2dPoint>,
-    output_path: &str,
-) -> Result<(), Box<dyn Error>> {
+pub fn export_to_geojson(data: Vec<(f64, f64)>, output_path: &str) -> Result<(), Box<dyn Error>> {
     let mut features = Vec::new();
 
     // 2. Map your data to standard GeoJSON features
@@ -309,25 +310,12 @@ pub fn export_to_geojson(
         // GeoJSON strictly requires [longitude, latitude]
         // Ensure your f64 tuples are ordered correctly here!
 
-        // Feature A: Ground Truth Point
-        features.push(json!({
-            "type": "Feature",
-            "geometry": {
-                "type": "Point",
-                "coordinates": [item.true_points.0, item.true_points.1]
-            },
-            "properties": {
-                "pair_id": index,
-                "point_type": "ground_truth"
-            }
-        }));
-
         // Feature B: Reconstructed Point
         features.push(json!({
             "type": "Feature",
             "geometry": {
                 "type": "Point",
-                "coordinates": [item.reconstructed_points.0, item.reconstructed_points.1]
+                "coordinates": [item.0, item.1]
             },
             "properties": {
                 "pair_id": index,
@@ -348,6 +336,101 @@ pub fn export_to_geojson(
     output_file.write_all(geojson_string.as_bytes())?;
 
     Ok(())
+}
+
+#[derive(Deserialize)]
+struct Metadata {
+    offset_lon: i64,
+    offset_lat: i64,
+}
+
+pub fn process_and_map_points(
+    metadata_path: &str,
+    csv_path: &str,
+    input_data: Vec<ReconstructionData2dPoint>,
+) -> Result<Vec<ReconstructionData2dPoint>, Box<dyn Error>> {
+    // 1. Load offsets from metadata.json
+    let meta_str = fs::read_to_string(metadata_path)?;
+    let meta: Metadata = serde_json::from_str(&meta_str)?;
+    let offset_lon = meta.offset_lon;
+    let offset_lat = meta.offset_lat;
+
+    // 2. Build lookup map: raw_map[(lon_int, lat_int)] -> HashSet<(lon_str, lat_str)>
+    let mut raw_map: HashMap<(i64, i64), HashSet<(String, String)>> = HashMap::new();
+
+    let mut rdr = csv::ReaderBuilder::new()
+        .has_headers(true)
+        .from_path(csv_path)?;
+
+    let headers = rdr.headers()?.clone();
+    let laenge_idx = headers.iter().position(|h| h == "Laenge").unwrap_or(0);
+    let breite_idx = headers.iter().position(|h| h == "Breite").unwrap_or(1);
+
+    for result in rdr.records() {
+        let record = result?;
+
+        if let (Some(lon_str), Some(lat_str)) = (record.get(laenge_idx), record.get(breite_idx)) {
+            let lon_trim = lon_str.trim();
+            let lat_trim = lat_str.trim();
+
+            if !lon_trim.is_empty() && !lat_trim.is_empty() {
+                if let (Ok(lon_f), Ok(lat_f)) = (lon_trim.parse::<f64>(), lat_trim.parse::<f64>()) {
+                    let lon_int = (lon_f * 100.0) as i64;
+                    let lat_int = (lat_f * 100.0) as i64;
+
+                    raw_map
+                        .entry((lon_int, lat_int))
+                        .or_insert_with(HashSet::new)
+                        .insert((lon_trim.to_string(), lat_trim.to_string()));
+                }
+            }
+        }
+    }
+
+    // 3. Map inputs, calculate averages, and build the new Struct Vec
+    let mut processed_results = Vec::with_capacity(input_data.len());
+
+    for entry in input_data {
+        // Only process entries that have unscaled points
+        if let Some((unscaled_x, unscaled_y)) = entry.unscaled_points {
+            let orig_lon = (unscaled_x as i64) + offset_lon;
+            let orig_lat = (unscaled_y as i64) + offset_lat;
+
+            // Look up the matching strings
+            if let Some(matched_strings) = raw_map.get(&(orig_lon, orig_lat)) {
+                if matched_strings.is_empty() {
+                    continue; // Skip if no original points map back (matches Python logic)
+                }
+
+                let mut sum_x = 0.0;
+                let mut sum_y = 0.0;
+                let mut count = 0;
+
+                // Parse strings back to floats and sum them up
+                for (lon_str, lat_str) in matched_strings {
+                    if let (Ok(lon), Ok(lat)) = (lon_str.parse::<f64>(), lat_str.parse::<f64>()) {
+                        sum_x += lon;
+                        sum_y += lat;
+                        count += 1;
+                    }
+                }
+
+                // Calculate average and push new struct
+                if count > 0 {
+                    let avg_x = sum_x / (count as f64);
+                    let avg_y = sum_y / (count as f64);
+
+                    processed_results.push(ReconstructionData2dPoint {
+                        true_points: (avg_x, avg_y),
+                        reconstructed_points: entry.reconstructed_points,
+                        unscaled_points: None, // Set to None as requested
+                    });
+                }
+            }
+        }
+    }
+
+    Ok(processed_results)
 }
 
 #[cfg(test)]
@@ -378,6 +461,7 @@ mod tests {
             .map(|(t, r)| ReconstructionData2dPoint {
                 true_points: t,
                 reconstructed_points: r,
+                unscaled_points: None,
             })
             .collect();
 

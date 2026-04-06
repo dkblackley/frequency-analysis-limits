@@ -1,4 +1,4 @@
-use comfy_table::{presets::UTF8_FULL, Cell, Color as TableColor, Table};
+use comfy_table::{Cell, Color as TableColor, Table, presets::UTF8_FULL};
 use plotters::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::error::Error;
@@ -19,7 +19,6 @@ pub struct DbResult {
     pub percent_queries_used: f64,
 }
 
-// #[derive(Debug, Serialize, Deserialize)]
 // pub struct ReconstructionData2d {
 //     #[serde(rename = "true")]
 //     pub true_points: Vec<(f64, f64)>,
@@ -33,12 +32,14 @@ pub struct DataWrapper {
     pub mapping: Vec<ReconstructionData2dPoint>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Copy, Clone)]
 pub struct ReconstructionData2dPoint {
     #[serde(rename = "true")]
     pub true_points: (f64, f64),
     #[serde(rename = "reconstructed")]
     pub reconstructed_points: (f64, f64),
+    #[serde(rename = "unscaled_true")]
+    pub unscaled_points: Option<(f64, f64)>,
 }
 
 pub struct Plotter {

@@ -4,10 +4,10 @@
 use cp_sat::proto::CpSolverStatus;
 use frequency_analysis_limits::dataloader::tester::testDB;
 use frequency_analysis_limits::dataloader::{unflatten_nd, Searchable};
-use frequency_analysis_limits::Record;
 use frequency_analysis_limits::LAMA::solver::Solver;
 use frequency_analysis_limits::LAMA::utility::get_mbq;
-use frequency_analysis_limits::{DomPair, Frequency, Value};
+use frequency_analysis_limits::{DomPair, Probability, Value};
+use frequency_analysis_limits::{Frequency, Record};
 use log::{debug, error, info, warn};
 use num_rational::Ratio;
 use rand::rngs::StdRng;
@@ -324,104 +324,102 @@ fn check_isomorphism(responses: &HashMap<i64, i64>, rows: i64, cols: i64) -> Opt
 fn end_to_end() {
     let _ = env_logger::builder()
         .is_test(true)
-        // This forces 'info' to be the default level if RUST_LOG isn't set
         .filter_level(log::LevelFilter::Debug)
         .try_init();
 
-    let rows = 150;
-    let cols = 150;
+    let rows = 50;
+    let cols = 50;
     let use_dfs = false;
 
     info!("Loading test DB ({}x{})", rows, cols);
     let loaded_db: Box<dyn Searchable + Sync> = Box::new(testDB::new(rows, cols, 80));
 
-    let dim = loaded_db.get_dims();
     let dist = "uniform";
+    let eps = 0.0; // Perfect knowledge constraint
+    let delt = 0.0;
+
+    let selector = Selector::new(dist, &loaded_db, eps, delt);
+    let dim = loaded_db.get_dims();
+
     let (low_pair, high_pair) = loaded_db.get_dom_pair();
     let universe = loaded_db.get_universe();
     let largest_enc_val = universe.iter().max().unwrap();
 
-    let selector = Selector {
-        dist: dist.to_string(),
-        encrypted_db: &loaded_db,
-        dim,
-        lowest_rec: low_pair.clone(),
-        largest_rec: high_pair.clone(),
-    };
+    info!("1. Precomputing observed encrypted tuples for t=1...");
+    let obs_t1 = selector.precompute_perfect_t_observed(1);
 
-    info!("1. Computing True Frequencies (DomPair -> Freq map)...");
-    let dom_pair_freq = selector.get_dominant_pair_to_freq_map().unwrap();
-
-    info!("2. Precomputing observed encrypted tuples for t=1...");
-    let obs_t1 = selector.precompute_t_observed(1, "dummy1", &dom_pair_freq);
-
-    info!("Making known frequency map");
-    let query_dist_over_one =
-        Selector::build_theoretical_t_dict(&*low_pair, &*high_pair, "uniform", 1);
+    info!("2. Making known theoretical frequency map for t=1");
+    let query_dist_over_one = selector.build_theoretical_t_dict(&low_pair, &high_pair, 1);
 
     info!(
-        "4. Initializing Translator with universe size: {}",
+        "3. Initializing Translator with universe size: {}",
         universe.len()
     );
-
     let mut translator = Translator::new(*largest_enc_val, universe.clone(), false);
 
     info!("--> Processing Base Case (t=1)");
     translator.process_t1(&obs_t1, &query_dist_over_one);
 
-    // Explicitly bind read-only references so the closures cleanly pass the Sync+Send bounds
-    // required by Rayon's worker threads in `process_t_greater_than_1`.
-    let dom_freq_ref = &dom_pair_freq;
+    let total_samples = selector.query_distribution.total_exact_frequency as f64;
+    let query_dist_ref = &selector.query_distribution;
     let high_pair_ref = &high_pair;
     let low_pair_ref = &low_pair;
 
-    info!("5. Compiling closures for dynamic frequency lookups...");
+    info!("4. Compiling probabilistic closures for dynamic lookups...");
 
-    // The Observed Frequency Closure
-    let get_observed_freq = |enc_tuple: &[i64]| -> u64 {
+    // 1. Observed probability of the encrypted records
+    let get_observed_prob = |enc_tuple: &[i64]| -> f64 {
         let true_plaintexts: Vec<Record> = enc_tuple
             .iter()
             .map(|rec| unflatten_nd(*rec, high_pair_ref, low_pair_ref))
             .collect();
-
         let dom_pair = get_mbq(&true_plaintexts);
-        *dom_freq_ref.get(&dom_pair).unwrap_or(&0)
+        let freq = query_dist_ref.get_true_freq(&dom_pair);
+        (freq as f64) / total_samples
     };
 
-    // The Expected Frequency Closure
-    let get_expected_freq = |candidate_vals: &[i64]| -> u64 {
-        let decoded_points: Vec<Record> = candidate_vals
+    // 2. Expected probability of proposed plaintexts
+    let get_expected_prob = |plaintexts: &[i64]| -> f64 {
+        let pt_records: Vec<Record> = plaintexts
             .iter()
             .map(|&v| unflatten_nd(v, high_pair_ref, low_pair_ref))
             .collect();
-
-        let dom_pair = get_mbq(&decoded_points);
-        *dom_freq_ref.get(&dom_pair).unwrap_or(&0)
+        let pt_mbq = get_mbq(&pt_records);
+        query_dist_ref.get_query_prob(&pt_mbq)
     };
+
+    // 3. Unified Validator
+    let active_eps = if eps == 0.0 { 1e-9 } else { eps };
+    let validate_candidate = |enc_tuple: &[i64], proposed_plaintexts: &[i64]| -> bool {
+        let obs_prob = get_observed_prob(enc_tuple);
+        if obs_prob == 0.0 {
+            return false;
+        }
+
+        let exp_prob = get_expected_prob(proposed_plaintexts);
+        (obs_prob - exp_prob).abs() <= active_eps
+    };
+
     info!("DFS STATUS: {use_dfs}");
     info!("--> Processing Recursive Case (t=2) across thread pool...");
-    translator.process_t_greater_than_1(2, &universe, get_observed_freq, get_expected_freq);
-    info!("--> Processing Recursive Case (t=3) across thread pool...");
-    translator.process_t_greater_than_1(3, &universe, get_observed_freq, get_expected_freq);
-    // info!("--> Processing Recursive Case (t=4) across thread pool...");
-    // translator.process_t_greater_than_1(4, &universe, get_observed_freq, get_expected_freq);
+    translator.process_t_greater_than_1(2, &universe, &validate_candidate);
 
-    info!("6. Building and executing the CP-SAT Solver for the final constraint graph...");
+    info!("--> Processing Recursive Case (t=3) across thread pool...");
+    translator.process_t_greater_than_1(3, &universe, &validate_candidate);
+
+    info!("5. Building and executing the CP-SAT Solver for the final constraint graph...");
     let mut solver = Solver::new(translator.get_var_index_map());
 
-    // Note: depending on your Translator method signatures, you may need to use
-    // `mut model = translator.get_proto_model(); solver.solve(&mut model);`
-    // if get_proto_model() consumes `self`.
-    let responses = solver.solve(&mut translator.get_proto_model(), false);
+    let mut model = translator.get_proto_model();
+    let responses = solver.solve(&mut model, false);
 
     if responses.len() != universe.len() {
-        let mut freq_to_t_tuple: HashMap<(Value, Frequency), Vec<Vec<Value>>> =
+        let freq_to_t_tuple: HashMap<(Value, Frequency), Vec<Vec<Value>>> =
             selector.get_freq_val_t_tup_dict(2).unwrap();
 
         error!("FATAL: Solver failed to reconstruct full universe!!");
         error!("Known frequency-to-plaintext mappings: {freq_to_t_tuple:?}");
         error!("'encrypted/encoded' universe of plaintexts: {universe:?}");
-        error!("Frequency to t-tuple matches: {freq_to_t_tuple:?}");
         error!("Solver Status: {:?}", solver.solution_stat);
         panic!("Solver did not return a full assignment.");
     }
@@ -429,9 +427,8 @@ fn end_to_end() {
     let mut correct = 0;
     let mut incorrect = 0;
 
-    // Key is actually the true encoded value.
     for (encrypted_alias, guessed_plaintext) in responses.clone() {
-        if guessed_plaintext == encrypted_alias {
+        if guessed_plaintext[0] == encrypted_alias {
             correct += 1;
         } else {
             incorrect += 1;
@@ -442,10 +439,15 @@ fn end_to_end() {
         "Direct matches: {} correct, {} incorrect",
         correct, incorrect
     );
-    info!("7. Running Isomorphism Checks...");
+    info!("6. Running Isomorphism Checks...");
 
-    // Check for a valid rotation/reflection
-    match check_isomorphism(&responses, rows as i64, cols as i64) {
+    let mut iso_map = HashMap::new();
+
+    for (key, val) in responses {
+        iso_map.insert(key, val[0]);
+    }
+
+    match check_isomorphism(&iso_map, rows as i64, cols as i64) {
         Some(transformation_name) => {
             info!(
                 "SUCCESS! Solver found a valid isomorphism: {}",
@@ -460,7 +462,6 @@ fn end_to_end() {
 
     info!("Test completed successfully.")
 }
-
 // Helper to group the plaintexts by frequency for fast O(1) lookups
 fn build_plaintext_dict(tuples: &[(u64, Vec<i64>)]) -> HashMap<u64, Vec<Vec<i64>>> {
     let mut dict: HashMap<u64, Vec<Vec<i64>>> = HashMap::new();

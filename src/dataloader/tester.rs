@@ -1,7 +1,7 @@
 use crate::dataloader::{flatten_nd, unflatten_nd, Searchable};
 use crate::{Coord, Record, Value};
 use ndarray::{s, Array2};
-use rand::RngExt;
+use rand::Rng;
 use std::collections::HashMap;
 
 #[derive(Debug)]
@@ -36,7 +36,7 @@ impl testDB {
     }
 
     fn generate_encoded_grid(rows: usize, cols: usize, density_pct: u8) -> Array2<i64> {
-        let mut rng = rand::rng();
+        let mut rng = rand::thread_rng();
 
         // Define the boundaries for your flatten_nd function
         let lower = [0, 0];
@@ -45,7 +45,7 @@ impl testDB {
         // Notice the |(y, x)| here!
         // from_shape_fn passes a tuple of the current coordinates to the closure.
         Array2::from_shape_fn((rows, cols), |(y, x)| {
-            let roll = rng.random_range(1..=100);
+            let roll = rng.gen_range(1..=100);
 
             if roll <= density_pct {
                 // It's a "hit". Encode the current (y, x) position!

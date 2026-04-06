@@ -6,7 +6,9 @@ pub type Value = Coord;
 pub type Record = Vec<Coord>;
 pub type Responses = Vec<Record>;
 pub type DomPair = (Record, Record);
-// Using u64 here as a placeholder for your frequency type.
+// A Probability between 0-1. When used for a response: What's the probability of seeing this response?
+pub type Probability = f64;
+// Stores a discrete count used in imperfect knowledge: "count how many I actually observed". Should inevitably end up as a probability.
 pub type Frequency = u64;
 
 pub mod LAMA;

@@ -1,4 +1,4 @@
-use crate::{Coord, DomPair, Frequency, Record, Value};
+use crate::{Coord, DomPair, Record};
 use itertools::Itertools;
 use std::str::FromStr;
 
@@ -34,47 +34,21 @@ pub fn get_all_dominating_values(v: &[Coord], largest_rec: &[Coord]) -> Vec<Reco
 }
 
 // Define an Enum to avoid string comparisons in the hot loop
-pub enum Distribution {
+pub enum DistributionType {
     Uniform,
-    Other,
+    Gaussian,
+    Beta,
 }
 
-impl FromStr for Distribution {
+impl FromStr for DistributionType {
     type Err = ();
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s.to_lowercase().as_str() {
-            "uniform" => Ok(Distribution::Uniform),
-            _ => Ok(Distribution::Other),
-        }
-    }
-}
-
-pub fn compute_pair_weight(
-    pair: &DomPair,
-    dist: &Distribution,
-    lowest_rec: &[Value],
-    largest_rec: &[Value],
-) -> Frequency {
-    let (lower, upper) = pair;
-
-    match dist {
-        Distribution::Uniform => {
-            let mut dominating_vals: u64 = 1;
-            for (&u_val, &max_val) in upper.iter().zip(largest_rec.iter()) {
-                dominating_vals *= ((max_val + 1) - u_val) as u64;
-            }
-
-            let mut dominated_vals: u64 = 1;
-            for (&l_val, &min_val) in lower.iter().zip(lowest_rec.iter()) {
-                dominated_vals *= ((l_val + 1) - min_val) as u64;
-            }
-
-            dominated_vals * dominating_vals
-        }
-        Distribution::Other => {
-            // Fallback logic
-            0
+            "uniform" => Ok(DistributionType::Uniform),
+            "gaussian" => Ok(DistributionType::Gaussian),
+            "beta" => Ok(DistributionType::Beta),
+            _ => Err(()),
         }
     }
 }
@@ -133,58 +107,5 @@ mod tests {
         let (minima, maxima) = get_mbq(&points);
         assert_eq!(minima, vec![1, 2, 1]);
         assert_eq!(maxima, vec![5, 10, 8]);
-    }
-
-    #[test]
-    fn test_compute_pair_weight_uniform_1d() {
-        // In 1D, for range [l, u] in domain [1, n], weight is l * (n + 1 - u)
-        let lower = vec![2];
-        let upper = vec![4];
-        let domain_min = vec![1];
-        let domain_max = vec![10];
-        let n = 10;
-        let weight = compute_pair_weight(
-            &(lower, upper),
-            &"uniform".parse::<Distribution>().unwrap(),
-            &domain_min,
-            &domain_max,
-        );
-        // 2 * (10 + 1 - 4) = 2 * 7 = 14
-        assert_eq!(weight, 14);
-    }
-
-    #[test]
-    fn test_compute_pair_weight_2d_exhaustive() {
-        // 2D Domain where N=2.
-        let n = 2;
-        let dist = "uniform";
-
-        // Point definitions for N=2
-        let p_11 = vec![1, 1];
-        let p_12 = vec![1, 2];
-        let p_21 = vec![2, 1];
-        let p_22 = vec![2, 2];
-
-        // Format: (v, dv, expected_weight)
-        let test_cases = vec![
-            // What are all the possible 'rectangles' that can be made over these points?
-            // for any one point there's pretty much always going to be 4. For a 'rectanlge'
-            // it's always gonna be 2 and then there is one that covers all points.
-            (&p_11, &p_11, 4), // (1*1) * (2*2) = 4
-            (&p_11, &p_12, 2), // (1*1) * (2*1) = 2
-            (&p_11, &p_21, 2), // (1*1) * (1*2) = 2
-            (&p_11, &p_22, 1), // (1*1) * (1*1) = 1
-            (&p_12, &p_12, 4), // (1*2) * (2*1) = 4
-            (&p_12, &p_22, 2), // (1*2) * (1*1) = 2
-            (&p_21, &p_21, 4), // (2*1) * (1*2) = 4
-            (&p_21, &p_22, 2), // (2*1) * (1*1) = 2
-            (&p_22, &p_22, 4), // (2*2) * (1*1) = 4
-        ];
-
-        for (v, dv, expected) in test_cases {
-            let pair = (v.clone(), dv.clone());
-            let weight = compute_pair_weight(&pair, &dist.parse().unwrap(), &p_11, &p_22);
-            assert_eq!(weight, expected, "Failed for pair: v={:?}, dv={:?}", v, dv);
-        }
     }
 }

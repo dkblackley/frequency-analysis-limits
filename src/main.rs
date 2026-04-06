@@ -1,9 +1,11 @@
 use clap::{arg, Parser};
 use frequency_analysis_limits::dataloader::Searchable;
 use frequency_analysis_limits::plotting::plot::{DbResult, Plotter, ReconstructionData2dPoint};
-use frequency_analysis_limits::plotting::post::{export_to_geojson, procrustes_align};
+use frequency_analysis_limits::plotting::post::{
+    export_to_geojson, process_and_map_points, procrustes_align,
+};
 use frequency_analysis_limits::LAMA::lama_attack;
-use log::info;
+use log::{debug, info};
 use std::collections::HashMap;
 use std::fmt::format;
 use std::fs;
@@ -37,12 +39,24 @@ pub struct Args {
     t: u64,
 
     /// Make plots and save to disk
-    #[arg(short, long)]
+    #[arg(long)]
     plot: bool,
 
     /// If true, do 'post-processing' - Calculate the best possible scale/etc. for MSE minimization
+    #[arg(long, default_value = "100.0")]
+    percent: f64,
+
+    #[arg(long, default_value = "uniform")]
+    dist: String,
+
     #[arg(long)]
     post: bool,
+
+    #[arg(long, default_value = "0.7")]
+    eps: f64,
+
+    #[arg(long, default_value = "0.9")]
+    delta: f64,
 }
 
 fn main() {
@@ -55,21 +69,105 @@ fn main() {
         .expect("Logger failed to init!");
 
     if !args.skip_lama {
-        lama_attack(&args.name, &args.dir_path, &args.t, &args.save);
+        lama_attack(
+            &args.name,
+            &args.dir_path,
+            &args.dist,
+            &args.t,
+            &args.save,
+            &args.eps,
+            &args.delta,
+            &args.percent,
+        );
     }
 
     if args.post {
-        let file =
-            File::open(format!("{0}{1}/reconstruction.json", args.dir_path, args.name).as_str())
-                .unwrap();
+        let dir = &args.dir_path;
+        let remin_path = format!("{dir}{0}/remin", args.name,);
+        let less_path = format!("{dir}{0}/even_less", args.name,);
+        let unique_name = format!("{0}_prob{1}.0_{2}", args.name, args.percent, args.dist);
 
-        let reader = BufReader::new(file);
-        let data: Vec<ReconstructionData2dPoint> = serde_json::from_reader(reader).unwrap();
-        let out = procrustes_align(&*data, true, true, false);
+        let unique_rem_name = format!("{unique_name}_classic.json");
+        let unique_less_name = format!("{unique_name}_even_less.json");
+
+        let remin_res = format!("{remin_path}/{unique_rem_name}");
+        let even_less_res = format!("{less_path}/{unique_less_name}");
+
+        debug!("About to load data {remin_res}, {even_less_res}");
+
+        let content = fs::read_to_string(&remin_res).unwrap();
+        let remin_data: Vec<ReconstructionData2dPoint> = serde_json::from_str(&content).unwrap();
+
+        let content = fs::read_to_string(&even_less_res).unwrap();
+        let less_data: Vec<ReconstructionData2dPoint> = serde_json::from_str(&content).unwrap();
+
+        let aligned = procrustes_align(&*remin_data, true, true, true);
+        info!("MSE of Remin (Original): {:?}", aligned.1);
+
+        let aligned = procrustes_align(&*less_data, true, true, true);
+        info!("MSE of Even Less (Original): {:?}", aligned.1);
+
+        if args.name == "spitz" {
+            let spitz_orig =
+                "/home/yelnat/Nextcloud/10TB-STHDD/datasets/freq_an/graw_drawing".to_string();
+            let lat_long_truth = process_and_map_points(
+                &format!("{spitz_orig}/metadata.json"),
+                &format!("{spitz_orig}/Spitz.csv"),
+                remin_data.clone(),
+            )
+            .unwrap();
+
+            print_min_val(
+                &lat_long_truth
+                    .iter()
+                    .map(|point| point.true_points)
+                    .collect(),
+            );
+
+            let aligned = procrustes_align(&*lat_long_truth, true, true, true);
+
+            info!("MSE of Remin (On map): {:?}", aligned.1);
+
+            let out_path = format!("{remin_path}/{unique_rem_name}.geojson");
+            let recon_points_vec: Vec<(f64, f64)> = aligned
+                .0
+                .iter()
+                .map(|point| point.reconstructed_points)
+                .collect();
+
+            export_to_geojson(recon_points_vec, &out_path).unwrap();
+
+            let true_points: Vec<(f64, f64)> =
+                aligned.0.iter().map(|point| point.true_points).collect();
+            let true_path = format!("{dir}{0}/true.geojson", args.name,);
+            export_to_geojson(true_points, &true_path).unwrap();
+
+            let lat_long_truth = process_and_map_points(
+                &format!("{spitz_orig}/metadata.json"),
+                &format!("{spitz_orig}/Spitz.csv"),
+                less_data,
+            )
+            .unwrap();
+
+            let aligned = procrustes_align(&*lat_long_truth, true, true, true);
+
+            info!("MSE of even less (On map): {:?}", aligned.1);
+
+            let out_path = format!("{less_path}/{unique_less_name}.geojson");
+
+            let recon_points_vec: Vec<(f64, f64)> = aligned
+                .0
+                .iter()
+                .map(|point| point.reconstructed_points)
+                .collect();
+            export_to_geojson(recon_points_vec, &out_path).unwrap();
+
+            info!("Saved lili to geojson");
+        }
+
+        let out = procrustes_align(&*remin_data, true, true, true);
         let new_vec = out.0;
         let mse = out.1;
-
-        info!("MSE of new plot: {mse}");
 
         let mut output_file =
             File::create(format!("{0}{1}/reconstruction.json", args.dir_path, args.name).as_str())
@@ -89,7 +187,6 @@ fn main() {
 
     if args.plot {
         info!("Plotting data");
-        let dir = args.dir_path;
 
         //plotter.handle_spatial_plot(&[format!("{dir}/{name}")].clone(), true);
 
@@ -99,7 +196,7 @@ fn main() {
             y_padder: 0.2,
         };
 
-        plotter.handle_spatial_plot(&[format!("{dir}/{}", args.name)].clone(), true);
+        //plotter.handle_spatial_plot(&[format!("{dir}/{}", args.name)].clone(), true);
 
         // if let Ok(entries) = fs::read_dir(&dir) {
         //     for entry in entries.flatten() {
@@ -132,5 +229,27 @@ fn quick_convert(file_path: &str, out_path: &str) {
     let reader = BufReader::new(file);
     let data: Vec<ReconstructionData2dPoint> = serde_json::from_reader(reader).unwrap();
 
-    export_to_geojson(data, out_path).unwrap();
+    let recon_points_vec: Vec<(f64, f64)> = data
+        .iter()
+        .map(|point| point.reconstructed_points)
+        .collect();
+
+    export_to_geojson(recon_points_vec, out_path).unwrap();
+}
+
+fn print_min_val(points: &Vec<(f64, f64)>) {
+    let (min_x, max_x, min_y, max_y) = points.iter().fold(
+        (
+            f64::INFINITY,
+            f64::NEG_INFINITY,
+            f64::INFINITY,
+            f64::NEG_INFINITY,
+        ),
+        |(min_x, max_x, min_y, max_y), &(x, y)| {
+            (min_x.min(x), max_x.max(x), min_y.min(y), max_y.max(y))
+        },
+    );
+
+    println!("X: min={}, max={}", min_x, max_x);
+    println!("Y: min={}, max={}", min_y, max_y);
 }

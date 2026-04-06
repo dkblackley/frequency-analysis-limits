@@ -39,14 +39,14 @@ impl TwoDMap {
         let reader = BufReader::new(file);
 
         // Deserialize into a temporary Vec of [f64; 2] arrays
-        let raw_data: Vec<[f64; 2]> = serde_json::from_reader(reader)?;
+        let raw_data: Vec<[u64; 2]> = serde_json::from_reader(reader)?;
 
         // Map the arrays into the Location struct (index 0 is lat, index 1 is long)
         let locations = raw_data
             .into_iter()
             .map(|arr| Location {
-                latitude: arr[0],
-                longitude: arr[1],
+                latitude: arr[0] as f64,
+                longitude: arr[1] as f64,
             })
             .collect();
 

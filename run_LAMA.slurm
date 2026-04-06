@@ -14,7 +14,6 @@ cd "$SLURM_SUBMIT_DIR"
 module --quiet purge
 module load hosts/hopper
 module load singularity
-module load cmake
 
 # --- 1. Download and Unpack OR-Tools ---
 ORTOOLS_DIR="/scratch/dblackle/ortools"
@@ -38,9 +37,25 @@ export SINGULARITYENV_LIBRARY_PATH="$ORTOOLS_DIR/lib"
 export SINGULARITYENV_RUST_LOG="debug"
 export SINGULARITYENV_RUST_BACKTRACE="1"
 
-CONTAINER="/scratch/dblackle/rust_env.sif"
-SG_RUN="singularity exec --bind /opt/sw --bind /scratch/dblackle --bind /scratch/dblackle/cargo:/usr/local/cargo $CONTAINER"
+# --- 2. Download and Unpack portable CMake ---
+CMAKE_DIR="/scratch/dblackle/cmake_portable"
+echo "Setting up portable CMake..."
+rm -rf "$CMAKE_DIR"
+mkdir -p "$CMAKE_DIR"
+cd "$CMAKE_DIR"
 
+wget -q https://github.com/Kitware/CMake/releases/download/v3.29.3/cmake-3.29.3-linux-x86_64.tar.gz
+tar -xf cmake-3.29.3-linux-x86_64.tar.gz --strip-components=1
+rm cmake-3.29.3-linux-x86_64.tar.gz
+
+cd "$SLURM_SUBMIT_DIR"
+# ---------------------------------------
+
+# Expose the portable binary to the container's environment
+export SINGULARITYENV_PATH="$CMAKE_DIR/bin:$PATH"
+
+CONTAINER="/scratch/dblackle/rust_env.sif"
+SG_RUN="singularity exec --bind /scratch/dblackle --bind /scratch/dblackle/cargo:/usr/local/cargo $CONTAINER"
 echo "Wiping corrupted global Cargo registry cache..."
 rm -rf /scratch/dblackle/cargo/registry
 

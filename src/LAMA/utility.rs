@@ -53,6 +53,16 @@ impl FromStr for DistributionType {
     }
 }
 
+impl std::fmt::Display for DistributionType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            DistributionType::Uniform => write!(f, "uniform"),
+            DistributionType::Gaussian => write!(f, "gaussian"),
+            DistributionType::Beta => write!(f, "beta"),
+        }
+    }
+}
+
 pub fn get_mbq(t_tup: &[Record]) -> DomPair {
     // Avoid allocating empty vectors with Value::MAX/MIN.
     // Clone the first record to use as our baseline bounds.

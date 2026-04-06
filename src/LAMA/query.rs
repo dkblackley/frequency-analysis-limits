@@ -3,6 +3,7 @@ use crate::LAMA::utility::DistributionType;
 use crate::{DomPair, Probability, Value};
 use indicatif::{ProgressBar, ProgressStyle};
 use itertools::Itertools;
+use log::info;
 use rand::distributions::WeightedIndex;
 use rayon::prelude::*;
 use rustc_hash::FxHashMap;
@@ -30,6 +31,7 @@ impl<'a> QueryDistribution<'a> {
         dist: DistributionType,
     ) -> Box<Self> {
         let (lowest_rec, largest_rec) = encrypted_db.get_dom_pair();
+        info!("Beginning to set up {dist} distribution");
         let (mut probs_and_dom_pairs_raw, sampler, weights, total_weight) = match dist {
             DistributionType::Uniform => Self::new_uniform_internal(&pairs),
             DistributionType::Gaussian => Self::new_gaussian(&pairs),
@@ -51,6 +53,7 @@ impl<'a> QueryDistribution<'a> {
 
         let atom_count = AtomicU64::new(0);
 
+        info!("Computing true cumulative probabilities for every MBQ");
         // Compute the True CUMULATIVE probability for every possible MBQ
         let computed_results: Vec<_> = pairs
             .par_iter() // Attaches the indicatif progress bar to Rayon

@@ -42,7 +42,6 @@ pub struct Args {
     #[arg(long)]
     plot: bool,
 
-    /// If true, do 'post-processing' - Calculate the best possible scale/etc. for MSE minimization
     #[arg(long, default_value = "100.0")]
     percent: f64,
 
@@ -52,7 +51,8 @@ pub struct Args {
     #[arg(long)]
     post: bool,
 
-    #[arg(long, default_value = "0.7")]
+    // 0.0 means full query dist
+    #[arg(long, default_value = "0.0")]
     eps: f64,
 
     #[arg(long, default_value = "0.9")]

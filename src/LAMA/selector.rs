@@ -163,7 +163,12 @@ impl<'a> Selector<'a> {
         vals.sort_unstable();
 
         let pb = ProgressBar::new(total_combinations as u64);
-        pb.set_style(ProgressStyle::default_bar().template("{spinner:.green} [{elapsed_precise}] [{wide_bar:.cyan/blue}] {pos}/{len} ({eta})").unwrap());
+        pb.set_style(
+            ProgressStyle::default_bar()
+                .template("[{elapsed_precise}] [{bar:40}] {pos}/{len} ({eta})")
+                .unwrap()
+                .progress_chars("=> "),
+        );
 
         let processed_count = AtomicU64::new(0);
 
@@ -227,7 +232,12 @@ impl<'a> Selector<'a> {
             .multi_cartesian_product();
 
         let pb = ProgressBar::new(total_dom_pairs / 2);
-        pb.set_style(ProgressStyle::default_bar().template("{spinner:.green} [{elapsed_precise}] [{wide_bar:.cyan/blue}] {pos}/{len} ({eta})").unwrap());
+        pb.set_style(
+            ProgressStyle::default_bar()
+                .template("[{elapsed_precise}] [{bar:40}] {pos}/{len} ({eta})")
+                .unwrap()
+                .progress_chars("=> "),
+        );
 
         let processed_count = AtomicU64::new(0);
         let largest_rec_ref = &largest_rec;
@@ -282,10 +292,9 @@ impl<'a> Selector<'a> {
         let pb = ProgressBar::new(total_combinations);
         pb.set_style(
             ProgressStyle::default_bar()
-                .template(
-                    "{spinner:.green} [{elapsed_precise}] [{wide_bar:.cyan/blue}] {pos}/{len} ({eta})",
-                ).unwrap()
-                .progress_chars("#>-"),
+                .template("[{elapsed_precise}] [{bar:40}] {pos}/{len} ({eta})")
+                .unwrap()
+                .progress_chars("=> "),
         );
 
         let processed_count = AtomicU64::new(0);
@@ -345,8 +354,9 @@ impl<'a> Selector<'a> {
         let pb = ProgressBar::new(dom_pairs.len() as u64);
         pb.set_style(
             ProgressStyle::default_bar()
-                .template("{spinner:.green} [{elapsed_precise}] [{wide_bar:.cyan/blue}] {pos}/{len} ({eta})").unwrap()
-                .progress_chars("#>-"),
+                .template("[{elapsed_precise}] [{bar:40}] {pos}/{len} ({eta})")
+                .unwrap()
+                .progress_chars("=> "),
         );
         let processed_count = AtomicU64::new(0);
 

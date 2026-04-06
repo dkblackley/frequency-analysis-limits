@@ -332,9 +332,9 @@ fn end_to_end() {
     let use_dfs = false;
 
     info!("Loading test DB ({}x{})", rows, cols);
-    let loaded_db: Box<dyn Searchable + Sync> = Box::new(testDB::new(rows, cols, 80));
+    let loaded_db: Box<dyn Searchable + Sync> = Box::new(testDB::new(rows, cols, 100));
 
-    let dist = "uniform";
+    let dist = "gaussian";
     let eps = 0.0; // Perfect knowledge constraint
     let delt = 0.0;
 
@@ -355,7 +355,7 @@ fn end_to_end() {
         "3. Initializing Translator with universe size: {}",
         universe.len()
     );
-    let mut translator = Translator::new(*largest_enc_val, universe.clone(), false);
+    let mut translator = Translator::new(*largest_enc_val, universe.clone());
 
     info!("--> Processing Base Case (t=1)");
     translator.process_t1(&obs_t1, &query_dist_over_one);
@@ -410,8 +410,8 @@ fn end_to_end() {
     info!("--> Processing Recursive Case (t=3) sequentially across chunk models...");
     translator.process_t_greater_than_1(3, &universe, &validate_candidate);
 
-    // info!("--> Processing Recursive Case (t=4) sequentially across chunk models...");
-    // translator.process_t_greater_than_1(4, &universe, &validate_candidate);
+    info!("--> Processing Recursive Case (t=4) sequentially across chunk models...");
+    translator.process_t_greater_than_1(4, &universe, &validate_candidate);
 
     info!("5. Building and executing the CP-SAT Solver for the final constraint graph...");
     let mut solver = Solver::new(translator.get_var_index_map());
@@ -419,7 +419,7 @@ fn end_to_end() {
     let mut model = translator.get_proto_model();
     let responses = solver.solve(&mut model, false);
 
-    if responses.len() < 6 {
+    if responses[&0].len() < 6 {
         // minimum number of expected reconstructions
         let freq_to_t_tuple: HashMap<(Value, Frequency), Vec<Vec<Value>>> =
             selector.get_freq_val_t_tup_dict(2).unwrap();

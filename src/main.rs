@@ -77,7 +77,6 @@ fn main() {
             &args.save,
             &args.eps,
             &args.delta,
-            &args.percent,
         );
     }
 

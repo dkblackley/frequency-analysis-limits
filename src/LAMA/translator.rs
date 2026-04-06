@@ -59,14 +59,15 @@ pub struct Translator {
     enc_id_to_intvar: HashMap<i64, IntVar>,
     var_index_map: HashMap<IntVar, (i32, i64)>,
     proto_model: CpModelProto,
-    use_dfs: bool,
     pub candidate_cache: HashMap<usize, HashMap<Vec<i64>, Vec<Vec<i64>>>>,
 }
 
 impl Translator {
-    pub fn new(largest_val: i64, mut encrypted_records: Vec<i64>, use_dfs: bool) -> Self {
+    pub fn new(largest_val: i64, mut encrypted_records: Vec<i64>) -> Self {
         let mut rng = StdRng::seed_from_u64(42);
 
+        // If we don't shuffle the encrypted records, the first reconstruction found is always the
+        // correct one (if there are multiple to be found)
         encrypted_records.shuffle(&mut rng);
 
         let mut cp_model = CpModelBuilder::default();
@@ -79,7 +80,6 @@ impl Translator {
             enc_id_to_intvar,
             var_index_map,
             candidate_cache: HashMap::new(),
-            use_dfs,
         }
     }
 
@@ -99,6 +99,10 @@ impl Translator {
         self.proto_model = new_model;
     }
 
+    /// Initialise all unknown variables. Each encrypted record is the id of the unknown var,
+    /// but this 'encrypted id' is actually just an encoded point. This allows for much easier
+    /// tracked of which var was which point (as opposed to actual encryption/decryption, which is
+    /// functionally the same).
     fn set_all_vars(
         cp_model: &mut CpModelBuilder,
         upper: Value,
@@ -165,7 +169,7 @@ impl Translator {
         model.constraints.push(constraint_proto);
     }
 
-    /// Base Case: t=1. Direct dictionary lookup.
+    /// Base Case: t=1. Direct dictionary lookup. TODO: Replace these with vecs of probs (f64) and records.
     pub fn process_t1(
         &mut self,
         observed_t1: &HashMap<u64, Vec<Vec<i64>>>,
@@ -258,7 +262,9 @@ impl Translator {
             pb.inc(1);
         }
         pb.finish_with_message("found candidates");
-        //TODO: THis might be removing the reflections (?)
+
+        // Remove identical values from solver. I don't think this 'removes reflections' as this
+        // is only looking at the encrypted values
         candidates.sort_unstable();
         candidates.dedup();
         candidates
@@ -285,12 +291,11 @@ impl Translator {
         let atom_count = AtomicU64::new(0);
 
         chunk
-            // .into_par_iter()
-            .into_iter()
+            .into_par_iter()
             .filter_map(|enc_t_tuple| {
                 let t = enc_t_tuple.len();
                 let current = atom_count.fetch_add(1, Ordering::Relaxed);
-                if current % 10 == 0 {
+                if current % 1000 == 0 {
                     pb.set_message(format!("Processed {} tuples...", current));
                 }
 

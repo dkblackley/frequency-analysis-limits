@@ -247,7 +247,7 @@ impl<'a> Selector<'a> {
                     let v_clone = v.clone();
                     move |dv| {
                         let count = processed_count_ref.fetch_add(1, AtomicOrdering::Relaxed);
-                        if count % 100_000 == 0 {
+                        if count % 10_000 == 0 {
                             pb_inner.set_position(count);
                         }
                         (v_clone.clone(), dv)

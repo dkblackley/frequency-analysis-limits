@@ -1,11 +1,13 @@
 use crate::dataloader::Searchable;
 use crate::LAMA::utility::DistributionType;
 use crate::{DomPair, Probability, Value};
+use indicatif::{ProgressBar, ProgressStyle};
 use itertools::Itertools;
 use rand::distributions::WeightedIndex;
 use rayon::prelude::*;
 use rustc_hash::FxHashMap;
 use statrs::distribution::{Beta, Continuous, Normal};
+use std::sync::atomic::AtomicU64;
 
 pub struct QueryDistribution<'a> {
     encrypted_db: &'a Box<dyn Searchable + Sync>,
@@ -27,28 +29,54 @@ impl<'a> QueryDistribution<'a> {
         encrypted_db: &'a Box<dyn Searchable + Sync>,
         dist: DistributionType,
     ) -> Box<Self> {
+        let (lowest_rec, largest_rec) = encrypted_db.get_dom_pair();
         let (mut probs_and_dom_pairs_raw, sampler, weights, total_weight) = match dist {
             DistributionType::Uniform => Self::new_uniform_internal(&pairs),
             DistributionType::Gaussian => Self::new_gaussian(&pairs),
             DistributionType::Beta => Self::new_beta(&pairs),
         };
 
-        let (lowest_rec, largest_rec) = encrypted_db.get_dom_pair();
         let dom_pair_to_known_prob = Self::make_vec_to_prob_map(&pairs, &weights);
 
         let mut mbq_to_cumulative_prob = FxHashMap::default();
         let mut probs_and_dom_pairs = Vec::with_capacity(pairs.len());
 
+        let pb = ProgressBar::new(pairs.len() as u64);
+        pb.set_style(
+            ProgressStyle::default_bar()
+                .template("[{elapsed_precise}] {bar:40.cyan/blue} {pos:>7}/{len:7} {eta}")
+                .unwrap()
+                .progress_chars("##-"),
+        );
+
+        let atom_count = AtomicU64::new(0);
+
         // Compute the True CUMULATIVE probability for every possible MBQ
-        for pair in &pairs {
-            let cum_prob = Self::compute_cumulative_prob(
-                pair,
-                &dist,
-                &lowest_rec,
-                &largest_rec,
-                &dom_pair_to_known_prob,
-                total_weight,
-            );
+        let computed_results: Vec<_> = pairs
+            .par_iter() // Attaches the indicatif progress bar to Rayon
+            .map(|pair| {
+                let cum_prob = Self::compute_cumulative_prob(
+                    pair,
+                    &dist, // Note: `dist`, `lowest_rec`, etc. must implement `Sync`
+                    &lowest_rec,
+                    &largest_rec,
+                    &dom_pair_to_known_prob,
+                    total_weight,
+                );
+
+                let current = atom_count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                if current % 1000 == 0 {
+                    pb.set_position(current);
+                }
+
+                // Return a tuple of references/clones needed for insertion
+                (pair, cum_prob)
+            })
+            .collect();
+
+        // 3. Sequential Insertion Phase
+        // Iterating over the pre-computed results to insert is virtually instantaneous.
+        for (pair, cum_prob) in computed_results {
             mbq_to_cumulative_prob.insert(pair.clone(), cum_prob);
             probs_and_dom_pairs.push((cum_prob, pair.clone()));
         }
@@ -81,7 +109,7 @@ impl<'a> QueryDistribution<'a> {
     ) -> Probability {
         match dist {
             DistributionType::Uniform => {
-                // O(1) Analytical Calculation for Uniform distributions
+                // This is faster than a hash lookup for uniform (I think)
                 let mut dominated_vals: u64 = 1;
                 for (&l_val, &min_val) in mbq.0.iter().zip(lowest_rec.iter()) {
                     dominated_vals *= (l_val - min_val + 1) as u64;
@@ -94,7 +122,7 @@ impl<'a> QueryDistribution<'a> {
                 count / total_weight
             }
             _ => {
-                // Fallback: Sum Cartesian space of enclosing queries for Gaussian/Beta
+                // Every other dist: Sum Cartesian space of enclosing queries.
                 let (target_lower, target_upper) = mbq;
                 let mut true_prob: f64 = 0.0;
 
@@ -162,9 +190,12 @@ impl<'a> QueryDistribution<'a> {
     pub fn new_gaussian(
         pairs: &[DomPair],
     ) -> (Vec<(f64, DomPair)>, WeightedIndex<f64>, Vec<f64>, f64) {
+        // Params taken from REMIN
         let mu = pairs.len() as f64 / 2.0;
         let sigma = pairs.len() as f64 / 5.0;
+
         let normal_dist = Normal::new(mu, sigma).expect("Sigma must be > 0.0");
+        // Calculate the 'weights' - The actual prob of sampling this index/Dom pair
         let weights: Vec<f64> = pairs
             .par_iter()
             .enumerate()
@@ -172,6 +203,8 @@ impl<'a> QueryDistribution<'a> {
             .collect();
         let total_weight: f64 = weights.par_iter().sum();
         let sampler = WeightedIndex::new(&weights).expect("Failed to create WeightedIndex");
+
+        // Store each pairs probability of being sampled in a vec
         let mut weight_pair: Vec<(f64, DomPair)> =
             weights.iter().copied().zip(pairs.iter().cloned()).collect();
         weight_pair.sort_unstable_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
@@ -179,12 +212,14 @@ impl<'a> QueryDistribution<'a> {
     }
 
     pub fn new_beta(pairs: &[DomPair]) -> (Vec<(f64, DomPair)>, WeightedIndex<f64>, Vec<f64>, f64) {
+        // The other methods were slightly 'off' when calculating this dist I think.
         let beta_dist = Beta::new(2.0, 1.0).expect("Alpha/Beta must be > 0.0");
         let n = pairs.len() as f64;
         let weights: Vec<f64> = pairs
             .par_iter()
             .enumerate()
             .map(|(i, _)| {
+                // this prevents 0 prob or 1 prob (I think)
                 let x = (i as f64 + 0.5) / n;
                 beta_dist.pdf(x)
             })

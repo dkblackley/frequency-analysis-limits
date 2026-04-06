@@ -25,10 +25,9 @@ pub fn lama_attack(
     dir_path: &String,
     dist: &String,
     t: &u64,
-    save: &bool,
+    _save: &bool,
     eps: &f64,
     delt: &f64,
-    query_perc: &f64,
 ) {
     let mut loaded_db: Box<dyn Searchable + Sync>;
     let full_datapath = format!("{0}{1}", dir_path, db_name);
@@ -61,16 +60,17 @@ pub fn lama_attack(
     let obs_t1: HashMap<u64, Vec<Vec<i64>>>;
 
     info!("Computing Observed frequencies -> 1 tuple");
-    if *query_perc == 1.0 {
+    if *eps == 0.0 {
         obs_t1 = selector.precompute_perfect_t_observed(1);
     } else {
+        // empirical VC/calc required samples for this eps/delta
         todo!();
     }
 
     info!("Computing True Probabilities -> 1 tuple");
     let query_dist_over_one = selector.build_theoretical_t_dict(&low_pair, &high_pair, 1);
 
-    let mut translator = Translator::new(*largest_enc_val, loaded_db.get_universe(), false);
+    let mut translator = Translator::new(*largest_enc_val, loaded_db.get_universe());
 
     translator.process_t1(&obs_t1, &query_dist_over_one);
 
@@ -78,7 +78,8 @@ pub fn lama_attack(
     let high_pair_ref = &high_pair;
     let low_pair_ref = &low_pair;
 
-    // 1. SIMULATION SHORTCUT: Calculate the observed probability of the encrypted records
+    // As a shortcut we use the 'dompair' as a unique id. We could equivalently just map enc id -> prob
+    // but this is more convenient for 'perfect knowledge'. TODO: Change empirical to be... empirical
     let get_observed_prob = |enc_tuple: &[i64]| -> f64 {
         let true_plaintexts: Vec<Record> = enc_tuple
             .iter()
@@ -100,16 +101,20 @@ pub fn lama_attack(
         query_dist_ref.get_cumulative_prob(&pt_mbq)
     };
 
-    // 3. THE VALIDATOR
+    // Use the epsilon bound and return true for all possible items that are valid/within eps prob
+    // of observed.
     let active_eps = if *eps == 0.0 { 1e-9 } else { *eps };
 
     let validate_candidate = |enc_tuple: &[i64], proposed_plaintexts: &[i64]| -> bool {
+        // get the 'empirically observed' probability of this tuple
         let obs_prob = get_observed_prob(enc_tuple);
         if obs_prob == 0.0 {
             return false;
         }
 
+        // get the expected/true prob
         let exp_prob = get_expected_prob(proposed_plaintexts);
+        // Are we within the bound? Then this is a valid potential reconstruction
         (obs_prob - exp_prob).abs() <= active_eps
     };
 
@@ -119,7 +124,7 @@ pub fn lama_attack(
         let start_t = Instant::now();
         info!("Recursively computing frequencies for {i} tuples");
 
-        translator.process_t_greater_than_1(i as usize, &universe, &validate_candidate);
+        translator.process_t_greater_than_1(i, &universe, &validate_candidate);
 
         let end_t = Instant::now();
         debug!("Round {i} took {}", end_t.duration_since(start_t).as_secs())
@@ -136,7 +141,7 @@ pub fn lama_attack(
     let mut first_resp = HashMap::new();
 
     for (key, val) in responses.clone() {
-        first_resp.insert(key, val[0]);
+        first_resp.insert(key, val[0]); // just pretend first resp is the correct one.
 
         for i in 0..val.len() {
             if key == val[i] {
@@ -145,9 +150,9 @@ pub fn lama_attack(
         }
     }
 
-    debug!("{correct} correct, {} total", responses.len());
+    debug!("{correct} correct out of {} total", responses.len());
     info!("Saving correct solution to {full_datapath}/limits/reconstruction.json");
-    save_reconstruction_data(&first_resp, &format!("{full_datapath}/limits"), &loaded_db);
+    save_reconstruction_data(&responses, &format!("{full_datapath}/limits"), &loaded_db);
 
     let final_res = DbResult {
         name: loaded_db.get_name().parse().unwrap(),
@@ -159,7 +164,8 @@ pub fn lama_attack(
         number_of_reconstructions: format!("{}", responses.len()),
         time_taken: end.duration_since(start).as_secs_f64(),
         total_db_size: loaded_db.get_universe().len() as u64,
-        percent_queries_used: 100.0,
+        percent_queries_used: 1.0,
+        num_queries_used: 1, // TODO
     };
 
     save_results(final_res, &format!("{full_datapath}/limit/results.json"))
@@ -173,27 +179,32 @@ fn save_results(result: DbResult, file_path: &str) {
 }
 
 fn save_reconstruction_data(
-    responses: &HashMap<i64, i64>,
+    responses: &HashMap<i64, Vec<i64>>,
     file_path: &str,
     loaded_db: &Box<dyn Searchable + Sync>,
 ) {
     //TODO: more than 2 dimension
 
     // Pre-allocate the vectors using the length of the hashmap to avoid reallocations
-    let mut data: Vec<ReconstructionData2dPoint> = Vec::new();
+    let mut data: Vec<Vec<ReconstructionData2dPoint>> = Vec::new();
 
     // Iterate over the HashMap
-    for (&encrypted_true, &encrypted_recon) in responses {
+    for (&encrypted_true, encrypted_recons) in responses {
         let true_vec = loaded_db.decrypt_point_f64(&encrypted_true);
-        let recon_vec = loaded_db.decrypt_point_f64(&encrypted_recon);
 
-        let saved_point = ReconstructionData2dPoint {
-            true_points: (true_vec[0] as f64, true_vec[1] as f64),
-            reconstructed_points: (recon_vec[0] as f64, recon_vec[1] as f64),
-            unscaled_points: None, // TODO: load from other files(?)
-        };
+        let mut reconstruction = Vec::new();
+        // iter over the recond
+        for encrypted_recon in encrypted_recons {
+            let recon_vec = loaded_db.decrypt_point_f64(&encrypted_recon);
+            let saved_point = ReconstructionData2dPoint {
+                true_points: (true_vec[0], true_vec[1]),
+                reconstructed_points: (recon_vec[0], recon_vec[1]),
+                unscaled_points: None, // TODO: load from other files(?)
+            };
 
-        data.push(saved_point);
+            reconstruction.push(saved_point);
+        }
+        data.push(reconstruction);
     }
 
     //let data_wrap = DataWrapper { mapping: data };
@@ -203,14 +214,18 @@ fn save_reconstruction_data(
 
     serde_json::to_writer_pretty(writer, &data).unwrap();
 
-    let recon_points_vec: Vec<(f64, f64)> = data
-        .iter()
-        .map(|point| point.reconstructed_points)
-        .collect();
+    // individually do entire recon space:
 
-    export_to_geojson(
-        recon_points_vec,
-        format!("{file_path}/reconstruction_geo.json").as_str(),
-    )
-    .unwrap();
+    for i in 0..data.len() {
+        let recon_points_vec: Vec<(f64, f64)> = data[i]
+            .iter()
+            .map(|point| point.reconstructed_points)
+            .collect();
+
+        export_to_geojson(
+            recon_points_vec,
+            format!("{file_path}/reconstruction_geo_{i}.json").as_str(),
+        )
+        .unwrap();
+    }
 }

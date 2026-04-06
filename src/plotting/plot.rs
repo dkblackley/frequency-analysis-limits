@@ -1,4 +1,4 @@
-use comfy_table::{Cell, Color as TableColor, Table, presets::UTF8_FULL};
+use comfy_table::{presets::UTF8_FULL, Cell, Color as TableColor, Table};
 use plotters::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::error::Error;
@@ -17,6 +17,7 @@ pub struct DbResult {
     pub time_taken: f64,
     pub total_db_size: u64,
     pub percent_queries_used: f64,
+    pub num_queries_used: u64,
 }
 
 // pub struct ReconstructionData2d {

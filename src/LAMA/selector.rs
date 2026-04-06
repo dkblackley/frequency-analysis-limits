@@ -59,7 +59,7 @@ impl<'a> Selector<'a> {
             dist.parse().unwrap(),
         );
 
-        let mut selector = Selector {
+        let selector = Selector {
             encrypted_db: loaded_db,
             dim,
             lowest_rec: low_pair.clone(),
@@ -94,15 +94,13 @@ impl<'a> Selector<'a> {
         );
         pb.set_message("Fetching entire database...");
 
-        // 1. Do a single search to extract the entire encrypted database
         let mut response = self
             .encrypted_db
             .do_search(&self.lowest_rec, &self.largest_rec);
-        response.retain(|&x| x != i64::MIN); // Filter out empty space placeholders
-        response.sort_unstable(); // Ensure canonical combination ordering
+        response.retain(|&x| x != i64::MIN);
+        response.sort_unstable();
 
         pb.set_message(format!("Processing combinations for t={}...", t));
-
         let processed_count = AtomicU64::new(0);
 
         let freq_to_observed_map: HashMap<u64, Vec<Vec<i64>>> = response
@@ -116,27 +114,24 @@ impl<'a> Selector<'a> {
                         .iter()
                         .map(|&v| unflatten_nd(v, &self.largest_rec, &self.lowest_rec))
                         .collect();
-
                     let dom_pair = get_mbq(&decoded_points);
 
-                    // NEW: Just ask the struct directly!
-                    let freq = self.query_distribution.get_true_freq(&dom_pair);
+                    // Get TRUE CUMULATIVE PROBABILITY!
+                    let prob = self.query_distribution.get_cumulative_prob(&dom_pair);
 
-                    if freq > 0 {
-                        local_map.entry(freq).or_default().push(t_tuple);
+                    if prob > 0.0 {
+                        // Cast f64 to u64 for HashMap storage
+                        local_map.entry(prob.to_bits()).or_default().push(t_tuple);
                     }
 
-                    // Update progress bar safely
                     let current = processed_count.fetch_add(1, AtomicOrdering::Relaxed);
                     if current % 10_000 == 0 {
                         pb.set_message(format!("Processed {} tuples...", current));
                     }
-
                     local_map
                 },
             )
             .reduce(HashMap::new, |mut map1, map2| {
-                // Merge thread-local HashMaps by extending the vectors
                 for (freq, mut tuples) in map2 {
                     map1.entry(freq).or_default().append(&mut tuples);
                 }
@@ -149,27 +144,71 @@ impl<'a> Selector<'a> {
         freq_to_observed_map
     }
 
-    /// Precomputes and serializes TRUE probabilities for dominant pairs using only the query
-    /// distribution. This function iterates through the domain to calculate how many queries cover
-    /// specific point pairs (dominant pairs). It doesn't say anything about how many records
-    /// are found/the frequency of records. This is purely the Query Distribution. The calculation
-    /// is: What is the probability of this specific dominating pair being issued as a query added
-    /// to the probability of every pair that also dominates this pair. Hence, the probability is:
-    /// what's the probability of OBSERVING this dominating pair.
-    ///
-    /// # Returns
-    ///
-    /// A mapping from a Query (dominating pair) to the (true) probability we'd expect that Query to be
-    /// served.
-    ///
-    pub fn get_dominant_pair_to_perfect_prob_map(
+    /// Computes the theoretical expected frequencies for all t-tuples
+    pub fn build_theoretical_t_dict(
         &self,
-    ) -> Result<HashMap<DomPair, Probability>, LAMAError> {
-        info!("Task 1: Computing dominant pair frequencies...");
+        lowest_rec: &[i64],
+        largest_rec: &[i64],
+        t: usize,
+    ) -> HashMap<u64, Vec<Vec<i64>>> {
+        let mut vals: Vec<Record> = lowest_rec
+            .iter()
+            .zip(largest_rec.iter())
+            .map(|(&low, &high)| low..=high)
+            .multi_cartesian_product()
+            .collect();
 
-        let timer = Instant::now();
-        let lowest_rec = self.lowest_rec.clone();
-        let largest_rec = self.largest_rec.clone();
+        let n = vals.len();
+        let total_combinations = binomial_coefficient(n, t);
+        vals.sort_unstable();
+
+        let pb = ProgressBar::new(total_combinations as u64);
+        pb.set_style(ProgressStyle::default_bar().template("{spinner:.green} [{elapsed_precise}] [{wide_bar:.cyan/blue}] {pos}/{len} ({eta})").unwrap());
+
+        let processed_count = AtomicU64::new(0);
+
+        let theoretical_dict: HashMap<u64, Vec<Vec<i64>>> = vals
+            .into_iter()
+            .combinations(t)
+            .par_bridge()
+            .fold(
+                HashMap::new,
+                |mut local_map: HashMap<u64, Vec<Vec<i64>>>, val_tuple| {
+                    let bounding_pair = get_mbq(&val_tuple);
+                    let prob = self.query_distribution.get_cumulative_prob(&bounding_pair);
+
+                    let flattened_tuple: Vec<i64> = val_tuple
+                        .iter()
+                        .map(|record| flatten_nd(record, largest_rec, lowest_rec))
+                        .collect();
+
+                    // Convert the f64 probability back to bits for the hashmap
+                    local_map
+                        .entry(prob.to_bits())
+                        .or_default()
+                        .push(flattened_tuple);
+
+                    let current = processed_count.fetch_add(1, AtomicOrdering::Relaxed);
+                    if current % 10_000 == 0 {
+                        pb.set_position(current);
+                    }
+                    local_map
+                },
+            )
+            .reduce(HashMap::new, |mut map1, map2| {
+                for (freq, mut tuples) in map2 {
+                    map1.entry(freq).or_default().append(&mut tuples);
+                }
+                map1
+            });
+
+        pb.finish_with_message(format!("Finished theoretical mapping for t={}", t));
+        theoretical_dict
+    }
+
+    pub fn get_dom_pairs(encrypted_db: &(dyn Searchable + Sync)) -> Vec<DomPair> {
+        info!("Finding all possible responses...");
+        let (lowest_rec, largest_rec) = encrypted_db.get_dom_pair();
 
         let space_size: f64 = lowest_rec
             .iter()
@@ -178,7 +217,8 @@ impl<'a> Selector<'a> {
             .product();
 
         let total_pairs = space_size.powi(2);
-        let total_dom_pairs = (total_pairs / 2_f64.powi((self.dim - 1) as i32)) as u64;
+        let total_dom_pairs =
+            (total_pairs / 2_f64.powi((encrypted_db.get_dims() - 1) as i32)) as u64;
 
         let domain_iter = lowest_rec
             .iter()
@@ -187,17 +227,13 @@ impl<'a> Selector<'a> {
             .multi_cartesian_product();
 
         let pb = ProgressBar::new(total_dom_pairs / 2);
-        pb.set_style(
-            ProgressStyle::default_bar()
-                .template("{spinner:.green} [{elapsed_precise}] [{wide_bar:.cyan/blue}] {pos}/{len} ({eta})").unwrap()
-                .progress_chars("#>-"),
-        );
-        let processed_count = AtomicU64::new(0);
+        pb.set_style(ProgressStyle::default_bar().template("{spinner:.green} [{elapsed_precise}] [{wide_bar:.cyan/blue}] {pos}/{len} ({eta})").unwrap());
 
+        let processed_count = AtomicU64::new(0);
         let largest_rec_ref = &largest_rec;
         let processed_count_ref = &processed_count;
 
-        let true_pair_frequency_dict: HashMap<DomPair, Probability> = domain_iter
+        let pair_vec: Vec<DomPair> = domain_iter
             .par_bridge()
             .flat_map(|v| {
                 let dom_iter = v
@@ -209,27 +245,21 @@ impl<'a> Selector<'a> {
 
                 dom_iter.par_bridge().map({
                     let v_clone = v.clone();
-
                     move |dv| {
-                        let pair = (v_clone.clone(), dv);
-
-                        let prob = self.query_distribution.get_query_prob(&pair);
-
                         let count = processed_count_ref.fetch_add(1, AtomicOrdering::Relaxed);
                         if count % 100_000 == 0 {
                             pb_inner.set_position(count);
                         }
-                        (pair, prob)
+                        (v_clone.clone(), dv)
                     }
                 })
             })
             .collect();
 
         pb.finish_with_message("Done computing dominant pair frequencies");
-        info!("Finished DP frequencies in {:?}", timer.elapsed());
-
-        Ok(true_pair_frequency_dict)
+        pair_vec
     }
+
     pub fn get_freq_val_t_tup_dict(
         &self,
         t: usize,
@@ -254,7 +284,7 @@ impl<'a> Selector<'a> {
             ProgressStyle::default_bar()
                 .template(
                     "{spinner:.green} [{elapsed_precise}] [{wide_bar:.cyan/blue}] {pos}/{len} ({eta})",
-                )?
+                ).unwrap()
                 .progress_chars("#>-"),
         );
 
@@ -268,15 +298,18 @@ impl<'a> Selector<'a> {
                 HashMap::new,
                 |mut local_map: HashMap<(Value, Frequency), Vec<Vec<Value>>>, val_tuple| {
                     let bounding_pair = get_mbq(&val_tuple);
-                    let freq = self.query_distribution.get_true_freq(&bounding_pair);
+
+                    // NEW: Use the cumulative probability natively
+                    let prob = self.query_distribution.get_cumulative_prob(&bounding_pair);
 
                     let flattened_tuple: Vec<Value> = val_tuple
                         .iter()
                         .map(|record| flatten_nd(record, &*largest_rec, &*lowest_rec))
                         .collect();
 
+                    // Convert f64 probability to bits (u64 / Frequency) for safe O(1) hashing
                     local_map
-                        .entry((flattened_tuple.len() as Value, freq))
+                        .entry((flattened_tuple.len() as Value, prob.to_bits()))
                         .or_default()
                         .push(flattened_tuple);
 
@@ -298,133 +331,6 @@ impl<'a> Selector<'a> {
         pb.finish_with_message("Done computing value tuple frequencies");
 
         Ok(val_tup_freq_dict)
-    }
-
-    /// Computes the theoretical expected frequencies for all t-tuples
-    pub fn build_theoretical_t_dict(
-        &self,
-        lowest_rec: &[i64],
-        largest_rec: &[i64],
-        t: usize,
-    ) -> HashMap<u64, Vec<Vec<i64>>> {
-        let mut vals: Vec<Record> = lowest_rec
-            .iter()
-            .zip(largest_rec.iter())
-            .map(|(&low, &high)| low..=high)
-            .multi_cartesian_product()
-            .collect();
-
-        let n = vals.len();
-        let total_combinations = binomial_coefficient(n, t);
-        vals.sort_unstable();
-
-        let pb = ProgressBar::new(total_combinations as u64);
-        pb.set_style(
-            ProgressStyle::default_bar()
-                .template("{spinner:.green} [{elapsed_precise}] [{wide_bar:.cyan/blue}] {pos}/{len} ({eta})").unwrap()
-                .progress_chars("#>-"),
-        );
-
-        let processed_count = AtomicU64::new(0);
-
-        let theoretical_dict: HashMap<u64, Vec<Vec<i64>>> = vals
-            .into_iter()
-            .combinations(t)
-            .par_bridge()
-            .fold(
-                HashMap::new,
-                |mut local_map: HashMap<u64, Vec<Vec<i64>>>, val_tuple| {
-                    let bounding_pair = get_mbq(&val_tuple);
-                    let freq = self.query_distribution.get_true_freq(&bounding_pair);
-
-                    let flattened_tuple: Vec<i64> = val_tuple
-                        .iter()
-                        .map(|record| flatten_nd(record, largest_rec, lowest_rec))
-                        .collect();
-
-                    local_map.entry(freq).or_default().push(flattened_tuple);
-
-                    let current = processed_count.fetch_add(1, AtomicOrdering::Relaxed);
-                    if current % 10_000 == 0 {
-                        pb.set_position(current);
-                    }
-
-                    local_map
-                },
-            )
-            .reduce(HashMap::new, |mut map1, map2| {
-                for (freq, mut tuples) in map2 {
-                    map1.entry(freq).or_default().append(&mut tuples);
-                }
-                map1
-            });
-
-        pb.finish_with_message(format!("Finished theoretical mapping for t={}", t));
-
-        theoretical_dict
-    }
-
-    pub fn get_dom_pairs(encrypted_db: &(dyn Searchable + Sync)) -> Vec<DomPair> {
-        info!("Finding all possible responses...");
-
-        let (lowest_rec, largest_rec) = encrypted_db.get_dom_pair();
-
-        // Product of (max - min + 1) for each dimension
-        let space_size: f64 = lowest_rec
-            .iter()
-            .zip(largest_rec.iter())
-            .map(|(&low, &high)| (high - low + 1) as f64)
-            .product();
-
-        let total_pairs = space_size.powi(2);
-        let total_dom_pairs =
-            (total_pairs / 2_f64.powi((encrypted_db.get_dims() - 1) as i32)) as u64;
-
-        let domain_iter = lowest_rec
-            .iter()
-            .zip(largest_rec.iter())
-            .map(|(&low, &high)| low..=high)
-            .multi_cartesian_product();
-
-        let pb = ProgressBar::new(total_dom_pairs / 2);
-        pb.set_style(
-            ProgressStyle::default_bar()
-                .template("{spinner:.green} [{elapsed_precise}] [{wide_bar:.cyan/blue}] {pos}/{len} ({eta})").unwrap()
-                .progress_chars("#>-"),
-        );
-        let processed_count = AtomicU64::new(0);
-
-        let largest_rec_ref = &largest_rec;
-        let processed_count_ref = &processed_count;
-
-        let pair_vec: Vec<DomPair> = domain_iter
-            .par_bridge() // Parallelize the outer loop
-            .flat_map(|v| {
-                // Build the iterator lazily without allocating a Vec
-                let dom_iter = v
-                    .iter()
-                    .zip(largest_rec_ref.iter())
-                    .map(|(&v_val, &max_val)| v_val..=max_val)
-                    .multi_cartesian_product();
-                let pb_inner = pb.clone();
-
-                // Bridge the inner iterator to run concurrently as well
-                dom_iter.par_bridge().map({
-                    // Clone `v` once per outer iteration so the inner closure can own its own copy
-                    let v_clone = v.clone();
-                    move |dv| {
-                        let count = processed_count_ref.fetch_add(1, AtomicOrdering::Relaxed);
-                        if count % 100_000 == 0 {
-                            pb_inner.set_position(count);
-                        }
-                        (v_clone.clone(), dv)
-                    }
-                })
-            })
-            .collect();
-
-        pb.finish_with_message("Done computing dominant pair frequencies");
-        pair_vec
     }
 
     // TODO: Sample instead.
@@ -579,159 +485,49 @@ impl<'a> Selector<'a> {
     }
 }
 
-// #[cfg(test)]
-// mod tests {
-//     use super::*;
-//     use crate::LAMA::selector::Selector;
-//     use crate::LAMA::utility::encloses;
-//     use rand::Rng;
-//
-//     #[test]
-//     fn test_vc_bounds_and_empirical_reality_testdb() {
-//         // 1. Setup a 10x10 test database at 50% density
-//         let rows = 50;
-//         let cols = 50;
-//         let db = testDB::new(rows, cols, 100);
-//         let boxed_db: Box<dyn Searchable + Sync> = Box::new(db);
-//
-//         let selector = Selector {
-//             dist: "uniform".to_string(),
-//             encrypted_db: &boxed_db,
-//             dim: 2,
-//             lowest_rec: vec![0, 0],
-//             largest_rec: vec![(rows - 1) as i64, (cols - 1) as i64],
-//             evc: boxed_db.get_universe().len(),
-//             epsilon: 0.05,
-//             delta: 0.1,
-//             query_percent: -1.0,
-//         };
-//
-//         // Universe size is the number of actual non-empty records in the DB
-//         let universe_size = boxed_db.get_universe().len();
-//
-//         let target_epsilon = 0.15; // 5% error margin
-//         let confidence = 0.70; // 90% confidence
-//         let delta = 1.0 - confidence;
-//
-//         // Calculate theoretical required queries based on the universe size [cite: 145, 147]
-//         let required_samples =
-//             Selector::calculate_required_samples(universe_size, target_epsilon, delta);
-//
-//         println!("Universe Size: {}", universe_size);
-//         println!(
-//             "Theoretical queries required for <= 5% error: {}",
-//             required_samples
-//         );
-//
-//         let dom_freq_map = selector.get_dominant_pair_to_freq_map().unwrap();
-//         let all_queries: Vec<DomPair> = dom_freq_map.keys().cloned().collect();
-//
-//         // Pick a random a response to act as our 'test'
-//
-//         let mut rng = rand::thread_rng();
-//         let target_response_idx = (rng.gen::<u64>() % all_queries.len() as u64) as usize;
-//         let target_response = boxed_db.do_search(
-//             &all_queries[target_response_idx].0,
-//             &all_queries[target_response_idx].1,
-//         );
-//
-//         let mut true_tuples = Vec::new();
-//
-//         for tuple in target_response.iter() {
-//             true_tuples.push(unflatten_nd(
-//                 *tuple,
-//                 &selector.largest_rec,
-//                 &selector.lowest_rec,
-//             ))
-//         }
-//
-//         // let target_response = all_responses
-//         //     .iter()
-//         //     .find(|r| !r.is_empty())
-//         //     .unwrap()
-//         //     .clone();
-//
-//         let dom_pair = get_mbq(&*true_tuples);
-//         assert_eq!(dom_pair, all_queries[target_response_idx]); // This should be obvious. Keeping it as a sanity check
-//
-//         // Calculate the exact TRUE probability.
-//         // Under a uniform distribution, this is the count of queries returning a superset
-//         // divided by the total number of possible queries (dominating pairs).
-//         let mut true_frequency = dom_freq_map.get(&dom_pair).unwrap();
-//         let total_dom_pairs = dom_freq_map.len() as f64;
-//         let true_probability: f64 = (true_frequency.clone() as f64) / total_dom_pairs;
-//
-//         // 3. Empirical Simulation
-//         let mut rng = rand::thread_rng();
-//         let mut observed_hits = 0;
-//
-//         for _ in 0..required_samples {
-//             // Uniformly sample a query from the map
-//             let random_query_idx: usize = (rng.gen::<u64>() % all_queries.len() as u64) as usize;
-//             let sampled_query = &all_queries[random_query_idx];
-//
-//             // If the sampled query dominates our target MBQ, it's a hit!
-//             if encloses(sampled_query, &dom_pair) {
-//                 observed_hits += 1;
-//             }
-//         }
-//
-//         let empirical_probability = observed_hits as f64 / required_samples as f64;
-//         let actual_error = (true_probability - empirical_probability).abs();
-//
-//         let empirical_probability = observed_hits as f64 / required_samples as f64;
-//         let actual_error = (true_probability - empirical_probability).abs();
-//
-//         println!("True Probability: {:.4}", true_probability);
-//         println!("Empirical Probability: {:.4}", empirical_probability);
-//         println!("Actual Empirical Error: {:.6}", actual_error);
-//
-//         // The empirical error should be vastly smaller than the worst-case epsilon bound.
-//         assert!(actual_error <= target_epsilon);
-//     }
-//
-//     #[test]
-//     fn test_sukp_bound_on_testdb() {
-//         // Create a 2x2 grid at 100% density.
-//         // We know exactly how many geometric subsets this creates.
-//         let rows = 2;
-//         let cols = 2;
-//         let db = testDB::new(rows, cols, 100);
-//         let boxed_db: Box<dyn Searchable + Sync> = Box::new(db);
-//
-//         let selector = Selector {
-//             dist: "uniform".to_string(),
-//             encrypted_db: &boxed_db,
-//             dim: 2,
-//             lowest_rec: vec![0, 0],
-//             largest_rec: vec![(rows - 1) as i64, (cols - 1) as i64],
-//             evc: 0,
-//             epsilon: 0.0,
-//             delta: 0.0,
-//             query_percent: -1.0,
-//         };
-//
-//         // For a dense 2x2 grid:
-//         // - Universe size (capacity) = 4 items.
-//         // - Total possible bounding boxes (responses) = 9
-//         //   (Four 1x1s, two 1x2s, two 2x1s, one 2x2).
-//         // Since every response contains only a subset of the 4 universe items,
-//         // the Set-Union Knapsack Problem can pick ALL 9 itemsets without
-//         // exceeding the weight capacity of 4 items.
-//
-//         let q = selector.get_vc_sukp_bound();
-//
-//         // The maximum profit 'q' should be exactly 9.0.
-//         assert!(
-//             (q - 9.0).abs() < 1e-5,
-//             "Expected SUKP profit of 9.0, got {}",
-//             q
-//         );
-//
-//         // VC-bound b = floor(log2(q)) + 1
-//         // floor(log2(9)) = 3.
-//         // b = 3 + 1 = 4.
-//         let b = q.log2().floor() + 1.0;
-//         assert_eq!(b, 4.0);
-//     }
-// }
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::dataloader::tester::testDB;
+
+    #[test]
+    fn test_5x5_corner_probabilities() {
+        let db = testDB::new(5, 5, 100);
+        let boxed_db: Box<dyn Searchable + Sync> = Box::new(db);
+        let selector = Selector::new("gaussian", &boxed_db, 0.0, 0.0);
+
+        // A 5x5 grid operates on indices 0..4
+        let top_right = (vec![4, 4], vec![4, 4]);
+        let bottom_left = (vec![0, 0], vec![0, 0]);
+        let top_left = (vec![0, 4], vec![0, 4]);
+        let bottom_right = (vec![4, 0], vec![4, 0]);
+        let center = (vec![2, 2], vec![2, 2]);
+
+        let p_tr = selector.query_distribution.get_cumulative_prob(&top_right);
+        let p_bl = selector
+            .query_distribution
+            .get_cumulative_prob(&bottom_left);
+        let p_tl = selector.query_distribution.get_cumulative_prob(&top_left);
+        let p_br = selector
+            .query_distribution
+            .get_cumulative_prob(&bottom_right);
+        let p_center = selector.query_distribution.get_cumulative_prob(&center);
+
+        // As proven mathematically:
+        // Total queries = 15 * 15 = 225
+        // Corners = 1*5*1*5 = 25 queries -> 25 / 225 = 1/9 = 0.1111...
+        // Center = 3*3*3*3 = 81 queries -> 81 / 225 = 0.36
+
+        // Prove corners are identical
+        assert_eq!(p_tr, p_bl);
+        assert_eq!(p_bl, p_tl);
+        assert_eq!(p_tl, p_br);
+
+        // Prove the math perfectly matches the float math from our function
+        assert_eq!(p_tr, 25.0 / 225.0);
+        assert_eq!(p_center, 81.0 / 225.0);
+
+        // Prove center is larger than edges
+        assert!(p_tr < p_center);
+    }
+}

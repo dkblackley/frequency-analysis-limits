@@ -17,6 +17,7 @@ use rand::SeedableRng;
 use rayon::prelude::*;
 use std::collections::HashMap;
 use std::io::Read;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 // Reads sequential bincode items and groups them by frequency on the fly
 struct GroupReader<R: Read> {
@@ -273,10 +274,25 @@ impl Translator {
     where
         V: Fn(&[i64], &[i64]) -> bool + Sync + Send,
     {
+        let pb = ProgressBar::new(chunk.len() as u64);
+        pb.set_style(
+            ProgressStyle::default_bar()
+                .template("{spinner:.green} [{elapsed_precise}] [{wide_bar:.cyan/blue}] {pos}/{len} ({eta})")
+                .unwrap()
+                .progress_chars("#>-"),
+        );
+
+        let atom_count = AtomicU64::new(0);
+
         chunk
-            .into_par_iter()
+            // .into_par_iter()
+            .into_iter()
             .filter_map(|enc_t_tuple| {
                 let t = enc_t_tuple.len();
+                let current = atom_count.fetch_add(1, Ordering::Relaxed);
+                if current % 10 == 0 {
+                    pb.set_message(format!("Processed {} tuples...", current));
+                }
 
                 // 1. APPLY T-1 PRUNING FIRST! (Made when running apriori candidates?)
                 for sub_tuple in enc_t_tuple.iter().copied().combinations(t - 1) {
@@ -331,7 +347,7 @@ impl Translator {
                 let mut params = SatParameters::default();
                 params.enumerate_all_solutions = Some(true);
                 params.fill_additional_solutions_in_response = Some(true);
-                params.solution_pool_size = Some(5000);
+                params.solution_pool_size = Some(50_000);
                 params.num_search_workers = Some(1);
 
                 let response = cp_sat::ffi::solve_with_parameters(&raw_model, &params);
@@ -348,6 +364,13 @@ impl Translator {
                 let primary_vals: Vec<i64> = (0..t).map(|i| response.solution[i]).collect();
                 if validate_candidate(enc_t_tuple, &primary_vals) {
                     valid_t_assignments.push(primary_vals);
+                }
+                for add_sol in &response.additional_solutions {
+                    let add_vals: Vec<i64> = (0..t).map(|i| add_sol.values[i]).collect();
+
+                    if validate_candidate(enc_t_tuple, &add_vals) {
+                        valid_t_assignments.push(add_vals);
+                    }
                 }
 
                 // Canonicalize: CP-SAT might return duplicates in the pool, deduplicate them

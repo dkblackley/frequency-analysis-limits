@@ -1,17 +1,16 @@
 use crate::dataloader::datasets::TwoDMap;
-use crate::dataloader::tester::testDB;
 use crate::dataloader::{unflatten_nd, Searchable};
-use crate::plotting::plot::{DataWrapper, DbResult, ReconstructionData2dPoint};
+use crate::plotting::plot::{DbResult, ReconstructionData2dPoint};
 use crate::plotting::post::export_to_geojson;
+use crate::Record;
 use crate::LAMA::selector::Selector;
 use crate::LAMA::solver::Solver;
 use crate::LAMA::translator::Translator;
 use crate::LAMA::utility::get_mbq;
-use crate::{DomPair, Probability, Record};
-use log::{debug, error, info};
+use log::{debug, info};
 use std::collections::HashMap;
 use std::fs::File;
-use std::io::{BufReader, BufWriter};
+use std::io::BufWriter;
 use std::time::Instant;
 
 mod error;
@@ -39,18 +38,7 @@ pub fn lama_attack(
         TwoDMap::load_array_locations_from_file(&format!("{full_datapath}/{db_name}_51x51.json"))
             .unwrap();
 
-    // Removed 'if-else' - all scaling now happens BEFORE loading in (Mainly we just take the scaled
-    // data from REMIN/even_less
-    loaded_db = Box::new(
-        TwoDMap::new(
-            loaded_locs,
-            db_name.as_str(),
-            1.0,
-            // Some((250, 250)),
-            None,
-        )
-        .unwrap(),
-    );
+    loaded_db = Box::new(TwoDMap::new(loaded_locs, db_name.as_str(), 1.0, None).unwrap());
 
     debug!(
         "Loaded {}, a {}-dim DB with {} records and highest/lowest records {:?}/{:?}",
@@ -61,9 +49,7 @@ pub fn lama_attack(
         loaded_db.get_dom_pair().1
     );
 
-    let dim = loaded_db.get_dims();
     let start = Instant::now();
-
     let (low_pair, high_pair) = loaded_db.get_dom_pair();
     let binding = loaded_db.get_universe();
     let largest_enc_val = binding.iter().max().unwrap();
@@ -72,46 +58,25 @@ pub fn lama_attack(
 
     info!("Selector computing values");
 
-    // This is part we assume the adversary is allowed to know. Dompair (a response) and how frequently
-    // This response truly appears under this distribution.
-
-    // if *save {
-    //     //TODO: Fix this
-    //     let filename = format!("{full_datapath}/limits/dom_to_freq");
-    //     let file = File::create(filename.clone()).unwrap();
-    //     let writer = BufWriter::new(file);
-    //     info!("Writing dom pair to freq map to {full_datapath}/limits/");
-    //     bincode::serialize_into(writer, &dom_pair_freq).unwrap();
-    // }
-    //
-
     let obs_t1: HashMap<u64, Vec<Vec<i64>>>;
 
     info!("Computing Observed frequencies -> 1 tuple");
-    //TODO: Move these into selector
-    if query_perc == &1.0 {
+    if *query_perc == 1.0 {
         obs_t1 = selector.precompute_perfect_t_observed(1);
     } else {
         todo!();
     }
 
     info!("Computing True Probabilities -> 1 tuple");
-    let query_dist_over_one = selector.build_theoretical_t_dict(&*low_pair, &*high_pair, 1);
+    let query_dist_over_one = selector.build_theoretical_t_dict(&low_pair, &high_pair, 1);
 
     let mut translator = Translator::new(*largest_enc_val, loaded_db.get_universe(), false);
 
-    // TODO: move this into translator
-
     translator.process_t1(&obs_t1, &query_dist_over_one);
-
-    let total_observed_samples = selector.query_distribution.total_exact_frequency as f64;
-    let high_pair_ref = &high_pair;
-    let low_pair_ref = &low_pair;
 
     let query_dist_ref = &selector.query_distribution;
     let high_pair_ref = &high_pair;
     let low_pair_ref = &low_pair;
-    let total_samples = query_dist_ref.total_exact_frequency as f64;
 
     // 1. SIMULATION SHORTCUT: Calculate the observed probability of the encrypted records
     let get_observed_prob = |enc_tuple: &[i64]| -> f64 {
@@ -121,8 +86,7 @@ pub fn lama_attack(
             .collect();
         let dom_pair = get_mbq(&true_plaintexts);
 
-        let freq = query_dist_ref.get_true_freq(&dom_pair);
-        (freq as f64) / total_samples
+        query_dist_ref.get_cumulative_prob(&dom_pair)
     };
 
     // 2. EXPECTED PROBABILITY: What is the theoretical probability of these proposed plaintexts?
@@ -133,12 +97,10 @@ pub fn lama_attack(
             .collect();
         let pt_mbq = get_mbq(&pt_records);
 
-        query_dist_ref.get_query_prob(&pt_mbq)
+        query_dist_ref.get_cumulative_prob(&pt_mbq)
     };
 
-    // 3. THE VALIDATOR: Checks if the theoretical probability falls within the observed epsilon bounds
-    // Safety check: If you pass `0.0` for perfect knowledge testing, use a micro-epsilon
-    // to prevent floating point drift from falsely rejecting valid candidates.
+    // 3. THE VALIDATOR
     let active_eps = if *eps == 0.0 { 1e-9 } else { *eps };
 
     let validate_candidate = |enc_tuple: &[i64], proposed_plaintexts: &[i64]| -> bool {
@@ -148,22 +110,16 @@ pub fn lama_attack(
         }
 
         let exp_prob = get_expected_prob(proposed_plaintexts);
-
-        // Probability-native bounding check!
         (obs_prob - exp_prob).abs() <= active_eps
     };
 
     let universe = loaded_db.get_universe();
 
-    for i in 2..(t + 1) {
+    for i in 2..(*t as usize + 1) {
         let start_t = Instant::now();
         info!("Recursively computing frequencies for {i} tuples");
 
-        translator.process_t_greater_than_1(
-            i as usize,
-            &universe,
-            &validate_candidate, // Pass the single probabilistic validator
-        );
+        translator.process_t_greater_than_1(i as usize, &universe, &validate_candidate);
 
         let end_t = Instant::now();
         debug!("Round {i} took {}", end_t.duration_since(start_t).as_secs())
@@ -173,31 +129,25 @@ pub fn lama_attack(
     let mut solver = Solver::new(translator.get_var_index_map());
     let end = Instant::now();
 
-    let responses = solver.solve(&mut translator.get_proto_model(), false);
+    let mut model = translator.get_proto_model();
+    let responses = solver.solve(&mut model, false);
 
     let mut correct = 0;
-    let mut incorrect = 0;
     let mut first_resp = HashMap::new();
 
-    //Key is actually the true value.
     for (key, val) in responses.clone() {
         first_resp.insert(key, val[0]);
 
         for i in 0..val.len() {
             if key == val[i] {
-                correct = correct + 1;
+                correct += 1;
             }
         }
     }
 
     debug!("{correct} correct, {} total", responses.len());
-    //TODO: Unique name
-    info!("Saving correct solution to {full_datapath}/limits/{db_name}TODO.json");
-    save_reconstruction_data(
-        &first_resp,
-        &format!("{full_datapath}/limits/reconstruction.json"),
-        &loaded_db,
-    );
+    info!("Saving correct solution to {full_datapath}/limits/reconstruction.json");
+    save_reconstruction_data(&first_resp, &format!("{full_datapath}/limits"), &loaded_db);
 
     let final_res = DbResult {
         name: loaded_db.get_name().parse().unwrap(),
@@ -212,12 +162,8 @@ pub fn lama_attack(
         percent_queries_used: 100.0,
     };
 
-    save_results(
-        final_res,
-        format!("{full_datapath}/limit/results.json",).as_str(),
-    )
+    save_results(final_res, &format!("{full_datapath}/limit/results.json"))
 }
-
 fn save_results(result: DbResult, file_path: &str) {
     // Create the file and wrap it in a BufWriter for better performance
     let file = File::create(file_path).unwrap();

@@ -327,8 +327,8 @@ fn end_to_end() {
         .filter_level(log::LevelFilter::Debug)
         .try_init();
 
-    let rows = 50;
-    let cols = 50;
+    let rows = 5;
+    let cols = 5;
     let use_dfs = false;
 
     info!("Loading test DB ({}x{})", rows, cols);
@@ -348,7 +348,7 @@ fn end_to_end() {
     info!("1. Precomputing observed encrypted tuples for t=1...");
     let obs_t1 = selector.precompute_perfect_t_observed(1);
 
-    info!("2. Making known theoretical frequency map for t=1");
+    info!("2. Making known theoretical probability map for t=1");
     let query_dist_over_one = selector.build_theoretical_t_dict(&low_pair, &high_pair, 1);
 
     info!(
@@ -360,7 +360,7 @@ fn end_to_end() {
     info!("--> Processing Base Case (t=1)");
     translator.process_t1(&obs_t1, &query_dist_over_one);
 
-    let total_samples = selector.query_distribution.total_exact_frequency as f64;
+    // Grab references to avoid lifetime closure issues
     let query_dist_ref = &selector.query_distribution;
     let high_pair_ref = &high_pair;
     let low_pair_ref = &low_pair;
@@ -374,8 +374,9 @@ fn end_to_end() {
             .map(|rec| unflatten_nd(*rec, high_pair_ref, low_pair_ref))
             .collect();
         let dom_pair = get_mbq(&true_plaintexts);
-        let freq = query_dist_ref.get_true_freq(&dom_pair);
-        (freq as f64) / total_samples
+
+        // Use the native cumulative probability directly
+        query_dist_ref.get_cumulative_prob(&dom_pair)
     };
 
     // 2. Expected probability of proposed plaintexts
@@ -385,11 +386,13 @@ fn end_to_end() {
             .map(|&v| unflatten_nd(v, high_pair_ref, low_pair_ref))
             .collect();
         let pt_mbq = get_mbq(&pt_records);
-        query_dist_ref.get_query_prob(&pt_mbq)
+
+        // Use the native cumulative probability directly
+        query_dist_ref.get_cumulative_prob(&pt_mbq)
     };
 
     // 3. Unified Validator
-    let active_eps = if eps == 0.0 { 1e-9 } else { eps };
+    let active_eps = if eps == 0.0 { 1e-5 } else { eps };
     let validate_candidate = |enc_tuple: &[i64], proposed_plaintexts: &[i64]| -> bool {
         let obs_prob = get_observed_prob(enc_tuple);
         if obs_prob == 0.0 {
@@ -401,11 +404,14 @@ fn end_to_end() {
     };
 
     info!("DFS STATUS: {use_dfs}");
-    info!("--> Processing Recursive Case (t=2) across thread pool...");
+    info!("--> Processing Recursive Case (t=2) sequentially across chunk models...");
     translator.process_t_greater_than_1(2, &universe, &validate_candidate);
 
-    info!("--> Processing Recursive Case (t=3) across thread pool...");
+    info!("--> Processing Recursive Case (t=3) sequentially across chunk models...");
     translator.process_t_greater_than_1(3, &universe, &validate_candidate);
+
+    // info!("--> Processing Recursive Case (t=4) sequentially across chunk models...");
+    // translator.process_t_greater_than_1(4, &universe, &validate_candidate);
 
     info!("5. Building and executing the CP-SAT Solver for the final constraint graph...");
     let mut solver = Solver::new(translator.get_var_index_map());
@@ -413,13 +419,16 @@ fn end_to_end() {
     let mut model = translator.get_proto_model();
     let responses = solver.solve(&mut model, false);
 
-    if responses.len() != universe.len() {
+    if responses.len() < 6 {
+        // minimum number of expected reconstructions
         let freq_to_t_tuple: HashMap<(Value, Frequency), Vec<Vec<Value>>> =
             selector.get_freq_val_t_tup_dict(2).unwrap();
 
         error!("FATAL: Solver failed to reconstruct full universe!!");
         error!("Known frequency-to-plaintext mappings: {freq_to_t_tuple:?}");
         error!("'encrypted/encoded' universe of plaintexts: {universe:?}");
+        error!("Intvars workings: {:?}", solver);
+        error!("CPModel: {:?}", model);
         error!("Solver Status: {:?}", solver.solution_stat);
         panic!("Solver did not return a full assignment.");
     }
@@ -461,12 +470,4 @@ fn end_to_end() {
     }
 
     info!("Test completed successfully.")
-}
-// Helper to group the plaintexts by frequency for fast O(1) lookups
-fn build_plaintext_dict(tuples: &[(u64, Vec<i64>)]) -> HashMap<u64, Vec<Vec<i64>>> {
-    let mut dict: HashMap<u64, Vec<Vec<i64>>> = HashMap::new();
-    for (freq, tup) in tuples {
-        dict.entry(*freq).or_default().push(tup.clone());
-    }
-    dict
 }

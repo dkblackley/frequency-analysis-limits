@@ -40,6 +40,9 @@ export SINGULARITYENV_RUST_BACKTRACE="1"
 CONTAINER="/scratch/dblackle/rust_env.sif"
 SG_RUN="singularity exec --bind /scratch/dblackle --bind /scratch/dblackle/cargo:/usr/local/cargo $CONTAINER"
 
+echo "Wiping corrupted global Cargo registry cache..."
+rm -rf /scratch/dblackle/cargo/registry
+
 echo "Cleaning previous cached builds..."
 $SG_RUN cargo clean
 

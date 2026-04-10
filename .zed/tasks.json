@@ -31,7 +31,6 @@
       "gaussian",
       "--t",
       "2",
-      "--post",
     ],
     "env": {
       "RUSTFLAGS": "-l protobuf",

@@ -220,6 +220,8 @@ fn main() {
         //
         // plotter.make_table(&dir_paths);
     }
+
+    info!("Moriturus te saluto");
 }
 
 fn quick_convert(file_path: &str, out_path: &str) {

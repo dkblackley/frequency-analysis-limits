@@ -1,13 +1,15 @@
-use crate::dataloader::datasets::TwoDMap;
+use crate::dataloader::datasets::{Location, TwoDMap};
+use crate::dataloader::tester::testDB;
 use crate::dataloader::{unflatten_nd, Searchable};
 use crate::plotting::plot::{DbResult, ReconstructionData2dPoint};
 use crate::plotting::post::export_to_geojson;
 use crate::Record;
+use crate::LAMA::error::LAMAError;
 use crate::LAMA::selector::Selector;
 use crate::LAMA::solver::Solver;
 use crate::LAMA::translator::Translator;
 use crate::LAMA::utility::get_mbq;
-use log::{debug, info};
+use log::{debug, error, info};
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::BufWriter;
@@ -32,13 +34,17 @@ pub fn lama_attack(
     let mut loaded_db: Box<dyn Searchable + Sync>;
     let full_datapath = format!("{0}/{1}", dir_path, db_name);
 
-    info!("Starting LAMA attack using {} dataset", db_name);
-    debug!("Loading data from {full_datapath}/{db_name}.json");
-    let loaded_locs =
-        TwoDMap::load_array_locations_from_file(&format!("{full_datapath}/{db_name}.json"))
-            .unwrap();
+    if db_name == "grid" {
+        loaded_db = Box::new(testDB::new(10, 10, 50))
+    } else {
+        info!("Starting LAMA attack using {} dataset", db_name);
+        debug!("Loading data from {full_datapath}/{db_name}.json");
+        let loaded_locs =
+            TwoDMap::load_array_locations_from_file(&format!("{full_datapath}/{db_name}.json"))
+                .unwrap();
 
-    loaded_db = Box::new(TwoDMap::new(loaded_locs, db_name.as_str(), 1.0, None).unwrap());
+        loaded_db = Box::new(TwoDMap::new(loaded_locs, db_name.as_str(), 1.0, None).unwrap());
+    }
 
     debug!(
         "Loaded {}, a {}-dim DB with {} records and highest/lowest records {:?}/{:?}",
@@ -61,7 +67,7 @@ pub fn lama_attack(
     let obs_t1: HashMap<u64, Vec<Vec<i64>>>;
 
     info!("Computing Observed frequencies -> 1 tuple");
-    if *eps == 1.0 {
+    if *eps == 0.0 {
         obs_t1 = selector.precompute_perfect_t_observed(1);
     } else {
         // empirical VC/calc required samples for this eps/delta
@@ -128,7 +134,10 @@ pub fn lama_attack(
         translator.process_t_greater_than_1(i, &universe, &validate_candidate);
 
         let end_t = Instant::now();
-        debug!("Round {i} took {}", end_t.duration_since(start_t).as_secs())
+        debug!(
+            "Round {i} took {} seconds",
+            end_t.duration_since(start_t).as_secs()
+        )
     }
 
     info!("Building and executing the CP-SAT Solver for the final constraint graph...");
@@ -169,14 +178,17 @@ pub fn lama_attack(
         num_queries_used: 1, // TODO
     };
 
-    save_results(final_res, &format!("{full_datapath}/limit/results.json"))
+    if let Err(e) = save_results(final_res, &format!("{full_datapath}/limit/results.json")) {
+        error!("unable to write to file: {}", e);
+    }
 }
-fn save_results(result: DbResult, file_path: &str) {
+fn save_results(result: DbResult, file_path: &str) -> Result<(), LAMAError> {
     // Create the file and wrap it in a BufWriter for better performance
-    let file = File::create(file_path).unwrap();
+    let file = File::create(file_path)?;
     let writer = BufWriter::new(file);
 
-    serde_json::to_writer_pretty(writer, &result).unwrap();
+    serde_json::to_writer_pretty(writer, &result)?;
+    Ok(())
 }
 
 fn save_reconstruction_data(

@@ -10,4 +10,7 @@ pub enum LAMAError {
 
     #[error("Progress bar failed")]
     ProgressBar(#[from] indicatif::style::TemplateError),
+
+    #[error("Serde Json Error: {0}")]
+    SerdeJson(#[from] serde_json::Error),
 }

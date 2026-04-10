@@ -38,9 +38,12 @@
     "request": "launch",
     "build": {
       "command": "cargo",
-      "args": ["test", "--no-run", "--test", "YOUR_TEST_TARGET_NAME"],
+      "args": ["test", "--no-run", "--test", "integration"],
     },
     "args": ["end_to_end", "--exact", "--nocapture"],
+    "env": {
+      "RUSTFLAGS": "-l protobuf",
+    },
     "sourceLanguages": ["rust"],
   },
 

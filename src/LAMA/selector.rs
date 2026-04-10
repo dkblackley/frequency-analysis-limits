@@ -145,12 +145,9 @@ impl<'a> Selector<'a> {
     }
 
     /// Computes the theoretical expected frequencies for all t-tuples
-    pub fn build_theoretical_t_dict(
-        &self,
-        lowest_rec: &[i64],
-        largest_rec: &[i64],
-        t: usize,
-    ) -> HashMap<u64, Vec<Vec<i64>>> {
+    pub fn build_theoretical_t_dict(&self, t: usize) -> HashMap<u64, Vec<Vec<i64>>> {
+        let (lowest_rec, largest_rec) = self.encrypted_db.get_dom_pair();
+
         let mut vals: Vec<Record> = lowest_rec
             .iter()
             .zip(largest_rec.iter())
@@ -184,7 +181,7 @@ impl<'a> Selector<'a> {
 
                     let flattened_tuple: Vec<i64> = val_tuple
                         .iter()
-                        .map(|record| flatten_nd(record, largest_rec, lowest_rec))
+                        .map(|record| flatten_nd(record, &largest_rec, &lowest_rec))
                         .collect();
 
                     // Convert the f64 probability back to bits for the hashmap

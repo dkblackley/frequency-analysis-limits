@@ -317,6 +317,18 @@ impl Translator {
                     raw_model.variables.push(var_proto);
                 }
 
+                let mut all_diff = cp_sat::proto::AllDifferentConstraintProto::default();
+                for i in 0..t {
+                    all_diff.exprs.push(LinearExpressionProto {
+                        vars: vec![i as i32],
+                        coeffs: vec![1],
+                        offset: 0,
+                    });
+                }
+                let mut constraint_proto = ConstraintProto::default();
+                constraint_proto.constraint = Some(Constraint::AllDiff(all_diff));
+                raw_model.constraints.push(constraint_proto);
+
                 // 4. INJECT TABLE CONSTRAINTS
                 for sub_indices in (0..t).combinations(t - 1) {
                     let mut sub_tuple = Vec::with_capacity(t - 1);
@@ -413,10 +425,7 @@ impl Translator {
         // 3. Generate the Apriori candidates for round t
         let candidate_combinations = Self::generate_apriori_candidates(&mut prev_valid_tuples, t);
 
-        // 4. Update the progress bar to reflect the vastly reduced search space
-        let total_combinations = candidate_combinations.len() as u64;
-
-        let chunk_size = 10_000;
+        let chunk_size = 20_000;
         let mut all_results = Vec::new();
 
         // let total_combinations = binomial_coefficient(encrypted_records.len() as usize, t);

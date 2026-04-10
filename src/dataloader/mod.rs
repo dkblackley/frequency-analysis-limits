@@ -2,7 +2,7 @@ use crate::{Record, Value};
 
 pub mod datasets;
 mod error;
-mod raw_data;
+// mod raw_data;
 pub mod tester;
 
 // Your shared trait

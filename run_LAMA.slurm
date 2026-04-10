@@ -53,6 +53,24 @@ cd "$SLURM_SUBMIT_DIR"
 # Safely prepend the portable binary to the container's internal PATH
 export SINGULARITYENV_PREPEND_PATH="$CMAKE_DIR/bin"
 
+# --- 3. Download and Unpack portable LLVM/Clang ---
+LLVM_DIR="/scratch/dblackle/llvm_portable"
+echo "Setting up portable LLVM/Clang..."
+rm -rf "$LLVM_DIR"
+mkdir -p "$LLVM_DIR"
+cd "$LLVM_DIR"
+
+# Download official pre-compiled LLVM binaries (compatible with Debian 12)
+wget -q https://github.com/llvm/llvm-project/releases/download/llvmorg-16.0.4/clang+llvm-16.0.4-x86_64-linux-gnu-ubuntu-22.04.tar.xz
+tar -xf clang+llvm-16.0.4-x86_64-linux-gnu-ubuntu-22.04.tar.xz --strip-components=1
+rm clang+llvm-16.0.4-x86_64-linux-gnu-ubuntu-22.04.tar.xz
+
+cd "$SLURM_SUBMIT_DIR"
+# ---------------------------------------
+
+# Point Rust's bindgen tool directly to the downloaded libclang.so
+export SINGULARITYENV_LIBCLANG_PATH="$LLVM_DIR/lib"
+
 CONTAINER="/scratch/dblackle/rust_env.sif"
 
 
@@ -90,7 +108,7 @@ for data_dir in "${DATA_DIRS[@]}"; do
 
             # Determine initial 't' value based on distribution type
             if [ "$dist" == "uniform" ]; then
-                t_val=3
+                t_val=4
             else
                 t_val=2
             fi

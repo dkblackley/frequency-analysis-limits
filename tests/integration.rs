@@ -327,16 +327,16 @@ fn end_to_end() {
         .filter_level(log::LevelFilter::Debug)
         .try_init();
 
-    let rows = 5;
-    let cols = 5;
+    let rows = 10;
+    let cols = 10;
     let use_dfs = false;
 
     info!("Loading test DB ({}x{})", rows, cols);
     let loaded_db: Box<dyn Searchable + Sync> = Box::new(testDB::new(rows, cols, 100));
 
-    let dist = "gaussian";
+    let dist = "uniform";
     let eps = 0.0; // Perfect knowledge constraint
-    let delt = 0.0;
+    let delt = 0.7;
 
     let selector = Selector::new(dist, &loaded_db, eps, delt);
     let dim = loaded_db.get_dims();
@@ -349,7 +349,7 @@ fn end_to_end() {
     let obs_t1 = selector.precompute_perfect_t_observed(1);
 
     info!("2. Making known theoretical probability map for t=1");
-    let query_dist_over_one = selector.build_theoretical_t_dict(&low_pair, &high_pair, 1);
+    let query_dist_over_one = selector.build_theoretical_t_dict(1);
 
     info!(
         "3. Initializing Translator with universe size: {}",
@@ -403,6 +403,8 @@ fn end_to_end() {
         (obs_prob - exp_prob).abs() <= active_eps
     };
 
+    info!("Processing t=1");
+
     info!("DFS STATUS: {use_dfs}");
     info!("--> Processing Recursive Case (t=2) sequentially across chunk models...");
     translator.process_t_greater_than_1(2, &universe, &validate_candidate);
@@ -419,7 +421,11 @@ fn end_to_end() {
     let mut model = translator.get_proto_model();
     let responses = solver.solve(&mut model, false);
 
-    if responses[&0].len() < 6 {
+    if (solver.solution_stat != CpSolverStatus::Optimal
+        || solver.solution_stat != CpSolverStatus::Feasible
+        || dist == "uniform" && responses[&0].len() < 6)
+        || (dist == "gaussian" && responses[&0].len() < 1)
+    {
         // minimum number of expected reconstructions
         let freq_to_t_tuple: HashMap<(Value, Frequency), Vec<Vec<Value>>> =
             selector.get_freq_val_t_tup_dict(2).unwrap();

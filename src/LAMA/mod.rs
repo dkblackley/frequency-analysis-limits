@@ -30,11 +30,12 @@ pub fn lama_attack(
     delt: &f64,
 ) {
     let mut loaded_db: Box<dyn Searchable + Sync>;
-    let full_datapath = format!("{0}{1}", dir_path, db_name);
+    let full_datapath = format!("{0}/{1}", dir_path, db_name);
 
     info!("Starting LAMA attack using {} dataset", db_name);
+    debug!("Loading data from {full_datapath}/{db_name}.json");
     let loaded_locs =
-        TwoDMap::load_array_locations_from_file(&format!("{full_datapath}/{db_name}_51x51.json"))
+        TwoDMap::load_array_locations_from_file(&format!("{full_datapath}/{db_name}.json"))
             .unwrap();
 
     loaded_db = Box::new(TwoDMap::new(loaded_locs, db_name.as_str(), 1.0, None).unwrap());
@@ -60,7 +61,7 @@ pub fn lama_attack(
     let obs_t1: HashMap<u64, Vec<Vec<i64>>>;
 
     info!("Computing Observed frequencies -> 1 tuple");
-    if *eps == 0.0 {
+    if *eps == 1.0 {
         obs_t1 = selector.precompute_perfect_t_observed(1);
     } else {
         // empirical VC/calc required samples for this eps/delta
@@ -68,7 +69,7 @@ pub fn lama_attack(
     }
 
     info!("Computing True Probabilities -> 1 tuple");
-    let query_dist_over_one = selector.build_theoretical_t_dict(&low_pair, &high_pair, 1);
+    let query_dist_over_one = selector.build_theoretical_t_dict(1);
 
     let mut translator = Translator::new(*largest_enc_val, loaded_db.get_universe());
 

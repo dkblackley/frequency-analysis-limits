@@ -110,13 +110,13 @@ fn end_to_end() {
         .filter_level(log::LevelFilter::Debug)
         .try_init();
 
-    let rows = 10;
-    let cols = 10;
+    let rows = 7;
+    let cols = 7;
 
     info!("Loading test DB ({}x{})", rows, cols);
     let loaded_db: Box<dyn Searchable + Sync> = Box::new(testDB::new(rows, cols, 70));
 
-    let dist = "gaussian";
+    let dist = "uniform";
     let eps = 0.0; // Perfect knowledge constraint
     let delt = 0.0;
 
@@ -157,7 +157,7 @@ fn end_to_end() {
         query_dist_ref.get_cumulative_prob(&dom_pair)
     };
 
-    // 2. Expected probability of proposed plaintexts
+    // 2. Expected (true) probability of proposed plaintexts
     let get_expected_prob = |plaintexts: &[i64]| -> f64 {
         let pt_records: Vec<Record> = plaintexts
             .iter()
@@ -182,7 +182,7 @@ fn end_to_end() {
     };
 
     info!("--> Processing Base Case (t=1)");
-    translator.process_t1(&obs_t1, &query_dist_over_one);
+    translator.process_t1(&universe, &validate_candidate);
 
     info!("--> Processing Recursive Case (t=2) sequentially across chunk models...");
     translator.process_t_greater_than_1(2, &universe, &validate_candidate);

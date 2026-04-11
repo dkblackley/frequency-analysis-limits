@@ -82,8 +82,6 @@ pub fn lama_attack(
 
     let mut translator = Translator::new(*largest_enc_val, loaded_db.get_universe());
 
-    translator.process_t1(&obs_t1, &query_dist_over_one);
-
     let query_dist_ref = &selector.query_distribution;
     let high_pair_ref = &high_pair;
     let low_pair_ref = &low_pair;
@@ -129,6 +127,7 @@ pub fn lama_attack(
     };
 
     let universe = loaded_db.get_universe();
+    translator.process_t1(&universe, &validate_candidate);
 
     for i in 2..(*t as usize + 1) {
         let start_t = Instant::now();

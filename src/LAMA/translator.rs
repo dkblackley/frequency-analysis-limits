@@ -15,6 +15,7 @@ use rand::rngs::StdRng;
 use rand::seq::SliceRandom;
 use rand::SeedableRng;
 use rayon::prelude::*;
+use rustc_hash::FxHashMap;
 use std::collections::{HashMap, HashSet};
 use std::hash::Hash;
 use std::io::Read;
@@ -140,47 +141,73 @@ impl Translator {
         model.constraints.push(constraint_proto);
     }
 
-    /// Base Case: t=1. Direct dictionary lookup. TODO: Replace these with vecs of probs (f64) and records.
-    pub fn process_t1(
-        &mut self,
-        observed_t1: &HashMap<u64, Vec<Vec<i64>>>,
-        freq_to_all_pts: &HashMap<u64, Vec<Vec<i64>>>,
-    ) {
+    /// Base Case: t=1. Direct dictionary lookup. TODO: Add in closure?
+    /// Base Case: t=1. Evaluates all 1-tuples using the probability closure.
+    pub fn process_t1<V>(&mut self, encrypted_records: &[i64], validate_candidate: V)
+    where
+        V: Fn(&[i64], &[i64]) -> bool,
+    {
         let mut t1_cache = HashMap::new();
 
-        for (freq, enc_tuples_list) in observed_t1 {
-            // Only proceed if this observed frequency exists in the theoretical perfect map
-            if let Some(valid_plaintexts) = freq_to_all_pts.get(freq) {
-                // Iterate over every specific encrypted 1-tuple observed at this frequency
-                for enc_tuple in enc_tuples_list {
-                    // Extract the literal i64 record alias (since t=1, it's at index 0)
-                    let rec = enc_tuple[0];
+        // Optional: Add a progress bar to match the styling of your other rounds
+        let pb = ProgressBar::new(encrypted_records.len() as u64);
+        pb.set_style(
+            ProgressStyle::default_bar()
+                .template("{spinner:.green} [{elapsed_precise}] [{wide_bar:.cyan/blue}] {pos}/{len} ({eta})")
+                .unwrap()
+                .progress_chars("#>-"),
+        );
 
-                    // Fetch its corresponding CP-SAT variable
-                    let var = *self.enc_id_to_intvar.get(&rec).unwrap_or_else(|| {
-                        panic!(
-                            "FATAL: Record {} observed but not in the variable map!",
-                            rec
-                        )
-                    });
+        for &enc_id in encrypted_records {
+            let enc_tuple = vec![enc_id];
+            let mut valid_plaintexts = Vec::new();
 
-                    // Constrain this variable to the valid theoretical plaintexts
-                    Self::add_allowed_assignments(
-                        &mut self.proto_model,
-                        &vec![var],
-                        valid_plaintexts,
-                        &self.var_index_map,
-                    );
+            // Test this encrypted record against every possible plaintext in the domain.
+            // Since we initialized the CP-SAT vars with domain [(0, self.upper)],
+            // we check all values from 0 up to self.upper.
+            for pt in 0..=self.upper {
+                let pt_tuple = vec![pt];
 
-                    // Insert the specific 1-tuple into the cache for Apriori round t=2
-                    t1_cache.insert(enc_tuple.clone(), valid_plaintexts.clone());
+                // 1. Run the unified closure!
+                if validate_candidate(&enc_tuple, &pt_tuple) {
+                    valid_plaintexts.push(pt_tuple);
                 }
-            } else {
-                // If the map-reduce finds a frequency that doesn't exist mathematically,
-                // log it so you know there's a mismatch in the query distribution closure.
-                warn!("Observed frequency {} has no theoretical match!", freq);
             }
+
+            // 2. If the closure found valid matches, add them to the model and cache
+            if !valid_plaintexts.is_empty() {
+                // Fetch its corresponding CP-SAT variable
+                let var = *self.enc_id_to_intvar.get(&enc_id).unwrap_or_else(|| {
+                    panic!(
+                        "FATAL: Record {} observed but not in the variable map!",
+                        enc_id
+                    )
+                });
+
+                // Constrain this variable to the valid theoretical plaintexts
+                Self::add_allowed_assignments(
+                    &mut self.proto_model,
+                    &vec![var],
+                    &valid_plaintexts,
+                    &self.var_index_map,
+                );
+
+                // Insert the specific 1-tuple into the cache for Apriori round t=2
+                t1_cache.insert(enc_tuple, valid_plaintexts);
+            } else {
+                // If it maps to nothing, it's good to log a warning so you know
+                // something is mathematically mismatched in the epsilon bounds
+                warn!(
+                    "Encrypted record {} has no valid plaintext assignments!",
+                    enc_id
+                );
+            }
+
+            pb.inc(1);
         }
+
+        pb.finish_with_message("Finished finding tuples for t=1");
+
         self.t_assignment_archive.insert(1, t1_cache);
     }
 
@@ -293,8 +320,8 @@ impl Translator {
 
     /// You could think of this function as being equivalent to getting a t-tuple we might be
     /// considering into the SAT solver with the simple 'all different' clause. That is, if we are
-    /// considering this t-tuple, is there even t unique plaintexts we can assign (based on
-    /// previous results)? (Note we don't actually use a SAT solver as this is simple enough)
+    /// considering this t-tuple, is there even t unique plaintexts we can assign - based on
+    /// previous results? (Note we don't actually use a SAT solver as this is simple enough)
     fn has_valid_injective_assignment(
         encrypted_tuple: &[i64],
         possible_assignments: &HashMap<i64, HashSet<i64>>,
@@ -354,73 +381,6 @@ impl Translator {
         false
     }
 
-    /// Takes in a mapping from 'encrypted values' to their possible 'plaintext values'. Takes in
-    /// the 't' that we are currently at. If t=2 then we have all the valid 1-tuple assignments
-    /// We then want to return a vec of 2-tuples (that are valid 2-tuples). We can do this as follows:
-    /// Get a 1 tuple and all 'm' valid 1-tuple assignments. Then for 2-tuples, instead of generating
-    /// every possible n choose 2 assignment we
-    fn generate_apriori_candidates(prev_keys: &mut [Vec<i64>], t: usize) -> Vec<Vec<i64>> {
-        let mut candidates = Vec::new();
-
-        // Sort keys lexically so matching prefixes are adjacent
-        prev_keys.sort_unstable();
-
-        debug!("Attempting to find candidates using previous round candidates");
-        let pb = ProgressBar::new(prev_keys.len() as u64);
-        pb.set_style(
-            ProgressStyle::default_bar()
-                .template(
-                    "{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} ({eta})",
-                )
-                .unwrap()
-                .progress_chars("#>-"),
-        );
-
-        for i in 0..prev_keys.len() {
-            // iterate over all previous t-tuple of encrypted records that had possible assignments
-            let k1 = &prev_keys[i];
-
-            for j in i + 1..prev_keys.len() {
-                // Check for ALL possible other t-tuples that have possible assignments
-                let k2 = &prev_keys[j];
-
-                // Check if there is an overlap in the first (t-2) elements. If this is the case,
-                // then the previous model decided that these two t-tuples can be joined and there is a valid
-                // assignment. Hence, we must work out the remaining (up to t) possible assignments.
-                // (so this t-tuple is a candidate). We then take whatever the remaining elements are
-                // from each and add them to the candidate.
-                if k1[..t - 2] == k2[..t - 2] {
-                    let mut candidate = Vec::with_capacity(t);
-                    candidate.extend_from_slice(&k1[..t - 2]);
-
-                    let a = k1[t - 2];
-                    let b = k2[t - 2];
-
-                    if a < b {
-                        candidate.push(a);
-                        candidate.push(b);
-                    } else {
-                        candidate.push(b);
-                        candidate.push(a);
-                    }
-                    candidates.push(candidate);
-                } else {
-                    // Because they are sorted, once the prefix stops matching,
-                    // no further keys in the inner loop will match. Break early!
-                    break;
-                }
-            }
-            pb.inc(1);
-        }
-        pb.finish_with_message("found candidates");
-
-        // Remove identical values from solver. I don't think this 'removes reflections' as this
-        // is only looking at the encrypted values
-        candidates.sort_unstable();
-        candidates.dedup();
-        candidates
-    }
-
     /// Helper for processing chunks in parallel using bare-metal CP-SAT Protobufs. Returns A vec of
     /// tuples, the first inner item is the vec of size t we attempted to solve and the second
     /// item is the vec of all found solutions for that t-tuple.
@@ -428,6 +388,7 @@ impl Translator {
         chunk: &[Vec<i64>],
         upper_bound: i64,
         tuples_to_assignments: &HashMap<Vec<i64>, Vec<Vec<i64>>>,
+        domain_sizes: &FxHashMap<i64, usize>,
         validate_candidate: &V,
     ) -> Vec<(Vec<i64>, Vec<Vec<i64>>)>
     where
@@ -465,7 +426,9 @@ impl Translator {
                 constraint_proto.constraint = Some(Constraint::AllDiff(all_diff));
                 raw_model.constraints.push(constraint_proto);
 
-                let mut total_possible_solutions = 0;
+                // We need to know the potential number of solutions in the output. We work this
+                // out dynamically.
+                let mut lowest_solution_bound: usize = usize::MAX;
 
                 // Now we do a 'OR' operation for this t-round. We take the results from the
                 // previous round and say "from the previous round, we know that only these specific
@@ -483,6 +446,24 @@ impl Translator {
                     let previously_found_plaintexts: &Vec<Vec<i64>> =
                         tuples_to_assignments.get(&sub_tuple).unwrap();
 
+                    // 1. Find which index is missing
+                    let missing_idx = (0..t).find(|x| !sub_indices.contains(x)).unwrap();
+                    let missing_enc_val = enc_t_tuple[missing_idx];
+
+                    // 2. Lightning fast lookup of the precomputed size
+                    let missing_domain_size = domain_sizes
+                        .get(&missing_enc_val)
+                        .copied() // FxHashMap yields a reference, so we copy the usize
+                        .unwrap_or((upper_bound + 1) as usize);
+
+                    // 3. Calculate max solutions bounded by THIS specific table
+                    let max_from_this_table =
+                        previously_found_plaintexts.len() * missing_domain_size;
+
+                    if max_from_this_table < lowest_solution_bound {
+                        lowest_solution_bound = max_from_this_table;
+                    }
+
                     // This table does a CP SAT OR. If this t-tuple (found in the previous round)
                     // has a possible assignment (do a lookup in the prob table) then add it here
                     // as a possible assignment
@@ -499,7 +480,6 @@ impl Translator {
 
                     // Flatten the valid assignments into the table constraint
                     for pt_tuple in previously_found_plaintexts {
-                        total_possible_solutions += pt_tuple.len();
                         table_proto.values.extend(pt_tuple);
                     }
 
@@ -514,8 +494,13 @@ impl Translator {
                 let mut params = SatParameters::default();
                 params.enumerate_all_solutions = Some(true);
                 params.fill_additional_solutions_in_response = Some(true);
-                params.solution_pool_size = Some(total_possible_solutions as i32);
+                params.solution_pool_size = Some(lowest_solution_bound as i32);
                 params.num_search_workers = Some(1);
+
+                params.cp_model_presolve = Some(false);
+                params.linearization_level = Some(0);
+                params.log_search_progress = Some(false);
+                params.catch_sigint_signal = Some(false);
 
                 let response = cp_sat::ffi::solve_with_parameters(&raw_model, &params);
 
@@ -578,6 +563,11 @@ impl Translator {
 
         let direct_map = Self::genereate_direct_mapping(&prev_t_cache);
 
+        let mut domain_sizes: FxHashMap<i64, usize> = FxHashMap::default();
+        for (&enc_val, plaintexts) in &direct_map {
+            domain_sizes.insert(enc_val, plaintexts.len());
+        }
+
         // Extract just the keys (the valid (t-1)-tuples of ENCRYPTED records)
         let prev_valid_tuples: Vec<Vec<i64>> = prev_t_cache.keys().cloned().collect();
 
@@ -586,7 +576,7 @@ impl Translator {
         let candidate_combinations =
             Self::generate_candidates_with_assignments(&prev_valid_tuples, t, &direct_map);
 
-        let chunk_size = 5_000;
+        let chunk_size = 25_000;
         let mut all_results = Vec::new();
 
         // let total_combinations = binomial_coefficient(encrypted_records.len() as usize, t);
@@ -604,6 +594,7 @@ impl Translator {
                 chunk, // Pass it as a slice directly
                 self.upper,
                 &prev_t_cache,
+                &domain_sizes,
                 &validate_candidate,
             );
             all_results.extend(results);
@@ -611,6 +602,17 @@ impl Translator {
         }
 
         pb.finish_with_message(format!("Finished finding tuples for t={t}"));
+        debug!("Found {} results for t={}", all_results.len(), t);
+
+        debug!("Updating t-cache for next round...");
+        let pb = ProgressBar::new(all_results.len() as u64);
+        pb.set_style(
+            ProgressStyle::default_bar()
+                .template("{spinner:.green} [{elapsed_precise}] [{wide_bar:.cyan/blue}] {pos}/{len} ({eta})")
+                .unwrap()
+                .progress_chars("#>-"),
+        );
+        let mut count = 0;
 
         let mut current_t_cache = HashMap::new();
         for (enc_t_tuple, valid_assignments) in all_results {
@@ -633,6 +635,11 @@ impl Translator {
         }
 
         self.t_assignment_archive.insert(t, current_t_cache);
+        // count += 1;
+        // if count % 10_000 == 0 {
+        //     pb.set_position(count);
+        // }
+        pb.inc(1);
     }
 }
 

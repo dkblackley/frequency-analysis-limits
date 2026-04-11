@@ -4,7 +4,7 @@ use cp_sat::proto::CpSolverStatus;
 use cp_sat::proto::{CpModelProto, CpSolverSolution, SatParameters};
 use indicatif::{ProgressBar, ProgressStyle};
 use itertools::all;
-use log::{error, info};
+use log::{debug, error, info};
 use std::cmp::max;
 use std::collections::HashMap;
 
@@ -62,6 +62,10 @@ impl Solver {
         let response = ffi::solve_with_parameters(&model, &params);
         pb.finish_with_message(format!("Solver finished in {:?}", pb.elapsed()));
         let status = response.status();
+
+        info!("Solver finished in {:?}", pb.elapsed());
+        debug!("Solver status: {:?}", status);
+
         let mut reconstructed_dbs = HashMap::new();
 
         let all_solutions: &Vec<CpSolverSolution> = &response.additional_solutions;

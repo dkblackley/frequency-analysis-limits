@@ -488,20 +488,41 @@ impl Translator {
                     raw_model.constraints.push(constraint_proto);
                 }
 
-                // Run the solver, which now tells ALL us valid assignments for this specific
-                // t-tuple given the constraints found from the previous rounds. Notice that we
-                // don't use the probability table YET.
+                // Because we're trying to solve many many small
+                // SAT problems, the 'precompute' ends up taking more
+                // time than the actual solution. We turn all that off with these params
                 let mut params = SatParameters::default();
                 params.enumerate_all_solutions = Some(true);
                 params.fill_additional_solutions_in_response = Some(true);
                 params.solution_pool_size = Some(lowest_solution_bound as i32);
                 params.num_search_workers = Some(1);
 
-                params.cp_model_presolve = Some(false);
-                params.linearization_level = Some(0);
-                params.log_search_progress = Some(false);
-                params.catch_sigint_signal = Some(false);
+                // params.cp_model_presolve = Some(false);
+                // params.linearization_level = Some(0);
+                // params.log_search_progress = Some(false);
+                // params.catch_sigint_signal = Some(false);
 
+                params.catch_sigint_signal = Some(false);
+                params.log_search_progress = Some(false);
+
+                // 2. Kill the "Smart" Heuristics (Overhead reducers)
+                params.cp_model_presolve = Some(false);
+                params.cp_model_probing_level = Some(0);
+                params.symmetry_level = Some(0);
+                params.use_probing_search = Some(false);
+
+                // 3. Kill the LP Engine
+                params.linearization_level = Some(0);
+                params.add_cg_cuts = Some(false);
+                params.add_mir_cuts = Some(false);
+                params.add_lin_max_cuts = Some(false);
+
+                // 4. Force a simple search strategy
+                params.random_branches_ratio = Some(0.0);
+
+                // Run the solver, which now tells ALL us valid assignments for this specific
+                // t-tuple given the constraints found from the previous rounds. Notice that we
+                // don't use the probability table YET.
                 let response = cp_sat::ffi::solve_with_parameters(&raw_model, &params);
 
                 if response.status() != CpSolverStatus::Optimal

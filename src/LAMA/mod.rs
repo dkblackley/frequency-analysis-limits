@@ -3,13 +3,14 @@ use crate::dataloader::tester::testDB;
 use crate::dataloader::{unflatten_nd, Searchable};
 use crate::plotting::plot::{DbResult, ReconstructionData2dPoint};
 use crate::plotting::post::export_to_geojson;
-use crate::Record;
 use crate::LAMA::error::LAMAError;
 use crate::LAMA::selector::Selector;
 use crate::LAMA::solver::Solver;
 use crate::LAMA::translator::Translator;
 use crate::LAMA::utility::get_mbq;
-use log::{debug, error, info};
+use crate::{Frequency, Record, Value};
+use cp_sat::proto::CpSolverStatus;
+use log::{debug, error, info, warn};
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::BufWriter;
@@ -35,7 +36,7 @@ pub fn lama_attack(
     let full_datapath = format!("{0}/{1}", dir_path, db_name);
 
     if db_name == "grid" {
-        loaded_db = Box::new(testDB::new(10, 10, 50))
+        loaded_db = Box::new(testDB::new(15, 15, 50))
     } else {
         info!("Starting LAMA attack using {} dataset", db_name);
         debug!("Loading data from {full_datapath}/{db_name}.json");
@@ -43,7 +44,7 @@ pub fn lama_attack(
             TwoDMap::load_array_locations_from_file(&format!("{full_datapath}/{db_name}.json"))
                 .unwrap();
 
-        loaded_db = Box::new(TwoDMap::new(loaded_locs, db_name.as_str(), 1.0, None).unwrap());
+        loaded_db = Box::new(TwoDMap::new_unscaled(loaded_locs, db_name.as_str()).unwrap());
     }
 
     debug!(
@@ -54,6 +55,8 @@ pub fn lama_attack(
         loaded_db.get_dom_pair().0,
         loaded_db.get_dom_pair().1
     );
+
+    debug!("Using eps: {}, delta: {}", eps, delt);
 
     let start = Instant::now();
     let (low_pair, high_pair) = loaded_db.get_dom_pair();
@@ -110,7 +113,7 @@ pub fn lama_attack(
 
     // Use the epsilon bound and return true for all possible items that are valid/within eps prob
     // of observed.
-    let active_eps = if *eps == 0.0 { 1e-9 } else { *eps };
+    let active_eps = if *eps == 0.0 { 1e-3 } else { *eps };
 
     let validate_candidate = |enc_tuple: &[i64], proposed_plaintexts: &[i64]| -> bool {
         // get the 'empirically observed' probability of this tuple
@@ -146,6 +149,40 @@ pub fn lama_attack(
 
     let mut model = translator.get_proto_model();
     let responses = solver.solve(&mut model, false);
+
+    if (solver.solution_stat != CpSolverStatus::Optimal
+        || solver.solution_stat != CpSolverStatus::Feasible)
+    {
+        // minimum number of expected reconstructions
+        let freq_to_t_tuple: HashMap<(Value, Frequency), Vec<Vec<Value>>> =
+            selector.get_freq_val_t_tup_dict(2).unwrap();
+        warn!(
+            "Solver did not return the expected number of reconstructions. No solutions were found."
+        );
+
+        debug!("Solver failed to reconstruct full universe!!");
+        //debug!("Known frequency-to-plaintext 2-tuple mappings: {freq_to_t_tuple:?}");
+        debug!("'encrypted/encoded' universe of plaintexts: {universe:?}");
+        debug!("Intvars workings: {:?}", solver);
+        debug!("CPModel: {:?}", model);
+        debug!("Solver Status: {:?}", solver.solution_stat);
+    }
+
+    if (dist == "uniform" && responses[&0].len() < 6) {
+        warn!(
+            "Solver did not return the expected number of reconstructions. {} were found.",
+            responses[&0].len()
+        );
+
+        let freq_to_t_tuple = selector.get_freq_val_t_tup_dict(2).unwrap();
+
+        debug!(" Solver failed to reconstruct full universe!!");
+        debug!("Known frequency-to-plaintext 2-tuple mappings: {freq_to_t_tuple:?}");
+        debug!("'encrypted/encoded' universe of plaintexts: {universe:?}");
+        debug!("Intvars workings: {:?}", solver);
+        debug!("CPModel: {:?}", model);
+        debug!("Solver Status: {:?}", solver.solution_stat);
+    }
 
     let mut correct = 0;
     let mut first_resp = HashMap::new();

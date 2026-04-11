@@ -14,7 +14,7 @@
     },
   },
   {
-    "label": "cargo run",
+    "label": "cargo run cali 25x25",
     "command": "cargo",
     "args": [
       "run",
@@ -25,6 +25,29 @@
       "--",
       "--name",
       "cali",
+      "--dir-path",
+      "databases/25x25",
+      "--dist",
+      "gaussian",
+      "--t",
+      "2",
+    ],
+    "env": {
+      "RUSTFLAGS": "-l protobuf",
+    },
+  },
+  {
+    "label": "cargo run grid 15x15",
+    "command": "cargo",
+    "args": [
+      "run",
+      "--package",
+      "frequency_analysis_limits",
+      "--bin",
+      "frequency_analysis_limits",
+      "--",
+      "--name",
+      "grid",
       "--dir-path",
       "databases/25x25",
       "--dist",

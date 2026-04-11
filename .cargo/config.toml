@@ -1,3 +1,6 @@
 [env]
 CXXFLAGS = "-DOR_PROTO_DLL="
 LD_LIBRARY_PATH = "/opt/ortools/lib"
+
+[build]
+rustflags = ["-l", "protobuf"]

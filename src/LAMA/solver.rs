@@ -66,7 +66,7 @@ impl Solver {
 
         let all_solutions: &Vec<CpSolverSolution> = &response.additional_solutions;
         let total_solutions = all_solutions.len();
-        info!("Found {} solutions!", max(total_solutions, 1));
+        info!("Found {} solutions", total_solutions);
 
         self.solution_stat = status.into();
 
@@ -100,7 +100,7 @@ impl Solver {
             }
         } else {
             let numb: i32 = status.into();
-            error!("Solver failed to find a consistent reconstruction. Status: {numb}");
+            error!("Solver failed to find a consistent reconstruction. Status: {numb} - (3) means infeasible");
         }
 
         reconstructed_dbs

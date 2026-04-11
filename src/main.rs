@@ -42,6 +42,7 @@ pub struct Args {
     #[arg(long)]
     plot: bool,
 
+    // TODO: Maybe remove this? Or have it override eps, delta bounds/reverse engineer eps/delta
     #[arg(long, default_value = "100.0")]
     percent: f64,
 

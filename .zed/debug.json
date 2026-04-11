@@ -1,6 +1,65 @@
 [
   {
-    "label": "Debug frequency_analysis_limits",
+    "label": "Debug frequency_analysis_limits cali 25x25",
+    "adapter": "GDB",
+    "request": "launch",
+    "program": "$ZED_WORKTREE_ROOT/target/debug/frequency_analysis_limits",
+    "args": [
+      "--name",
+      "cali",
+      "--dir-path",
+      "databases/25x25",
+      "--dist",
+      "gaussian",
+      "--t",
+      "2",
+    ],
+    "env": {
+      "RUSTFLAGS": "-l protobuf",
+    },
+    "build": {
+      "command": "cargo",
+      "args": [
+        "build",
+        "--package",
+        "frequency_analysis_limits",
+        "--bin",
+        "frequency_analysis_limits",
+      ],
+      "env": {
+        "RUSTFLAGS": "-l protobuf",
+      },
+    },
+    "sourceLanguages": ["rust"],
+  },
+  {
+    "label": "Debug Integration Test: end_to_end GDB",
+    "adapter": "GDB",
+    "request": "launch",
+    "build": {
+      "command": "cargo",
+      "args": ["test", "--test", "integration", "end_to_end", "--no-run"],
+      "env": {
+        "RUSTFLAGS": "-l protobuf",
+      },
+    },
+    "args": ["end_to_end", "--nocapture"],
+  },
+  {
+    "label": "Debug Integration Test: end_to_end minimal GDB",
+    "adapter": "GDB",
+    "request": "launch",
+    "build": {
+      "command": "cargo",
+      "args": ["test", "--test", "integration", "end_to_end"],
+      "env": {
+        "RUSTFLAGS": "-l protobuf",
+      },
+    },
+    "args": ["end_to_end", "--nocapture"],
+  },
+  {
+    "label": "Debug frequency_analysis_limits LLDB cali 50x50",
     "adapter": "CodeLLDB",
     "request": "launch",
     "program": "$ZED_WORKTREE_ROOT/target/debug/frequency_analysis_limits",
@@ -32,36 +91,13 @@
     },
     "sourceLanguages": ["rust"],
   },
-  {
-    "label": "Debug end_to_end test",
-    "adapter": "GDB",
-    "request": "launch",
-    "build": {
-      "command": "cargo",
-      "args": ["test", "--no-run", "--test", "integration"],
-    },
-    "args": ["end_to_end", "--exact", "--nocapture"],
-    "env": {
-      "RUSTFLAGS": "-l protobuf",
-    },
-    "sourceLanguages": ["rust"],
-  },
 
   {
-    "label": "Debug frequency_analysis_limits (GDB)",
-    "adapter": "gdb",
+    "label": "Debug frequency_analysis_limits LLDB cali 25x25",
+    "adapter": "CodeLLDB",
     "request": "launch",
     "program": "$ZED_WORKTREE_ROOT/target/debug/frequency_analysis_limits",
-    "args": [
-      "--name",
-      "cali",
-      "--dir-path",
-      "databases/50x50",
-      "--plot",
-      "--t",
-      "2",
-      "--post",
-    ],
+    "args": ["--name", "cali", "--dir-path", "databases/25x25", "--t", "2"],
     "env": {
       "RUSTFLAGS": "-l protobuf",
     },
@@ -78,5 +114,6 @@
         "RUSTFLAGS": "-l protobuf",
       },
     },
+    "sourceLanguages": ["rust"],
   },
 ]

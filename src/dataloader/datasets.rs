@@ -181,6 +181,85 @@ impl TwoDMap {
             offset,
         })
     }
+
+    /// Initializes a map from exact integer locations, preserving the offset to [0,0]
+    /// and deduplicating, but applying no scaling factors.
+    /// Flags the `scale` field as -1.0 for downstream decryption handlers.
+    pub fn new_unscaled(locations: Vec<Location>, name: &str) -> Result<Self, std::io::Error> {
+        info!("Loaded Unscaled DB {name}");
+
+        // 1. Extract values directly without scaling
+        let raw_points: Vec<[Value; 2]> = locations
+            .into_iter()
+            .map(|loc| [loc.longitude as Value, loc.latitude as Value])
+            .collect();
+
+        // 2. Find the bounding box to calculate the offset
+        let mut true_lower = [Value::MAX, Value::MAX];
+        let mut true_upper = [Value::MIN, Value::MIN];
+
+        for p in &raw_points {
+            if p[0] < true_lower[0] {
+                true_lower[0] = p[0];
+            }
+            if p[1] < true_lower[1] {
+                true_lower[1] = p[1];
+            }
+            if p[0] > true_upper[0] {
+                true_upper[0] = p[0];
+            }
+            if p[1] > true_upper[1] {
+                true_upper[1] = p[1];
+            }
+        }
+
+        if true_lower[0] == Value::MAX {
+            true_lower = [0, 0];
+            true_upper = [0, 0];
+        }
+
+        let offset = vec![true_lower[0], true_lower[1]];
+        let lower = [0, 0];
+        // Calculate shifted upper bounds relative to 0
+        let upper = [true_upper[0] - offset[0], true_upper[1] - offset[1]];
+
+        let mut encrypted_db = Vec::new();
+        let mut unique_points = HashSet::new();
+
+        // 3. Shift the points to 0,0 and deduplicate using your flatten_nd logic
+        for p in raw_points {
+            let shifted_x = p[0] - offset[0];
+            let shifted_y = p[1] - offset[1];
+
+            let flat_point = flatten_nd(&[shifted_x, shifted_y], &upper, &lower);
+            if unique_points.insert(flat_point) {
+                encrypted_db.push(flat_point);
+            }
+        }
+
+        // 4. Build the grid efficiently
+        let dim_x = (upper[0] - lower[0]) as usize + 1;
+        let dim_y = (upper[1] - lower[1]) as usize + 1;
+
+        let mut grid = Array2::from_elem((dim_x, dim_y), i64::MIN);
+        for &flat_point in &encrypted_db {
+            let grid_point = unflatten_nd(flat_point, &upper, &lower);
+            grid[[grid_point[0] as usize, grid_point[1] as usize]] = flat_point;
+        }
+
+        encrypted_db.sort_unstable();
+
+        Ok(TwoDMap {
+            encrypted_db,
+            grid,
+            dimensions: 2,
+            name: name.to_string(),
+            scale: -1.0, // Flag for your decrypt_point_f64 method
+            upper: upper.to_vec(),
+            lower: lower.to_vec(),
+            offset,
+        })
+    }
 }
 
 impl Searchable for TwoDMap {
@@ -228,6 +307,13 @@ impl Searchable for TwoDMap {
 
     fn decrypt_point_f64(&self, val: &Value) -> Vec<f64> {
         let grid_point = unflatten_nd(*val, &self.upper, &self.lower);
+
+        if self.scale == -1.0 {
+            return vec![
+                (grid_point[0] + self.offset[0]) as f64,
+                (grid_point[1] + self.offset[1]) as f64,
+            ];
+        }
 
         vec![
             (grid_point[0] + self.offset[0]) as f64 / self.scale,

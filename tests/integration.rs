@@ -112,17 +112,15 @@ fn end_to_end() {
 
     let rows = 10;
     let cols = 10;
-    let use_dfs = false;
 
     info!("Loading test DB ({}x{})", rows, cols);
-    let loaded_db: Box<dyn Searchable + Sync> = Box::new(testDB::new(rows, cols, 100));
+    let loaded_db: Box<dyn Searchable + Sync> = Box::new(testDB::new(rows, cols, 70));
 
-    let dist = "uniform";
+    let dist = "gaussian";
     let eps = 0.0; // Perfect knowledge constraint
-    let delt = 0.7;
+    let delt = 0.0;
 
     let selector = Selector::new(dist, &loaded_db, eps, delt);
-    let dim = loaded_db.get_dims();
 
     let (low_pair, high_pair) = loaded_db.get_dom_pair();
     let universe = loaded_db.get_universe();
@@ -139,9 +137,6 @@ fn end_to_end() {
         universe.len()
     );
     let mut translator = Translator::new(*largest_enc_val, universe.clone());
-
-    info!("--> Processing Base Case (t=1)");
-    translator.process_t1(&obs_t1, &query_dist_over_one);
 
     // Grab references to avoid lifetime closure issues
     let query_dist_ref = &selector.query_distribution;
@@ -175,7 +170,7 @@ fn end_to_end() {
     };
 
     // 3. Unified Validator
-    let active_eps = if eps == 0.0 { 1e-5 } else { eps };
+    let active_eps = if eps == 0.0 { 1e-9 } else { eps };
     let validate_candidate = |enc_tuple: &[i64], proposed_plaintexts: &[i64]| -> bool {
         let obs_prob = get_observed_prob(enc_tuple);
         if obs_prob == 0.0 {
@@ -186,9 +181,9 @@ fn end_to_end() {
         (obs_prob - exp_prob).abs() <= active_eps
     };
 
-    info!("Processing t=1");
+    info!("--> Processing Base Case (t=1)");
+    translator.process_t1(&obs_t1, &query_dist_over_one);
 
-    info!("DFS STATUS: {use_dfs}");
     info!("--> Processing Recursive Case (t=2) sequentially across chunk models...");
     translator.process_t_greater_than_1(2, &universe, &validate_candidate);
 
@@ -205,7 +200,7 @@ fn end_to_end() {
     let responses = solver.solve(&mut model, false);
 
     if (solver.solution_stat != CpSolverStatus::Optimal
-        || solver.solution_stat != CpSolverStatus::Feasible
+        && solver.solution_stat != CpSolverStatus::Feasible
         || dist == "uniform" && responses[&0].len() < 6)
         || (dist == "gaussian" && responses[&0].len() < 1)
     {
@@ -214,10 +209,10 @@ fn end_to_end() {
             selector.get_freq_val_t_tup_dict(2).unwrap();
 
         error!("FATAL: Solver failed to reconstruct full universe!!");
-        error!("Known frequency-to-plaintext mappings: {freq_to_t_tuple:?}");
+        // error!("Known frequency-to-plaintext mappings: {freq_to_t_tuple:?}");
         error!("'encrypted/encoded' universe of plaintexts: {universe:?}");
         error!("Intvars workings: {:?}", solver);
-        error!("CPModel: {:?}", model);
+        //error!("CPModel: {:?}", model);
         error!("Solver Status: {:?}", solver.solution_stat);
         panic!("Solver did not return a full assignment.");
     }

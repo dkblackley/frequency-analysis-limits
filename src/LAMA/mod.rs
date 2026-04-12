@@ -71,7 +71,7 @@ pub fn lama_attack(
 
     info!("Computing Observed frequencies -> 1 tuple");
     if *eps == 0.0 {
-        obs_t1 = selector.precompute_perfect_t_observed(1);
+        //obs_t1 = selector.precompute_perfect_t_observed(1);
     } else {
         // empirical VC/calc required samples for this eps/delta
         todo!();
@@ -86,8 +86,6 @@ pub fn lama_attack(
     let high_pair_ref = &high_pair;
     let low_pair_ref = &low_pair;
 
-    // As a shortcut we use the 'dompair' as a unique id. We could equivalently just map enc id -> prob
-    // but this is more convenient for 'perfect knowledge'. TODO: Change empirical to be... empirical
     let get_observed_prob = |enc_tuple: &[i64]| -> f64 {
         let true_plaintexts: Vec<Record> = enc_tuple
             .iter()
@@ -95,10 +93,11 @@ pub fn lama_attack(
             .collect();
         let dom_pair = get_mbq(&true_plaintexts);
 
+        // Use the native cumulative probability directly
         query_dist_ref.get_cumulative_prob(&dom_pair)
     };
 
-    // 2. EXPECTED PROBABILITY: What is the theoretical probability of these proposed plaintexts?
+    // 2. Expected (true) probability of proposed plaintexts
     let get_expected_prob = |plaintexts: &[i64]| -> f64 {
         let pt_records: Vec<Record> = plaintexts
             .iter()
@@ -106,23 +105,19 @@ pub fn lama_attack(
             .collect();
         let pt_mbq = get_mbq(&pt_records);
 
+        // Use the native cumulative probability directly
         query_dist_ref.get_cumulative_prob(&pt_mbq)
     };
 
-    // Use the epsilon bound and return true for all possible items that are valid/within eps prob
-    // of observed.
-    let active_eps = if *eps == 0.0 { 1e-3 } else { *eps };
-
+    // 3. Unified Validator
+    let active_eps = if *eps == 0.0 { 1e-9 } else { *eps };
     let validate_candidate = |enc_tuple: &[i64], proposed_plaintexts: &[i64]| -> bool {
-        // get the 'empirically observed' probability of this tuple
         let obs_prob = get_observed_prob(enc_tuple);
         if obs_prob == 0.0 {
             return false;
         }
 
-        // get the expected/true prob
         let exp_prob = get_expected_prob(proposed_plaintexts);
-        // Are we within the bound? Then this is a valid potential reconstruction
         (obs_prob - exp_prob).abs() <= active_eps
     };
 
@@ -149,12 +144,12 @@ pub fn lama_attack(
     let mut model = translator.get_proto_model();
     let responses = solver.solve(&mut model, false);
 
-    if (solver.solution_stat != CpSolverStatus::Optimal
-        || solver.solution_stat != CpSolverStatus::Feasible)
+    if solver.solution_stat != CpSolverStatus::Optimal
+        && solver.solution_stat != CpSolverStatus::Feasible
     {
         // minimum number of expected reconstructions
         let freq_to_t_tuple: HashMap<(Value, Frequency), Vec<Vec<Value>>> =
-            selector.get_freq_val_t_tup_dict(2).unwrap();
+            selector.get_freq_val_t_tup_dict(1).unwrap();
         warn!(
             "Solver did not return the expected number of reconstructions. No solutions were found."
         );
@@ -169,18 +164,9 @@ pub fn lama_attack(
 
     if (dist == "uniform" && responses[&0].len() < 6) {
         warn!(
-            "Solver did not return the expected number of reconstructions. {} were found.",
+            "Solver did not return the expected number of reconstructions for uniform. {} were found.",
             responses[&0].len()
         );
-
-        let freq_to_t_tuple = selector.get_freq_val_t_tup_dict(2).unwrap();
-
-        debug!(" Solver failed to reconstruct full universe!!");
-        debug!("Known frequency-to-plaintext 2-tuple mappings: {freq_to_t_tuple:?}");
-        debug!("'encrypted/encoded' universe of plaintexts: {universe:?}");
-        debug!("Intvars workings: {:?}", solver);
-        debug!("CPModel: {:?}", model);
-        debug!("Solver Status: {:?}", solver.solution_stat);
     }
 
     let mut correct = 0;

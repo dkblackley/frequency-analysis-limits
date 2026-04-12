@@ -168,7 +168,7 @@ $SG_RUN ./target/release/frequency_analysis_limits \
                         --dir-path "$SLURM_SUBMIT_DIR/databases/350x50" \
                         --name "spitz" \
                         --t 3 \
-                        --dist "uniform" \
+                        --dist "beta" \
                         --plot
 
 echo "All runs completed."

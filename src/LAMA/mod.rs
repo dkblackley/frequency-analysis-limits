@@ -1,8 +1,7 @@
-use crate::dataloader::datasets::{Location, TwoDMap};
+use crate::dataloader::datasets::TwoDMap;
 use crate::dataloader::tester::testDB;
 use crate::dataloader::{unflatten_nd, Searchable};
 use crate::plotting::plot::{DbResult, ReconstructionData2dPoint};
-use crate::plotting::post::export_to_geojson;
 use crate::LAMA::error::LAMAError;
 use crate::LAMA::selector::Selector;
 use crate::LAMA::solver::Solver;
@@ -32,7 +31,7 @@ pub fn lama_attack(
     eps: &f64,
     delt: &f64,
 ) {
-    let mut loaded_db: Box<dyn Searchable + Sync>;
+    let loaded_db: Box<dyn Searchable + Sync>;
     let full_datapath = format!("{0}/{1}", dir_path, db_name);
 
     if db_name == "grid" {
@@ -67,7 +66,7 @@ pub fn lama_attack(
 
     info!("Selector computing values");
 
-    let obs_t1: HashMap<u64, Vec<Vec<i64>>>;
+    let _obs_t1: HashMap<u64, Vec<Vec<i64>>>;
 
     info!("Computing Observed frequencies -> 1 tuple");
     if *eps == 0.0 {
@@ -78,7 +77,7 @@ pub fn lama_attack(
     }
 
     info!("Computing True Probabilities -> 1 tuple");
-    let query_dist_over_one = selector.build_theoretical_t_dict(1);
+    let _query_dist_over_one = selector.build_theoretical_t_dict(1);
 
     let mut translator = Translator::new(*largest_enc_val, loaded_db.get_universe());
 
@@ -148,7 +147,7 @@ pub fn lama_attack(
         && solver.solution_stat != CpSolverStatus::Feasible
     {
         // minimum number of expected reconstructions
-        let freq_to_t_tuple: HashMap<(Value, Frequency), Vec<Vec<Value>>> =
+        let _freq_to_t_tuple: HashMap<(Value, Frequency), Vec<Vec<Value>>> =
             selector.get_freq_val_t_tup_dict(1).unwrap();
         warn!(
             "Solver did not return the expected number of reconstructions. No solutions were found."
@@ -162,7 +161,7 @@ pub fn lama_attack(
         debug!("Solver Status: {:?}", solver.solution_stat);
     }
 
-    if (dist == "uniform" && responses[&0].len() < 6) {
+    if dist == "uniform" && responses[&0].len() < 6  {
         warn!(
             "Solver did not return the expected number of reconstructions for uniform. {} were found.",
             responses[&0].len()

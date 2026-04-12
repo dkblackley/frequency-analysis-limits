@@ -126,7 +126,7 @@ pub fn procrustes_align(
 
 use itertools::iproduct;
 use rayon::prelude::*;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 
 /// Calculates the standard Mean Squared Error (MSE)
 pub fn calculate_mse(data: &[ReconstructionData2dPoint]) -> f64 {

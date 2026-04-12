@@ -1,32 +1,20 @@
-use crate::dataloader::tester::testDB;
 use crate::dataloader::{flatten_nd, unflatten_nd, Searchable};
 use crate::LAMA::error::LAMAError;
 use crate::LAMA::query::QueryDistribution;
 use crate::LAMA::utility::{
-    binomial_coefficient, dominates, get_all_dominating_values, get_mbq, DistributionType,
+    binomial_coefficient, get_mbq,
 };
-use crate::{Coord, DomPair, Frequency, Probability, Record, Value};
+use crate::{DomPair, Frequency, Record, Value};
 use good_lp::{
-    default_solver, variable, Constraint, Expression, ProblemVariables, Solution, SolverModel,
+    default_solver, variable, Expression, ProblemVariables, Solution, SolverModel,
 };
-use indicatif::{ProgressBar, ProgressIterator, ProgressStyle};
+use indicatif::{ProgressBar, ProgressStyle};
 use itertools::Itertools;
 use log::info;
-use rand::distributions::{Distribution, WeightedIndex};
-use rand::thread_rng;
+use rand::distributions::Distribution;
 use rayon::prelude::*;
-use rayon::prelude::*;
-use rustc_hash::FxHashMap;
-use statrs::distribution::Normal;
-use statrs::distribution::{Beta, Continuous};
-use std::cmp::Ordering;
-use std::collections::{HashMap, HashSet};
-use std::fs::File;
-use std::io::{BufReader, BufWriter, Write};
-use std::str::FromStr;
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
-use std::sync::mpsc::sync_channel;
-use std::thread;
 use std::time::Instant;
 
 /// Selector: Choosing Record-Retrieval Events.

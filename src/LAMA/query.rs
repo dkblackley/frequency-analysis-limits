@@ -32,7 +32,7 @@ impl<'a> QueryDistribution<'a> {
     ) -> Box<Self> {
         let (lowest_rec, largest_rec) = encrypted_db.get_dom_pair();
         info!("Beginning to set up {dist} distribution");
-        let (mut probs_and_dom_pairs_raw, sampler, weights, total_weight) = match dist {
+        let (_probs_and_dom_pairs_raw, sampler, weights, total_weight) = match dist {
             DistributionType::Uniform => Self::new_uniform_internal(&pairs),
             DistributionType::Gaussian => Self::new_gaussian(&pairs),
             DistributionType::Beta => Self::new_beta(&pairs),

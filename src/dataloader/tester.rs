@@ -24,7 +24,7 @@ impl Default for testDB {
 
 impl testDB {
     pub fn new(rows: usize, cols: usize, density_pct: u8) -> Self {
-        let mut id_map = HashMap::new();
+        let id_map = HashMap::new();
 
         Self {
             idMap: id_map,

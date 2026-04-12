@@ -81,7 +81,7 @@ impl Plotter {
                 let content = fs::read_to_string(&recon_path).unwrap();
                 let data: Vec<ReconstructionData2dPoint> = serde_json::from_str(&content).unwrap();
 
-                let (true_points, mut reconstructed): (Vec<_>, Vec<_>) = data
+                let (true_points, reconstructed): (Vec<_>, Vec<_>) = data
                     .into_iter()
                     .map(|p| (p.true_points, p.reconstructed_points))
                     .unzip();

@@ -1,11 +1,9 @@
-use cp_sat::builder::{CpModelBuilder, IntVar};
+use cp_sat::builder::IntVar;
 use cp_sat::ffi;
 use cp_sat::proto::CpSolverStatus;
 use cp_sat::proto::{CpModelProto, CpSolverSolution, SatParameters};
 use indicatif::{ProgressBar, ProgressStyle};
-use itertools::all;
 use log::{debug, error, info};
-use std::cmp::max;
 use std::collections::HashMap;
 
 /// Solver Reconstruction as Constraint-Satisfaction.

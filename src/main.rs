@@ -1,16 +1,13 @@
-use clap::{arg, Parser};
-use frequency_analysis_limits::dataloader::Searchable;
-use frequency_analysis_limits::plotting::plot::{DbResult, Plotter, ReconstructionData2dPoint};
+use clap::Parser;
+use frequency_analysis_limits::plotting::plot::{Plotter, ReconstructionData2dPoint};
 use frequency_analysis_limits::plotting::post::{
     export_to_geojson, process_and_map_points, procrustes_align,
 };
 use frequency_analysis_limits::LAMA::lama_attack;
 use log::{debug, info};
-use std::collections::HashMap;
-use std::fmt::format;
 use std::fs;
 use std::fs::File;
-use std::io::{BufReader, BufWriter, Write};
+use std::io::{BufReader, Write};
 
 #[derive(Parser, Debug, Clone)]
 #[command(version, about, long_about = None)]
@@ -167,7 +164,7 @@ fn main() {
 
         let out = procrustes_align(&*remin_data, true, true, true);
         let new_vec = out.0;
-        let mse = out.1;
+        let _mse = out.1;
 
         let mut output_file =
             File::create(format!("{0}{1}/reconstruction.json", args.dir_path, args.name).as_str())
@@ -191,7 +188,7 @@ fn main() {
         //plotter.handle_spatial_plot(&[format!("{dir}/{name}")].clone(), true);
 
         //let mut dir_paths = Vec::new();
-        let mut plotter = Plotter {
+        let _plotter = Plotter {
             x_padder: 0.2,
             y_padder: 0.2,
         };

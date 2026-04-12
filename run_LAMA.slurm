@@ -110,7 +110,7 @@ for data_dir in "${DATA_DIRS[@]}"; do
             if [ "$dist" == "uniform" ]; then
                 t_val=4
             else
-                t_val=2
+                t_val=3
             fi
 
             # Initial run
@@ -118,8 +118,7 @@ for data_dir in "${DATA_DIRS[@]}"; do
                 --dir-path "$data_dir/" \
                 --name "$name" \
                 --t "$t_val" \
-                --dist "$dist" \
-                --plot
+                --dist "$dist"
 
             # Check if the initial run failed
             if [ $? -ne 0 ]; then
@@ -147,6 +146,28 @@ for data_dir in "${DATA_DIRS[@]}"; do
         done
     done
 done
+
+# Do specific spitz run at the end.
+$SG_RUN ./target/release/frequency_analysis_limits \
+                        --dir-path "$SLURM_SUBMIT_DIR/databases/350x50" \
+                        --name "spitz" \
+                        --t 3 \
+                        --dist "gaussian" \
+                        --plot
+
+$SG_RUN ./target/release/frequency_analysis_limits \
+                        --dir-path "$SLURM_SUBMIT_DIR/databases/350x50" \
+                        --name "spitz" \
+                        --t 3 \
+                        --dist "uniform" \
+                        --plot
+
+$SG_RUN ./target/release/frequency_analysis_limits \
+                        --dir-path "$SLURM_SUBMIT_DIR/databases/350x50" \
+                        --name "spitz" \
+                        --t 3 \
+                        --dist "uniform" \
+                        --plot
 
 echo "All runs completed."
 

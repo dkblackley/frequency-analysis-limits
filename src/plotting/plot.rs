@@ -18,6 +18,8 @@ pub struct DbResult {
     pub total_db_size: u64,
     pub percent_queries_used: f64,
     pub num_queries_used: u64,
+    pub eps: f64,
+    pub delt: f64,
 }
 
 // pub struct ReconstructionData2d {

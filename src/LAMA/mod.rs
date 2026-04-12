@@ -239,8 +239,8 @@ fn save_reconstruction_data(
         for encrypted_recon in encrypted_recons {
             let recon_vec = loaded_db.decrypt_point_f64(&encrypted_recon);
             let saved_point = ReconstructionData2dPoint {
-                true_points: (true_vec[0], true_vec[1]),
-                reconstructed_points: (recon_vec[0], recon_vec[1]),
+                true_points: vec![true_vec[0], true_vec[1]],
+                reconstructed_points: vec![recon_vec[0], recon_vec[1]],
                 unscaled_points: None, // TODO: load from other files(?)
             };
 

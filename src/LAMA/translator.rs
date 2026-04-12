@@ -263,13 +263,15 @@ impl Translator {
         // For O(1) lookups.
         let prev_t_tuples_hashset: HashSet<Vec<i64>> = prev_t_tuples.iter().cloned().collect();
 
+        // for better multi-threading
+        let all_combinations: Vec<Vec<i64>> =
+            unique_elements_sorted.into_iter().combinations(t).collect();
+
         // 2. Generate all combinations of size 't'
         // From the proof of optimal selection, we know we don't need to consider both [A, B] and [B, A],
         // it's just n choose t. This means that we can only consider the proba of seeing [A, B]
-        let valid_candidates: Vec<Vec<i64>> = unique_elements_sorted
-            .into_iter()
-            .combinations(t)
-            .par_bridge() // Converts the sequential iterator to parallel
+        let valid_candidates: Vec<Vec<i64>> = all_combinations
+            .into_par_iter()
             .filter(|candidate| {
                 let current = counter.fetch_add(1, Ordering::Relaxed);
 
@@ -381,8 +383,8 @@ impl Translator {
     /// Helper for processing chunks in parallel using bare-metal CP-SAT Protobufs. Returns A vec of
     /// tuples, the first inner item is the vec of size t we attempted to solve and the second
     /// item is the vec of all found solutions for that t-tuple.
-    fn process_chunk_cpsat<V>(
-        chunk: &[Vec<i64>],
+    fn process_cpsat<V>(
+        candidates: &[Vec<i64>],
         upper_bound: i64,
         tuples_to_assignments: &HashMap<Vec<i64>, Vec<Vec<i64>>>,
         domain_sizes: &FxHashMap<i64, usize>,
@@ -391,9 +393,25 @@ impl Translator {
     where
         V: Fn(&[i64], &[i64]) -> bool + Sync + Send,
     {
-        chunk
+        let pb = ProgressBar::new(candidates.len() as u64);
+        pb.set_style(
+            ProgressStyle::default_bar()
+                .template("{spinner:.green} [{elapsed_precise}] [{wide_bar:.cyan/blue}] {pos}/{len} ({eta})")
+                .unwrap()
+                .progress_chars("#>-"),
+        );
+
+        let counter = AtomicUsize::new(0);
+
+        candidates
             .into_par_iter()
             .filter_map(|enc_t_tuple| {
+                counter.fetch_add(1, Ordering::Relaxed);
+
+                if counter.load(Ordering::Relaxed) % 10_000 == 0 {
+                    pb.set_position(counter.load(Ordering::Relaxed) as u64);
+                }
+
                 let t = enc_t_tuple.len();
 
                 let mut raw_model = CpModelProto::default();
@@ -607,17 +625,15 @@ impl Translator {
         );
 
         //  Batch combinations to avoid eager memory bombs
-        for chunk in candidate_combinations.chunks(chunk_size) {
-            let results = Self::process_chunk_cpsat(
-                chunk, // Pass it as a slice directly
-                self.upper,
-                &prev_t_cache,
-                &domain_sizes,
-                &validate_candidate,
-            );
-            all_results.extend(results);
-            pb.inc(chunk.len() as u64); // Safe for partial chunks!
-        }
+
+        let results = Self::process_cpsat(
+            &*candidate_combinations, // Pass it as a slice directly
+            self.upper,
+            &prev_t_cache,
+            &domain_sizes,
+            &validate_candidate,
+        );
+        all_results.extend(results);
 
         pb.finish_with_message(format!("Finished finding tuples for t={t}"));
         debug!("Found {} results for t={}", all_results.len(), t);

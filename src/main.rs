@@ -9,6 +9,10 @@ use std::fs;
 use std::fs::File;
 use std::io::{BufReader, Write};
 
+// Helps rayon when calling malloc
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
 #[derive(Parser, Debug, Clone)]
 #[command(version, about, long_about = None)]
 pub struct Args {
@@ -121,10 +125,10 @@ fn main() {
             )
             .unwrap();
 
-            print_min_val(
+            print_min_val_2d(
                 &lat_long_truth
                     .iter()
-                    .map(|point| point.true_points)
+                    .map(|point| point.true_points.clone())
                     .collect(),
             );
 
@@ -133,16 +137,19 @@ fn main() {
             info!("MSE of Remin (On map): {:?}", aligned.1);
 
             let out_path = format!("{remin_path}/{unique_rem_name}.geojson");
-            let recon_points_vec: Vec<(f64, f64)> = aligned
+            let recon_points_vec: Vec<Vec<f64>> = aligned
                 .0
                 .iter()
-                .map(|point| point.reconstructed_points)
+                .map(|point| point.reconstructed_points.clone())
                 .collect();
 
             export_to_geojson(recon_points_vec, &out_path).unwrap();
 
-            let true_points: Vec<(f64, f64)> =
-                aligned.0.iter().map(|point| point.true_points).collect();
+            let true_points: Vec<Vec<f64>> = aligned
+                .0
+                .iter()
+                .map(|point| point.true_points.clone())
+                .collect();
             let true_path = format!("{dir}{0}/true.geojson", args.name,);
             export_to_geojson(true_points, &true_path).unwrap();
 
@@ -159,10 +166,10 @@ fn main() {
 
             let out_path = format!("{less_path}/{unique_less_name}.geojson");
 
-            let recon_points_vec: Vec<(f64, f64)> = aligned
+            let recon_points_vec: Vec<Vec<f64>> = aligned
                 .0
                 .iter()
-                .map(|point| point.reconstructed_points)
+                .map(|point| point.reconstructed_points.clone())
                 .collect();
             export_to_geojson(recon_points_vec, &out_path).unwrap();
 
@@ -235,15 +242,15 @@ fn quick_convert(file_path: &str, out_path: &str) {
     let reader = BufReader::new(file);
     let data: Vec<ReconstructionData2dPoint> = serde_json::from_reader(reader).unwrap();
 
-    let recon_points_vec: Vec<(f64, f64)> = data
+    let recon_points_vec: Vec<Vec<f64>> = data
         .iter()
-        .map(|point| point.reconstructed_points)
+        .map(|point| point.reconstructed_points.clone())
         .collect();
 
     export_to_geojson(recon_points_vec, out_path).unwrap();
 }
 
-fn print_min_val(points: &Vec<(f64, f64)>) {
+fn print_min_val_2d(points: &Vec<Vec<f64>>) {
     let (min_x, max_x, min_y, max_y) = points.iter().fold(
         (
             f64::INFINITY,
@@ -251,7 +258,8 @@ fn print_min_val(points: &Vec<(f64, f64)>) {
             f64::INFINITY,
             f64::NEG_INFINITY,
         ),
-        |(min_x, max_x, min_y, max_y), &(x, y)| {
+        |(min_x, max_x, min_y, max_y), x_y| {
+            let (x, y) = (x_y[0], x_y[1]);
             (min_x.min(x), max_x.max(x), min_y.min(y), max_y.max(y))
         },
     );

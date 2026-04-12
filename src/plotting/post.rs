@@ -1,4 +1,6 @@
 use crate::plotting::plot::ReconstructionData2dPoint;
+use nalgebra::DMatrix;
+use serde::Deserialize;
 use serde_json::json;
 use std::collections::{HashMap, HashSet};
 use std::error::Error;
@@ -6,129 +8,7 @@ use std::fs;
 use std::fs::File;
 use std::io::Write;
 
-/// Computes the optimal 2D Procrustes alignment (translation, rotation, uniform scaling)
-/// analytically, returning the aligned dataset and the minimized global MSE.
-pub fn procrustes_align(
-    data: &[ReconstructionData2dPoint],
-    scale: bool,
-    rotate: bool,
-    shift: bool,
-) -> (Vec<ReconstructionData2dPoint>, f64) {
-    let n = data.len() as f64;
-    if n == 0.0 {
-        return (Vec::new(), 0.0);
-    }
-
-    // 1. Calculate centroids
-    let (mut mean_true_x, mut mean_true_y) = (0.0, 0.0);
-    let (mut mean_recon_x, mut mean_recon_y) = (0.0, 0.0);
-
-    for p in data {
-        mean_true_x += p.true_points.0;
-        mean_true_y += p.true_points.1;
-        mean_recon_x += p.reconstructed_points.0;
-        mean_recon_y += p.reconstructed_points.1;
-    }
-
-    mean_true_x /= n;
-    mean_true_y /= n;
-    mean_recon_x /= n;
-    mean_recon_y /= n;
-
-    // 2. Center points and accumulate cross-covariance & variance
-    let mut numerator_a = 0.0;
-    let mut numerator_b = 0.0;
-    let mut var_recon = 0.0;
-
-    for p in data {
-        let tx = p.true_points.0 - mean_true_x;
-        let ty = p.true_points.1 - mean_true_y;
-        let rx = p.reconstructed_points.0 - mean_recon_x;
-        let ry = p.reconstructed_points.1 - mean_recon_y;
-
-        numerator_a += tx * rx + ty * ry;
-        numerator_b += ty * rx - tx * ry;
-        var_recon += rx * rx + ry * ry;
-    }
-
-    // 3. Solve for combined scale and rotation factors (u = s*cos(theta), v = s*sin(theta))
-    let (u, v) = if var_recon > 1e-12 {
-        match (scale, rotate) {
-            (true, true) => {
-                // Full Procrustes (Optimal Scale + Optimal Rotation)
-                (numerator_a / var_recon, numerator_b / var_recon)
-            }
-            (false, true) => {
-                // Rotation only (Scale is constrained to 1.0)
-                let norm = (numerator_a.powi(2) + numerator_b.powi(2)).sqrt();
-                if norm > 1e-12 {
-                    (numerator_a / norm, numerator_b / norm)
-                } else {
-                    (1.0, 0.0)
-                }
-            }
-            (true, false) => {
-                // Scale only (Rotation is constrained to 0 degrees)
-                (numerator_a / var_recon, 0.0)
-            }
-            (false, false) => {
-                // Identity transformation
-                (1.0, 0.0)
-            }
-        }
-    } else {
-        (1.0, 0.0)
-    };
-
-    // 4. Apply optimal transformation and compute final MSE
-    let mut total_mse = 0.0;
-
-    let aligned_data = data
-        .iter()
-        .map(|p| {
-            let tx = p.true_points.0 - mean_true_x;
-            let ty = p.true_points.1 - mean_true_y;
-            let rx = p.reconstructed_points.0 - mean_recon_x;
-            let ry = p.reconstructed_points.1 - mean_recon_y;
-
-            let scaled_rotated_x = rx * u - ry * v;
-            let scaled_rotated_y = rx * v + ry * u;
-
-            // Determine final placement based on the `shift` parameter
-            let (final_true_x, final_true_y, final_recon_x, final_recon_y) = if shift {
-                // Shift reconstructed points to match the center of the original true points.
-                // Leave the true points untouched.
-                (
-                    p.true_points.0,
-                    p.true_points.1,
-                    scaled_rotated_x + mean_true_x,
-                    scaled_rotated_y + mean_true_y,
-                )
-            } else {
-                // Align both graphs to the origin (0,0) without shifting back to target center
-                (tx, ty, scaled_rotated_x, scaled_rotated_y)
-            };
-
-            let diff_x = final_true_x - final_recon_x;
-            let diff_y = final_true_y - final_recon_y;
-            total_mse += diff_x * diff_x + diff_y * diff_y;
-
-            ReconstructionData2dPoint {
-                true_points: (final_true_x, final_true_y),
-                reconstructed_points: (final_recon_x, final_recon_y),
-                unscaled_points: None,
-            }
-        })
-        .collect();
-
-    (aligned_data, total_mse / n)
-}
-
-use itertools::iproduct;
-use rayon::prelude::*;
-use serde::Deserialize;
-
-/// Calculates the standard Mean Squared Error (MSE)
+/// Calculates the standard Mean Squared Error (MSE) across N dimensions
 pub fn calculate_mse(data: &[ReconstructionData2dPoint]) -> f64 {
     if data.is_empty() {
         return 0.0;
@@ -136,173 +16,151 @@ pub fn calculate_mse(data: &[ReconstructionData2dPoint]) -> f64 {
     let sum_sq: f64 = data
         .iter()
         .map(|p| {
-            let dx = p.true_points.0 - p.reconstructed_points.0;
-            let dy = p.true_points.1 - p.reconstructed_points.1;
-            dx * dx + dy * dy
+            p.true_points
+                .iter()
+                .zip(p.reconstructed_points.iter())
+                .map(|(t, r)| (t - r).powi(2))
+                .sum::<f64>()
         })
         .sum();
     sum_sq / data.len() as f64
 }
 
-/// Applies a transformation and calculates MSE without allocating a new Vec
-#[inline]
-fn evaluate_transform(
+/// Computes the optimal N-Dimensional Procrustes alignment
+/// using Singular Value Decomposition (SVD).
+pub fn procrustes_align(
     data: &[ReconstructionData2dPoint],
-    dx: f64,
-    dy: f64,
-    angle_deg: f64,
-    sx: f64,
-    sy: f64,
-) -> f64 {
-    let rad = angle_deg.to_radians();
-    let (sin_t, cos_t) = rad.sin_cos();
+    scale: bool,
+    rotate: bool,
+    shift: bool,
+) -> (Vec<ReconstructionData2dPoint>, f64) {
+    let n = data.len();
+    if n == 0 {
+        return (Vec::new(), 0.0);
+    }
 
-    let sum_sq: f64 = data
-        .iter()
-        .map(|p| {
-            let (tx, ty) = p.true_points;
-            let (rx, ry) = p.reconstructed_points;
+    // Determine dimensionality from the first point
+    let d = data[0].true_points.len();
 
-            // Scale -> Rotate -> Translate
-            let scaled_x = rx * sx;
-            let scaled_y = ry * sy;
+    // 1. Calculate centroids
+    let mut mean_true = vec![0.0; d];
+    let mut mean_recon = vec![0.0; d];
 
-            let rot_x = scaled_x * cos_t - scaled_y * sin_t;
-            let rot_y = scaled_x * sin_t + scaled_y * cos_t;
+    for p in data {
+        for i in 0..d {
+            mean_true[i] += p.true_points[i];
+            mean_recon[i] += p.reconstructed_points[i];
+        }
+    }
 
-            let final_x = rot_x + dx;
-            let final_y = rot_y + dy;
+    for i in 0..d {
+        mean_true[i] /= n as f64;
+        mean_recon[i] /= n as f64;
+    }
 
-            let diff_x = tx - final_x;
-            let diff_y = ty - final_y;
-            diff_x * diff_x + diff_y * diff_y
-        })
-        .sum();
-    sum_sq / data.len() as f64
-}
+    // 2. Center points into dynamically sized matrices
+    let mut var_recon = 0.0;
+    let mut centered_true = DMatrix::<f64>::zeros(n, d);
+    let mut centered_recon = DMatrix::<f64>::zeros(n, d);
 
-/// Reconstructs the actual Vec for the best found parameters
-fn apply_transform(
-    data: &[ReconstructionData2dPoint],
-    dx: f64,
-    dy: f64,
-    angle_deg: f64,
-    sx: f64,
-    sy: f64,
-) -> Vec<ReconstructionData2dPoint> {
-    let rad = angle_deg.to_radians();
-    let (sin_t, cos_t) = rad.sin_cos();
+    for (row, p) in data.iter().enumerate() {
+        for col in 0..d {
+            let t = p.true_points[col] - mean_true[col];
+            let r = p.reconstructed_points[col] - mean_recon[col];
+            centered_true[(row, col)] = t;
+            centered_recon[(row, col)] = r;
+            var_recon += r * r;
+        }
+    }
 
-    data.iter()
-        .map(|p| {
-            let (rx, ry) = p.reconstructed_points;
-            let scaled_x = rx * sx;
-            let scaled_y = ry * sy;
-            let rot_x = scaled_x * cos_t - scaled_y * sin_t;
-            let rot_y = scaled_x * sin_t + scaled_y * cos_t;
+    // 3. Solve for N-D Rotation matrix and Scale factor
+    let mut r_mat = DMatrix::<f64>::identity(d, d);
+    let mut s_factor = 1.0;
 
-            ReconstructionData2dPoint {
-                true_points: p.true_points,
-                reconstructed_points: (rot_x + dx, rot_y + dy),
-                unscaled_points: None,
+    if var_recon > 1e-12 {
+        if rotate {
+            // Cross-covariance matrix H = Y^T * X
+            let h = centered_recon.transpose() * &centered_true;
+
+            // SVD of H
+            let svd = h.svd(true, true);
+            let u = svd.u.unwrap();
+            let v_t = svd.v_t.unwrap();
+
+            // Optimal rotation R = U * V^T
+            let mut r_temp = &u * &v_t;
+            let mut d_sign = 1.0;
+
+            // Prevent reflection by enforcing a positive determinant
+            if r_temp.determinant() < 0.0 {
+                d_sign = -1.0;
+                let mut modified_u = u.clone();
+                for i in 0..d {
+                    modified_u[(i, d - 1)] *= -1.0;
+                }
+                r_temp = modified_u * v_t;
             }
-        })
-        .collect()
+            r_mat = r_temp;
+
+            // Optimal scale accounting for rotation
+            if scale {
+                let mut trace_sigma = 0.0;
+                for i in 0..d {
+                    let sign = if i == d - 1 { d_sign } else { 1.0 };
+                    trace_sigma += svd.singular_values[i] * sign;
+                }
+                s_factor = trace_sigma / var_recon;
+            }
+        } else if scale {
+            // Scale only (trace(Y^T * X) / variance)
+            let h = centered_recon.transpose() * &centered_true;
+            s_factor = h.trace() / var_recon;
+        }
+    }
+
+    // 4. Apply transformations and calculate MSE
+    let mut total_mse = 0.0;
+    let mut aligned_data = Vec::with_capacity(n);
+
+    for (row, p) in data.iter().enumerate() {
+        // Extract 1xD row vector, apply rotation and scale: Y_transformed = Y * R * s
+        let y_row = centered_recon.row(row);
+        let transformed_y = y_row * &r_mat * s_factor;
+
+        let mut final_true = vec![0.0; d];
+        let mut final_recon = vec![0.0; d];
+        let mut diff_sq_sum = 0.0;
+
+        for col in 0..d {
+            let tx = centered_true[(row, col)];
+            let scaled_rotated_r = transformed_y[(0, col)];
+
+            let (ft, fr) = if shift {
+                (p.true_points[col], scaled_rotated_r + mean_true[col])
+            } else {
+                (tx, scaled_rotated_r)
+            };
+
+            final_true[col] = ft;
+            final_recon[col] = fr;
+
+            let diff = ft - fr;
+            diff_sq_sum += diff * diff;
+        }
+
+        total_mse += diff_sq_sum;
+
+        aligned_data.push(ReconstructionData2dPoint {
+            true_points: final_true,
+            reconstructed_points: final_recon,
+            unscaled_points: None,
+        });
+    }
+
+    (aligned_data, total_mse / n as f64)
 }
 
-/// 1. Shift Search
-pub fn search_shifts(
-    data: &[ReconstructionData2dPoint],
-    domain_width: usize,
-    domain_height: usize,
-    step: f64,
-) -> Vec<f64> {
-    let x_steps = (0..=(domain_width as f64 / step) as usize).map(|i| i as f64 * step);
-    let y_steps = (0..=(domain_height as f64 / step) as usize).map(|i| i as f64 * step);
-
-    iproduct!(x_steps, y_steps)
-        .par_bridge()
-        .map(|(dx, dy)| evaluate_transform(data, dx, dy, 0.0, 1.0, 1.0))
-        .collect()
-}
-
-/// 2. Rotation Search
-pub fn search_rotations(data: &[ReconstructionData2dPoint], step_deg: f64) -> Vec<f64> {
-    let steps = (0..=(360.0 / step_deg) as usize).map(|i| i as f64 * step_deg);
-
-    steps
-        .par_bridge()
-        .map(|angle| evaluate_transform(data, 0.0, 0.0, angle, 1.0, 1.0))
-        .collect()
-}
-
-/// 3. Scale Search
-pub fn search_scales(
-    data: &[ReconstructionData2dPoint],
-    max_w: usize,
-    max_h: usize,
-    step: f64,
-) -> Vec<f64> {
-    let x_scales = (1..=(max_w as f64 / step) as usize).map(|i| i as f64 * step);
-    let y_scales = (1..=(max_h as f64 / step) as usize).map(|i| i as f64 * step);
-
-    iproduct!(x_scales, y_scales)
-        .par_bridge()
-        .map(|(sx, sy)| evaluate_transform(data, 0.0, 0.0, 0.0, sx, sy))
-        .collect()
-}
-
-/// 4. Combined Multithreaded Grid Search
-pub fn combined_search(
-    data: &[ReconstructionData2dPoint],
-    shift_domain: (usize, usize),
-    shift_step: f64,
-    rot_step_deg: f64,
-    scale_domain: (usize, usize),
-    scale_step: f64,
-) -> (Vec<ReconstructionData2dPoint>, Vec<f64>) {
-    let x_shifts: Vec<f64> = (0..=(shift_domain.0 as f64 / shift_step) as usize)
-        .map(|i| i as f64 * shift_step)
-        .collect();
-    let y_shifts: Vec<f64> = (0..=(shift_domain.1 as f64 / shift_step) as usize)
-        .map(|i| i as f64 * shift_step)
-        .collect();
-    let rotations: Vec<f64> = (0..=(360.0 / rot_step_deg) as usize)
-        .map(|i| i as f64 * rot_step_deg)
-        .collect();
-    let x_scales: Vec<f64> = (1..=(scale_domain.0 as f64 / scale_step) as usize)
-        .map(|i| i as f64 * scale_step)
-        .collect();
-    let y_scales: Vec<f64> = (1..=(scale_domain.1 as f64 / scale_step) as usize)
-        .map(|i| i as f64 * scale_step)
-        .collect();
-
-    // Create combinations. par_bridge() parallelizes the consumption of this massive iterator.
-    let grid = iproduct!(x_shifts, y_shifts, rotations, x_scales, y_scales);
-
-    // Map-Reduce to find all MSEs and track the best configuration simultaneously
-    let (all_mses, best_config) = grid
-        .par_bridge()
-        .map(|(dx, dy, angle, sx, sy)| {
-            let mse = evaluate_transform(data, dx, dy, angle, sx, sy);
-            (vec![mse], (mse, dx, dy, angle, sx, sy))
-        })
-        .reduce(
-            || (Vec::new(), (f64::MAX, 0.0, 0.0, 0.0, 1.0, 1.0)),
-            |mut acc1, mut acc2| {
-                acc1.0.append(&mut acc2.0);
-                let best = if acc1.1.0 < acc2.1.0 { acc1.1 } else { acc2.1 };
-                (acc1.0, best)
-            },
-        );
-
-    let (_, best_dx, best_dy, best_angle, best_sx, best_sy) = best_config;
-    let best_vec = apply_transform(data, best_dx, best_dy, best_angle, best_sx, best_sy);
-
-    (best_vec, all_mses)
-}
-
-pub fn export_to_geojson(data: Vec<(f64, f64)>, output_path: &str) -> Result<(), Box<dyn Error>> {
+pub fn export_to_geojson(data: Vec<Vec<f64>>, output_path: &str) -> Result<(), Box<dyn Error>> {
     let mut features = Vec::new();
 
     // 2. Map your data to standard GeoJSON features
@@ -315,7 +173,7 @@ pub fn export_to_geojson(data: Vec<(f64, f64)>, output_path: &str) -> Result<(),
             "type": "Feature",
             "geometry": {
                 "type": "Point",
-                "coordinates": [item.0, item.1]
+                "coordinates": [item[0], item[1]]
             },
             "properties": {
                 "pair_id": index,
@@ -392,7 +250,10 @@ pub fn process_and_map_points(
 
     for entry in input_data {
         // Only process entries that have unscaled points
-        if let Some((unscaled_x, unscaled_y)) = entry.unscaled_points {
+        if let Some((unscaled_x_unscaled_y)) = entry.unscaled_points {
+            let unscaled_x = unscaled_x_unscaled_y[0];
+            let unscaled_y = unscaled_x_unscaled_y[1];
+
             let orig_lon = (unscaled_x as i64) + offset_lon;
             let orig_lat = (unscaled_y as i64) + offset_lat;
 
@@ -421,7 +282,7 @@ pub fn process_and_map_points(
                     let avg_y = sum_y / (count as f64);
 
                     processed_results.push(ReconstructionData2dPoint {
-                        true_points: (avg_x, avg_y),
+                        true_points: vec![avg_x, avg_y],
                         reconstructed_points: entry.reconstructed_points,
                         unscaled_points: None, // Set to None as requested
                     });
@@ -436,25 +297,28 @@ pub fn process_and_map_points(
 #[cfg(test)]
 mod tests {
     use super::*;
-    // Assumes procrustes_align and the struct are in the parent module
 
     #[test]
-    fn test_procrustes_alignment() {
-        // True points: A simple 1x1 square
-        let true_pts = vec![(0.0, 0.0), (0.0, 1.0), (1.0, 1.0), (1.0, 0.0)];
+    fn test_procrustes_alignment_nd() {
+        // True points: A simple 1x1 square represented as N-D vectors
+        let true_pts = vec![
+            vec![0.0, 0.0],
+            vec![0.0, 1.0],
+            vec![1.0, 1.0],
+            vec![1.0, 0.0],
+        ];
 
         // Reconstructed points:
         // 1. Scaled by 2.0
-        // 2. Rotated by 90 degrees counter-clockwise (x,y -> -y,x)
+        // 2. Rotated by 90 degrees counter-clockwise
         // 3. Translated by x + 5.0, y + 10.0
         let recon_pts = vec![
-            (5.0, 10.0), // from (0,0)
-            (3.0, 10.0), // from (0,1)
-            (3.0, 12.0), // from (1,1)
-            (5.0, 12.0), // from (1,0)
+            vec![5.0, 10.0],
+            vec![3.0, 10.0],
+            vec![3.0, 12.0],
+            vec![5.0, 12.0],
         ];
 
-        // Zip them into your struct
         let data: Vec<ReconstructionData2dPoint> = true_pts
             .into_iter()
             .zip(recon_pts.into_iter())
@@ -468,25 +332,24 @@ mod tests {
         // Run the alignment
         let (aligned_data, mse) = procrustes_align(&data, true, true, true);
 
-        // Float comparison: MSE should be practically zero
         assert!(mse < 1e-10, "MSE is not zero: {}", mse);
 
         // Verify each aligned point matches the original true point perfectly
         for p in aligned_data {
-            let dx = (p.true_points.0 - p.reconstructed_points.0).abs();
-            let dy = (p.true_points.1 - p.reconstructed_points.1).abs();
+            let dx = (p.true_points[0] - p.reconstructed_points[0]).abs();
+            let dy = (p.true_points[1] - p.reconstructed_points[1]).abs();
 
             assert!(
                 dx < 1e-10,
                 "X mismatch: true {}, aligned {}",
-                p.true_points.0,
-                p.reconstructed_points.0
+                p.true_points[0],
+                p.reconstructed_points[0]
             );
             assert!(
                 dy < 1e-10,
                 "Y mismatch: true {}, aligned {}",
-                p.true_points.1,
-                p.reconstructed_points.1
+                p.true_points[1],
+                p.reconstructed_points[1]
             );
         }
     }

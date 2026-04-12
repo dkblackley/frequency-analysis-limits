@@ -24,6 +24,8 @@ plotters = "0.3.7"
 good_lp = { version = "1.15.0", features = ["highs"] }
 statrs = "0.18.0"
 rustc-hash = "2.1.2"
+mimalloc = "0.1.48"
+nalgebra = "0.33.3"
 
 [dev-dependencies]
 num-rational = "0.4"

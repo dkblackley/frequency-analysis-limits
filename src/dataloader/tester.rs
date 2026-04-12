@@ -8,7 +8,7 @@ use std::collections::HashMap;
 #[derive(Debug)]
 pub struct testDB {
     //Map of 'node_id' to the two lat and longs (multiplied by 100 and cast to u64)
-    idMap: HashMap<Value, Vec<Value>>,
+    id_map: HashMap<Value, Vec<Value>>,
     dimensions: Value, // should always be two
     name: String,
     grid: Array2<Value>,
@@ -27,7 +27,7 @@ impl testDB {
         let id_map = HashMap::new();
 
         Self {
-            idMap: id_map,
+            id_map: id_map,
             dimensions: 2,
             name: "testDB".to_string(),
             grid: Self::generate_encoded_grid(rows, cols, density_pct),
@@ -67,7 +67,7 @@ impl Searchable for testDB {
     }
 
     // fn get_id_map(&self) -> &HashMap<Self::Key, Self::Value> {
-    //     &self.idMap
+    //     &self.id_map
     // }
 
     fn get_name(&self) -> &str {
@@ -133,7 +133,7 @@ mod tests {
             let rows = 100;
             let cols = 100;
             let db = testDB {
-                idMap: HashMap::new(),
+                id_map: HashMap::new(),
                 dimensions: 2,
                 name: "testDB".to_string(),
                 grid: testDB::generate_encoded_grid(rows, cols, 100),

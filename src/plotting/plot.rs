@@ -35,14 +35,14 @@ pub struct DataWrapper {
     pub mapping: Vec<ReconstructionData2dPoint>,
 }
 
-#[derive(Debug, Serialize, Deserialize, Copy, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ReconstructionData2dPoint {
     #[serde(rename = "true")]
-    pub true_points: (f64, f64),
+    pub true_points: Vec<f64>,
     #[serde(rename = "reconstructed")]
-    pub reconstructed_points: (f64, f64),
+    pub reconstructed_points: Vec<f64>,
     #[serde(rename = "unscaled_true")]
-    pub unscaled_points: Option<(f64, f64)>,
+    pub unscaled_points: Option<Vec<f64>>,
 }
 
 pub struct Plotter {
@@ -171,8 +171,8 @@ impl Plotter {
     /// Optionally overlays true coordinates (x, x) as a glowing backdrop.
     pub fn plot_spatial_reconstruction(
         &self,
-        true_coords: &[(f64, f64)],
-        recon_coords: &[(f64, f64)],
+        true_coords: &[Vec<f64>],
+        recon_coords: &[Vec<f64>],
         output_path: &str,
         show_true_points: bool,
     ) -> Result<(), Box<dyn Error>> {
@@ -190,7 +190,8 @@ impl Plotter {
 
         let (mut min_x, mut max_x) = (f64::INFINITY, f64::NEG_INFINITY);
         let (mut min_y, mut max_y) = (f64::INFINITY, f64::NEG_INFINITY);
-        for &(x, y) in true_coords.iter().chain(recon_coords.iter()) {
+        for x_y in true_coords.iter().chain(recon_coords.iter()) {
+            let (x, y) = (x_y[0], x_y[1]);
             min_x = min_x.min(x);
             max_x = max_x.max(x);
             min_y = min_y.min(y);
@@ -227,7 +228,7 @@ impl Plotter {
                 .draw_series(
                     true_coords
                         .iter()
-                        .map(|&(x, y)| Circle::new((x, y), 8, cyber_cyan.mix(0.3).filled())),
+                        .map(|x_y| Circle::new((x_y[0], x_y[1]), 8, cyber_cyan.mix(0.3).filled())),
                 )?
                 .label("Ground Truth")
                 .legend(move |(x, y)| Circle::new((x, y), 6, cyber_cyan.mix(0.4).filled()));
@@ -235,7 +236,8 @@ impl Plotter {
 
         // --- 2. Reconstructed Points Series ---
         chart
-            .draw_series(recon_coords.iter().map(|&(x, y)| {
+            .draw_series(recon_coords.iter().map(|x_y| {
+                let (x, y) = (x_y[0], x_y[1]);
                 let ratio = if max_y > min_y {
                     (y - min_y) / (max_y - min_y)
                 } else {
@@ -263,8 +265,8 @@ impl Plotter {
 
     pub fn just_points(
         &self,
-        true_coords: &[(f64, f64)],
-        recon_coords: &[(f64, f64)],
+        true_coords: &[Vec<f64>],
+        recon_coords: &[Vec<f64>],
         output_path: &str,
         show_true_points: bool,
     ) -> Result<(), Box<dyn Error>> {
@@ -279,7 +281,8 @@ impl Plotter {
         // 2. Calculate coordinate bounds
         let (mut min_x, mut max_x) = (f64::INFINITY, f64::NEG_INFINITY);
         let (mut min_y, mut max_y) = (f64::INFINITY, f64::NEG_INFINITY);
-        for &(x, y) in true_coords.iter().chain(recon_coords.iter()) {
+        for x_y in true_coords.iter().chain(recon_coords.iter()) {
+            let (x, y) = (x_y[0], x_y[1]);
             min_x = min_x.min(x);
             max_x = max_x.max(x);
             min_y = min_y.min(y);
@@ -308,13 +311,14 @@ impl Plotter {
             chart.draw_series(
                 true_coords
                     .iter()
-                    .map(|&(x, y)| Circle::new((x, y), 8, cyber_cyan.mix(0.3).filled())),
+                    .map(|x_y| Circle::new((x_y[0], x_y[1]), 8, cyber_cyan.mix(0.3).filled())),
             )?;
             // Notice: .label() and .legend() are removed from here
         }
 
         // --- 5. Draw Reconstructed Points Series ---
-        chart.draw_series(recon_coords.iter().map(|&(x, y)| {
+        chart.draw_series(recon_coords.iter().map(|x_y| {
+            let (x, y) = (x_y[0], x_y[1]);
             let ratio = if max_y > min_y {
                 (y - min_y) / (max_y - min_y)
             } else {

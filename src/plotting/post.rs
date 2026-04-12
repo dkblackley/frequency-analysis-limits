@@ -250,7 +250,7 @@ pub fn process_and_map_points(
 
     for entry in input_data {
         // Only process entries that have unscaled points
-        if let Some((unscaled_x_unscaled_y)) = entry.unscaled_points {
+        if let Some(unscaled_x_unscaled_y ) = entry.unscaled_points {
             let unscaled_x = unscaled_x_unscaled_y[0];
             let unscaled_y = unscaled_x_unscaled_y[1];
 

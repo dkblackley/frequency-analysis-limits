@@ -612,7 +612,7 @@ impl Translator {
         let candidate_combinations =
             Self::generate_candidates_with_assignments(&prev_valid_tuples, t, &direct_map);
 
-        let chunk_size = 25_000;
+        let _chunk_size = 25_000;
         let mut all_results = Vec::new();
 
         // let total_combinations = binomial_coefficient(encrypted_records.len() as usize, t);

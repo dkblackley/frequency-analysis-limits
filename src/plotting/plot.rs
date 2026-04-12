@@ -32,11 +32,11 @@ pub struct DbResult {
 #[derive(Debug, Deserialize, Serialize)]
 pub struct DataWrapper {
     #[serde(rename = "mapping")]
-    pub mapping: Vec<ReconstructionData2dPoint>,
+    pub mapping: Vec<ReconstructionDataPoint>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct ReconstructionData2dPoint {
+pub struct ReconstructionDataPoint {
     #[serde(rename = "true")]
     pub true_points: Vec<f64>,
     #[serde(rename = "reconstructed")]
@@ -79,7 +79,7 @@ impl Plotter {
             let recon_path = dir.join("reconstruction.json");
             if recon_path.exists() {
                 let content = fs::read_to_string(&recon_path).unwrap();
-                let data: Vec<ReconstructionData2dPoint> = serde_json::from_str(&content).unwrap();
+                let data: Vec<ReconstructionDataPoint> = serde_json::from_str(&content).unwrap();
 
                 let (true_points, reconstructed): (Vec<_>, Vec<_>) = data
                     .into_iter()

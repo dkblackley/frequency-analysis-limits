@@ -1,4 +1,4 @@
-use crate::plotting::plot::ReconstructionData2dPoint;
+use crate::plotting::plot::ReconstructionDataPoint;
 use nalgebra::DMatrix;
 use serde::Deserialize;
 use serde_json::json;
@@ -9,7 +9,7 @@ use std::fs::File;
 use std::io::Write;
 
 /// Calculates the standard Mean Squared Error (MSE) across N dimensions
-pub fn calculate_mse(data: &[ReconstructionData2dPoint]) -> f64 {
+pub fn calculate_mse(data: &[ReconstructionDataPoint]) -> f64 {
     if data.is_empty() {
         return 0.0;
     }
@@ -29,11 +29,11 @@ pub fn calculate_mse(data: &[ReconstructionData2dPoint]) -> f64 {
 /// Computes the optimal N-Dimensional Procrustes alignment
 /// using Singular Value Decomposition (SVD).
 pub fn procrustes_align(
-    data: &[ReconstructionData2dPoint],
+    data: &[ReconstructionDataPoint],
     scale: bool,
     rotate: bool,
     shift: bool,
-) -> (Vec<ReconstructionData2dPoint>, f64) {
+) -> (Vec<ReconstructionDataPoint>, f64) {
     let n = data.len();
     if n == 0 {
         return (Vec::new(), 0.0);
@@ -150,7 +150,7 @@ pub fn procrustes_align(
 
         total_mse += diff_sq_sum;
 
-        aligned_data.push(ReconstructionData2dPoint {
+        aligned_data.push(ReconstructionDataPoint {
             true_points: final_true,
             reconstructed_points: final_recon,
             unscaled_points: None,
@@ -205,8 +205,8 @@ struct Metadata {
 pub fn process_and_map_points(
     metadata_path: &str,
     csv_path: &str,
-    input_data: Vec<ReconstructionData2dPoint>,
-) -> Result<Vec<ReconstructionData2dPoint>, Box<dyn Error>> {
+    input_data: Vec<ReconstructionDataPoint>,
+) -> Result<Vec<ReconstructionDataPoint>, Box<dyn Error>> {
     // 1. Load offsets from metadata.json
     let meta_str = fs::read_to_string(metadata_path)?;
     let meta: Metadata = serde_json::from_str(&meta_str)?;
@@ -250,7 +250,7 @@ pub fn process_and_map_points(
 
     for entry in input_data {
         // Only process entries that have unscaled points
-        if let Some(unscaled_x_unscaled_y ) = entry.unscaled_points {
+        if let Some(unscaled_x_unscaled_y) = entry.unscaled_points {
             let unscaled_x = unscaled_x_unscaled_y[0];
             let unscaled_y = unscaled_x_unscaled_y[1];
 
@@ -281,7 +281,7 @@ pub fn process_and_map_points(
                     let avg_x = sum_x / (count as f64);
                     let avg_y = sum_y / (count as f64);
 
-                    processed_results.push(ReconstructionData2dPoint {
+                    processed_results.push(ReconstructionDataPoint {
                         true_points: vec![avg_x, avg_y],
                         reconstructed_points: entry.reconstructed_points,
                         unscaled_points: None, // Set to None as requested
@@ -319,10 +319,10 @@ mod tests {
             vec![5.0, 12.0],
         ];
 
-        let data: Vec<ReconstructionData2dPoint> = true_pts
+        let data: Vec<ReconstructionDataPoint> = true_pts
             .into_iter()
             .zip(recon_pts.into_iter())
-            .map(|(t, r)| ReconstructionData2dPoint {
+            .map(|(t, r)| ReconstructionDataPoint {
                 true_points: t,
                 reconstructed_points: r,
                 unscaled_points: None,

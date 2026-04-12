@@ -110,13 +110,13 @@ fn end_to_end() {
         .filter_level(log::LevelFilter::Debug)
         .try_init();
 
-    let rows = 8;
-    let cols = 8;
+    let rows = 10;
+    let cols = 10;
 
     info!("Loading test DB ({}x{})", rows, cols);
     let loaded_db: Box<dyn Searchable + Sync> = Box::new(testDB::new(rows, cols, 90));
 
-    let dist = "uniform";
+    let dist = "gaussian";
     let eps = 0.0; // Perfect knowledge constraint
     let delt = 0.0;
 
@@ -190,9 +190,9 @@ fn end_to_end() {
     info!("--> Processing Recursive Case (t=3) sequentially across chunk models...");
     translator.process_t_greater_than_1(3, &universe, &validate_candidate);
 
-    info!("Remember: Computing for DB size {} by {}...", rows, cols);
-    info!("--> Processing Recursive Case (t=4) sequentially across chunk models...");
-    translator.process_t_greater_than_1(4, &universe, &validate_candidate);
+    // info!("Remember: Computing for DB size {} by {}...", rows, cols);
+    // info!("--> Processing Recursive Case (t=4) sequentially across chunk models...");
+    // translator.process_t_greater_than_1(4, &universe, &validate_candidate);
 
     info!("5. Building and executing the CP-SAT Solver for the final constraint graph...");
     let mut solver = Solver::new(translator.get_var_index_map());

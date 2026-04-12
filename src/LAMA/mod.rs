@@ -183,7 +183,7 @@ pub fn lama_attack(
     }
 
     debug!("{correct} correct out of {} total", responses.len());
-    info!("Saving correct solution to {full_datapath}/limits/reconstruction.json");
+    info!("Saving correct solutions to {full_datapath}/limits/reconstruction.json");
     save_reconstruction_data(&responses, &format!("{full_datapath}/limits"), &loaded_db);
 
     let final_res = DbResult {
@@ -201,8 +201,13 @@ pub fn lama_attack(
     };
 
     if let Err(e) = save_results(final_res, &format!("{full_datapath}/limit/results.json")) {
-        error!("unable to write to file: {}", e);
+        error!(
+            "failed writing to {full_datapath}/limit/results.json: {}",
+            e
+        );
     }
+
+    info!("LAMA finished running on {db_name}");
 }
 fn save_results(result: DbResult, file_path: &str) -> Result<(), LAMAError> {
     // Create the file and wrap it in a BufWriter for better performance
@@ -248,19 +253,4 @@ fn save_reconstruction_data(
     let writer = BufWriter::new(file);
 
     serde_json::to_writer_pretty(writer, &data).unwrap();
-
-    // individually do entire recon space:
-
-    for i in 0..data.len() {
-        let recon_points_vec: Vec<(f64, f64)> = data[i]
-            .iter()
-            .map(|point| point.reconstructed_points)
-            .collect();
-
-        export_to_geojson(
-            recon_points_vec,
-            format!("{file_path}/reconstruction_geo_{i}.json").as_str(),
-        )
-        .unwrap();
-    }
 }

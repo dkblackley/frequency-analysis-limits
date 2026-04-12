@@ -60,6 +60,8 @@ pub struct Args {
 fn main() {
     let args = Args::parse();
 
+    debug!("Args handed in: {:?}", args);
+
     env_logger::builder()
         .is_test(false)
         .filter_level(log::LevelFilter::Debug)

@@ -107,13 +107,12 @@ for data_dir in "${DATA_DIRS[@]}"; do
             echo "========================================"
 
             # Determine initial 't' value based on distribution type
-#            if [ "$dist" == "uniform" ]; then
-#                t_val=4
-#            else
-#                t_val=3
-#            fi
+            if [ "$dist" == "uniform" ]; then
+                t_val=3
+            else
+                t_val=2
+            fi
 
-            t_val=3
 
             # Initial run
             $SG_RUN ./target/release/frequency_analysis_limits \

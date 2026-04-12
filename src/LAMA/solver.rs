@@ -43,7 +43,9 @@ impl Solver {
         } else {
             params.enumerate_all_solutions = Some(true);
             params.fill_additional_solutions_in_response = Some(true);
-            params.solution_pool_size = Some(32); // Store all solutions found. shouldn't be larger than max t val.
+            // Store all solutions found. I don't know how many reflections higher
+            // dim DBs will have but I don't think it should be above this....
+            params.solution_pool_size = Some(1000);
         }
 
         // Validate the model structurally before solving

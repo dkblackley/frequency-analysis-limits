@@ -110,11 +110,11 @@ fn end_to_end() {
         .filter_level(log::LevelFilter::Debug)
         .try_init();
 
-    let rows = 9;
-    let cols = 9;
+    let rows = 8;
+    let cols = 8;
 
     info!("Loading test DB ({}x{})", rows, cols);
-    let loaded_db: Box<dyn Searchable + Sync> = Box::new(testDB::new(rows, cols, 55));
+    let loaded_db: Box<dyn Searchable + Sync> = Box::new(testDB::new(rows, cols, 90));
 
     let dist = "uniform";
     let eps = 0.0; // Perfect knowledge constraint

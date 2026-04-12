@@ -161,7 +161,7 @@ pub fn lama_attack(
         debug!("Solver Status: {:?}", solver.solution_stat);
     }
 
-    if dist == "uniform" && responses[&0].len() < 6  {
+    if dist == "uniform" && responses[&0].len() < 6 {
         warn!(
             "Solver did not return the expected number of reconstructions for uniform. {} were found.",
             responses[&0].len()
@@ -197,8 +197,8 @@ pub fn lama_attack(
         total_db_size: loaded_db.get_universe().len() as u64,
         percent_queries_used: 1.0,
         num_queries_used: 1, // TODO
-        eps: *eps,
-        delt: *delt,
+        eps: Some(*eps),
+        delt: Some(*delt),
     };
 
     if let Err(e) = save_results(final_res, &format!("{full_datapath}/limits/results.json")) {

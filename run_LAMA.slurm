@@ -116,7 +116,7 @@ for data_dir in "${DATA_DIRS[@]}"; do
 
             # Initial run
             $SG_RUN ./target/release/frequency_analysis_limits \
-                --dir-path "$data_dir/" \
+                --dir-path "$data_dir" \
                 --name "$name" \
                 --t "$t_val" \
                 --dist "$dist"
@@ -127,7 +127,7 @@ for data_dir in "${DATA_DIRS[@]}"; do
 
                 # Retry one more time with t=4
                 $SG_RUN ./target/release/frequency_analysis_limits \
-                        --dir-path "$data_dir/" \
+                        --dir-path "$data_dir" \
                         --name "$name" \
                         --t 4 \
                         --dist "$dist" \

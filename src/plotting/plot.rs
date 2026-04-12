@@ -18,8 +18,8 @@ pub struct DbResult {
     pub total_db_size: u64,
     pub percent_queries_used: f64,
     pub num_queries_used: u64,
-    pub eps: f64,
-    pub delt: f64,
+    pub eps: Option<f64>,
+    pub delt: Option<f64>,
 }
 
 // pub struct ReconstructionData2d {
@@ -85,53 +85,6 @@ impl Plotter {
                     .into_iter()
                     .map(|p| (p.true_points, p.reconstructed_points))
                     .unzip();
-
-                //TODO: Move this into 'post' crate.
-
-                // if dir_path.contains("lili") {
-                //     // 1. Find the current min and max for X and Y
-                //     let min_x = reconstructed
-                //         .iter()
-                //         .map(|rec| rec.0 as f64)
-                //         .fold(f64::INFINITY, |a, b| a.min(b));
-                //     let max_x = reconstructed
-                //         .iter()
-                //         .map(|rec| rec.0 as f64)
-                //         .fold(f64::NEG_INFINITY, |a, b| a.max(b));
-                //
-                //     let min_y = reconstructed
-                //         .iter()
-                //         .map(|rec| rec.1 as f64)
-                //         .fold(f64::INFINITY, |a, b| a.min(b));
-                //     let max_y = reconstructed
-                //         .iter()
-                //         .map(|rec| rec.1 as f64)
-                //         .fold(f64::NEG_INFINITY, |a, b| a.max(b));
-                //
-                //     // Calculate the current range.
-                //     // We use max(1e-6) to prevent dividing by zero if all points share the exact same axis.
-                //     let range_x = (max_x - min_x).max(1e-6);
-                //     let range_y = (max_y - min_y).max(1e-6);
-                //     let target_max = 50.0;
-                //
-                //     // 2. Scale the points using the Min-Max formula
-                //     let mut scaled: Vec<(f64, f64)> = Vec::with_capacity(reconstructed.len());
-                //
-                //     for rec in &reconstructed {
-                //         let x = rec.0 as f64;
-                //         let y = rec.1 as f64;
-                //
-                //         let shifted_x = (((x - min_x) / range_x) * 10.0).round();
-                //         let shifted_y = (((y - min_y) / range_y) * 53.0).round();
-                //
-                //         scaled.push((shifted_x, shifted_y));
-                //     }
-
-                // debug!("Name: {0}", dir_path);
-                // debug!("Scaled: {:?}", scaled);
-                // debug!("Ground truth: {:?}", &data.true_points);
-                //     reconstructed = scaled;
-                // }
 
                 let mut output_img = dir.join("reconstruction_plot.png");
                 self.plot_spatial_reconstruction(

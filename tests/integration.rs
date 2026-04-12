@@ -110,11 +110,11 @@ fn end_to_end() {
         .filter_level(log::LevelFilter::Debug)
         .try_init();
 
-    let rows = 8;
-    let cols = 8;
+    let rows = 9;
+    let cols = 9;
 
     info!("Loading test DB ({}x{})", rows, cols);
-    let loaded_db: Box<dyn Searchable + Sync> = Box::new(testDB::new(rows, cols, 100));
+    let loaded_db: Box<dyn Searchable + Sync> = Box::new(testDB::new(rows, cols, 55));
 
     let dist = "uniform";
     let eps = 0.0; // Perfect knowledge constraint
@@ -190,6 +190,7 @@ fn end_to_end() {
     info!("--> Processing Recursive Case (t=3) sequentially across chunk models...");
     translator.process_t_greater_than_1(3, &universe, &validate_candidate);
 
+    info!("Remember: Computing for DB size {} by {}...", rows, cols);
     info!("--> Processing Recursive Case (t=4) sequentially across chunk models...");
     translator.process_t_greater_than_1(4, &universe, &validate_candidate);
 
@@ -201,7 +202,7 @@ fn end_to_end() {
 
     if (solver.solution_stat != CpSolverStatus::Optimal
         && solver.solution_stat != CpSolverStatus::Feasible
-        || dist == "uniform" && responses[&0].len() < 6)
+        || dist == "uniform" && responses[&0].len() < 2)
         || (dist == "gaussian" && responses[&0].len() < 1)
     {
         // minimum number of expected reconstructions

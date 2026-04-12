@@ -1,7 +1,8 @@
 use crate::dataloader::{flatten_nd, unflatten_nd, Searchable};
 use crate::{Coord, Record, Value};
 use ndarray::{s, Array2};
-use rand::Rng;
+use rand::rngs::StdRng;
+use rand::{Rng, SeedableRng};
 use std::collections::HashMap;
 
 #[derive(Debug)]
@@ -36,7 +37,7 @@ impl testDB {
     }
 
     fn generate_encoded_grid(rows: usize, cols: usize, density_pct: u8) -> Array2<i64> {
-        let mut rng = rand::thread_rng();
+        let mut rng = StdRng::seed_from_u64(42);
 
         // Define the boundaries for your flatten_nd function
         let lower = [0, 0];

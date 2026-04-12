@@ -33,16 +33,19 @@ impl Solver {
     ///
     pub fn solve(&mut self, model: &mut CpModelProto, get_one: bool) -> HashMap<i64, Vec<i64>> {
         let mut params = SatParameters::default();
+        params.linearization_level = Some(0);
+        params.symmetry_level = Some(4);
+        params.add_cg_cuts = Some(false);
+        params.add_mir_cuts = Some(false);
+        params.add_lin_max_cuts = Some(false);
 
         if get_one {
-            params.num_workers = Some(128);
+            params.num_workers = Some(256);
         } else {
             params.enumerate_all_solutions = Some(true);
             params.fill_additional_solutions_in_response = Some(true);
-            params.solution_pool_size = Some(self.var_index_map.len() as i32); // Store all solutions found
+            params.solution_pool_size = Some(32); // Store all solutions found. shouldn't be larger than max t val.
         }
-
-        //
 
         // Validate the model structurally before solving
         info!("Model Validation: {}", ffi::validate_cp_model(&model));

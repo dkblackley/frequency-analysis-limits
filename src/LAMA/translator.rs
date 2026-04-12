@@ -633,125 +633,34 @@ impl Translator {
                 .unwrap()
                 .progress_chars("#>-"),
         );
-        let mut count = 0;
 
-        let mut current_t_cache = HashMap::new();
+        // OPTIMIZATION: Pre-allocate the exact capacity so the HashMap doesn't have to
+        // constantly re-allocate and move memory as it grows to 700k items.
+        let mut current_t_cache = HashMap::with_capacity(all_results.len());
+
         for (enc_t_tuple, valid_assignments) in all_results {
             let main_vars: Vec<_> = enc_t_tuple
                 .iter()
                 .map(|rec| *self.enc_id_to_intvar.get(rec).unwrap())
                 .collect();
 
-            // Finally, we do all this optimisation work just to trim down out t-tuple assignment.
-            // This is now the OR seen in the Paper. I.e. in main_vars might be [id_a, id_b] and
-            // assignments might be [[3, 4], [4, 3]] to get (id_a = 3 AND id_b=4) OR (id_a = 4 AND id_b=3)
-            // (And then ortools explicitly puts and AND between any future calls)
             Self::add_allowed_assignments(
                 &mut self.proto_model,
                 &main_vars,
                 &valid_assignments,
                 &self.var_index_map,
             );
+
             current_t_cache.insert(enc_t_tuple, valid_assignments);
+
+            // FIX: Increment the progress bar INSIDE the loop!
+            // (Indicatif handles internal throttling automatically, so calling this
+            // 700k times will not slow down your loop).
+            pb.inc(1);
         }
 
+        pb.finish_with_message("Finished updating t-cache");
+
         self.t_assignment_archive.insert(t, current_t_cache);
-        // count += 1;
-        // if count % 10_000 == 0 {
-        //     pb.set_position(count);
-        // }
-        pb.inc(1);
     }
 }
-
-// #[cfg(test)]
-// mod equivalence_tests {
-//     use super::*;
-//     // Pulls in Translator, process_chunk, process_chunk_cpsat, etc.
-//     use std::collections::HashMap;
-//
-//     #[test]
-//     fn test_dfs_vs_cpsat_equivalence() {
-//         // 1. Setup Mock Variables for a t=3 scenario
-//         let t = 3;
-//         let upper_bound = 15; // Max plaintext value
-//         let enc_t_tuple = vec![10i64, 20i64, 30i64]; // Our target 3-tuple of encrypted records
-//
-//         // 2. Build a mock prev_t_cache (t-1 = 2)
-//         // We are saying: "In round 2, these were the only valid plaintext assignments for these pairs"
-//         let mut prev_t_cache: HashMap<Vec<i64>, Vec<Vec<i64>>> = HashMap::new();
-//
-//         // Valid plaintexts for (10, 20) are (1, 2) and (8, 9) and a distractor (5, 5)
-//         prev_t_cache.insert(vec![10, 20], vec![vec![1, 2], vec![8, 9], vec![5, 5]]);
-//
-//         // Valid plaintexts for (10, 30) are (1, 3) and (8, 10)
-//         prev_t_cache.insert(vec![10, 30], vec![vec![1, 3], vec![8, 10]]);
-//
-//         // Valid plaintexts for (20, 30) are (2, 3) and (9, 10)
-//         prev_t_cache.insert(vec![20, 30], vec![vec![2, 3], vec![9, 10]]);
-//
-//         // Mathematically, the natural join of these tables should ONLY yield:
-//         // [1, 2, 3] and [8, 9, 10]. The distractor [5, 5] has no matching subsets.
-//
-//         // 3. Mock Frequency Closures
-//         // Only return a target frequency of '42' if the exact target tuple is queried
-//         let get_observed_freq = |tuple: &[i64]| -> u64 {
-//             if tuple == enc_t_tuple.as_slice() {
-//                 42
-//             } else {
-//                 0
-//             }
-//         };
-//
-//         // Only return '42' if the solver guesses one of our valid joined plaintexts
-//         let get_expected_freq = |vals: &[i64]| -> u64 {
-//             if vals == [1, 2, 3] || vals == [8, 9, 10] {
-//                 42
-//             } else {
-//                 0
-//             }
-//         };
-//
-//         // 4. Create the chunk
-//         let chunk = vec![enc_t_tuple.clone()];
-//
-//         // 5. Run the pure Rust DFS method
-//         let mut dfs_results = Translator::process_chunk(
-//             &chunk,
-//             &prev_t_cache,
-//             &get_observed_freq,
-//             &get_expected_freq,
-//         );
-//
-//         // 6. Run the CP-SAT Protobuf method
-//         let mut cpsat_results = Translator::process_chunk_cpsat(
-//             &chunk,
-//             upper_bound,
-//             &prev_t_cache,
-//             &get_observed_freq,
-//             &get_expected_freq,
-//         );
-//
-//         // 7. Canonicalize sorting to ensure equality isn't tripped up by vector order
-//         if let Some((_, dfs_assignments)) = dfs_results.get_mut(0) {
-//             dfs_assignments.sort_unstable();
-//         }
-//         if let Some((_, cpsat_assignments)) = cpsat_results.get_mut(0) {
-//             cpsat_assignments.sort_unstable();
-//         }
-//
-//         // 8. Print Results for visual confirmation
-//         println!("DFS Results:   {:?}", dfs_results);
-//         println!("CP-SAT Results: {:?}", cpsat_results);
-//
-//         // 9. Assert absolute mathematical equivalence
-//         assert_eq!(
-//             dfs_results, cpsat_results,
-//             "FATAL: DFS and CP-SAT produced different candidate sets!"
-//         );
-//
-//         // 10. Verify they both successfully filtered out the distractor and found the true joins
-//         let expected_assignments = vec![vec![1, 2, 3], vec![8, 9, 10]];
-//         assert_eq!(dfs_results[0].1, expected_assignments);
-//     }
-// }

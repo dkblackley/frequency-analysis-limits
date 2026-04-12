@@ -1,5 +1,5 @@
 use clap::Parser;
-use frequency_analysis_limits::plotting::plot::{Plotter, ReconstructionData2dPoint};
+use frequency_analysis_limits::plotting::plot::{Plotter, ReconstructionDataPoint};
 use frequency_analysis_limits::plotting::post::{
     export_to_geojson, process_and_map_points, procrustes_align,
 };
@@ -104,10 +104,10 @@ fn main() {
         debug!("About to load data {remin_res}, {even_less_res}");
 
         let content = fs::read_to_string(&remin_res).unwrap();
-        let remin_data: Vec<ReconstructionData2dPoint> = serde_json::from_str(&content).unwrap();
+        let remin_data: Vec<ReconstructionDataPoint> = serde_json::from_str(&content).unwrap();
 
         let content = fs::read_to_string(&even_less_res).unwrap();
-        let less_data: Vec<ReconstructionData2dPoint> = serde_json::from_str(&content).unwrap();
+        let less_data: Vec<ReconstructionDataPoint> = serde_json::from_str(&content).unwrap();
 
         let aligned = procrustes_align(&*remin_data, true, true, true);
         info!("MSE of Remin (Original): {:?}", aligned.1);
@@ -240,7 +240,7 @@ fn quick_convert(file_path: &str, out_path: &str) {
     // Pre-allocate the vectors using the length of the hashmap to avoid reallocations
     let file = File::open(file_path).unwrap();
     let reader = BufReader::new(file);
-    let data: Vec<ReconstructionData2dPoint> = serde_json::from_reader(reader).unwrap();
+    let data: Vec<ReconstructionDataPoint> = serde_json::from_reader(reader).unwrap();
 
     let recon_points_vec: Vec<Vec<f64>> = data
         .iter()

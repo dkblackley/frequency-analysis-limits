@@ -1,7 +1,7 @@
 use crate::dataloader::datasets::TwoDMap;
 use crate::dataloader::tester::testDB;
 use crate::dataloader::{unflatten_nd, Searchable};
-use crate::plotting::plot::{DbResult, ReconstructionData2dPoint};
+use crate::plotting::plot::{DbResult, ReconstructionDataPoint};
 use crate::LAMA::error::LAMAError;
 use crate::LAMA::selector::Selector;
 use crate::LAMA::solver::Solver;
@@ -34,6 +34,7 @@ pub fn lama_attack(
 ) {
     let loaded_db: Box<dyn Searchable + Sync>;
     let full_datapath = format!("{0}/{1}", dir_path, db_name);
+    let unique_name = format!("{db_name}_{dist}_e{eps}_d{delt}");
 
     if db_name == "grid" {
         loaded_db = Box::new(testDB::new(15, 15, 50))
@@ -162,13 +163,6 @@ pub fn lama_attack(
         debug!("Solver Status: {:?}", solver.solution_stat);
     }
 
-    if dist == "uniform" && responses[&0].len() < 6 {
-        warn!(
-            "Solver did not return the expected number of reconstructions for uniform. {} were found.",
-            responses[&0].len()
-        );
-    }
-
     let mut correct = 0;
     let mut first_resp = HashMap::new();
 
@@ -183,12 +177,17 @@ pub fn lama_attack(
     }
 
     debug!("{correct} correct out of {} total", responses.len());
-    info!("Saving correct solutions to {full_datapath}/limits/reconstruction.json");
-    save_reconstruction_data(&responses, &format!("{full_datapath}/limits"), &loaded_db);
+    info!("Saving correct solutions to {full_datapath}/limits/{unique_name}_reconstruction.json");
+    save_reconstruction_data(
+        &responses,
+        &format!("{full_datapath}/limits"),
+        &unique_name,
+        &loaded_db,
+    );
 
     let final_res = DbResult {
         name: loaded_db.get_name().parse().unwrap(),
-        method: "LAMA (Ours)".to_string(),
+        method: "LAMA".to_string(),
         dims: loaded_db.get_dims() as u32,
         mse: Some(0.0),
         match_rate: Some(1.0),
@@ -197,16 +196,16 @@ pub fn lama_attack(
         time_taken: end.duration_since(start).as_secs_f64(),
         total_db_size: loaded_db.get_universe().len() as u64,
         percent_queries_used: 1.0,
-        num_queries_used: 1, // TODO
+        num_queries_used: 1, //todo:
         eps: Some(*eps),
         delt: Some(*delt),
     };
 
-    if let Err(e) = save_results(final_res, &format!("{full_datapath}/limits/results.json")) {
-        error!(
-            "failed writing to {full_datapath}/limits/results.json: {}",
-            e
-        );
+    if let Err(e) = save_results(
+        final_res,
+        &format!("{full_datapath}/limits/results_{unique_name}.json"),
+    ) {
+        error!("failed writing to {full_datapath}/limits/results_{unique_name}.json: {e}");
     }
 
     info!("LAMA finished running on {db_name}");
@@ -223,35 +222,41 @@ fn save_results(result: DbResult, file_path: &str) -> Result<(), LAMAError> {
 fn save_reconstruction_data(
     responses: &HashMap<i64, Vec<i64>>,
     file_path: &str,
+    unique_name: &str,
     loaded_db: &Box<dyn Searchable + Sync>,
 ) {
-    //TODO: more than 2 dimension
-
-    // Pre-allocate the vectors using the length of the hashmap to avoid reallocations
-    let mut data: Vec<Vec<ReconstructionData2dPoint>> = Vec::new();
+    // This will hold our "transposed" data.
+    let mut data: Vec<Vec<ReconstructionDataPoint>> = Vec::new();
 
     // Iterate over the HashMap
     for (&encrypted_true, encrypted_recons) in responses {
         let true_vec = loaded_db.decrypt_point_f64(&encrypted_true);
 
-        let mut reconstruction = Vec::new();
-        // iter over the recond
-        for encrypted_recon in encrypted_recons {
+        // Iterate over the reconstructions and get their index
+        for (i, &encrypted_recon) in encrypted_recons.iter().enumerate() {
             let recon_vec = loaded_db.decrypt_point_f64(&encrypted_recon);
-            let saved_point = ReconstructionData2dPoint {
-                true_points: vec![true_vec[0], true_vec[1]],
-                reconstructed_points: vec![recon_vec[0], recon_vec[1]],
-                unscaled_points: None, // TODO: load from other files(?)
+
+            let saved_point = ReconstructionDataPoint {
+                true_points: true_vec.clone(),
+                reconstructed_points: recon_vec,
+                unscaled_points: None,
             };
 
-            reconstruction.push(saved_point);
+            // If we have more reconstructions for this point than we have
+            // outer arrays, we need to push a new empty Vec to hold them.
+            if data.len() <= i {
+                data.push(Vec::new());
+            }
+
+            // Push the saved point to the correct reconstruction index
+            data[i].push(saved_point);
         }
-        data.push(reconstruction);
     }
+
     fs::create_dir_all(file_path).unwrap();
-    //let data_wrap = DataWrapper { mapping: data };
+
     // Create the file and wrap it in a BufWriter for better performance
-    let file = File::create(format!("{file_path}/reconstruction.json",)).unwrap();
+    let file = File::create(format!("{file_path}/{unique_name}_reconstruction.json")).unwrap();
     let writer = BufWriter::new(file);
 
     serde_json::to_writer_pretty(writer, &data).unwrap();

@@ -200,9 +200,9 @@ pub fn lama_attack(
         num_queries_used: 1, // TODO
     };
 
-    if let Err(e) = save_results(final_res, &format!("{full_datapath}/limit/results.json")) {
+    if let Err(e) = save_results(final_res, &format!("{full_datapath}/limits/results.json")) {
         error!(
-            "failed writing to {full_datapath}/limit/results.json: {}",
+            "failed writing to {full_datapath}/limits/results.json: {}",
             e
         );
     }

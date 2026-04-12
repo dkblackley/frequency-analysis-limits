@@ -11,6 +11,7 @@ use crate::{Frequency, Record, Value};
 use cp_sat::proto::CpSolverStatus;
 use log::{debug, error, info, warn};
 use std::collections::HashMap;
+use std::fs;
 use std::fs::File;
 use std::io::BufWriter;
 use std::time::Instant;
@@ -247,7 +248,7 @@ fn save_reconstruction_data(
         }
         data.push(reconstruction);
     }
-
+    fs::create_dir_all(file_path).unwrap();
     //let data_wrap = DataWrapper { mapping: data };
     // Create the file and wrap it in a BufWriter for better performance
     let file = File::create(format!("{file_path}/reconstruction.json",)).unwrap();

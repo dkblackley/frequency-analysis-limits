@@ -34,7 +34,6 @@ impl Solver {
     pub fn solve(&mut self, model: &mut CpModelProto, get_one: bool) -> HashMap<i64, Vec<i64>> {
         let mut params = SatParameters::default();
         params.linearization_level = Some(0);
-        params.symmetry_level = Some(4);
         params.add_cg_cuts = Some(false);
         params.add_mir_cuts = Some(false);
         params.add_lin_max_cuts = Some(false);

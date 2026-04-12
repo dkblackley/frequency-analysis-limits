@@ -60,13 +60,18 @@ pub struct Args {
 fn main() {
     let args = Args::parse();
 
-    debug!("Args handed in: {:?}", args);
-
     env_logger::builder()
         .is_test(false)
         .filter_level(log::LevelFilter::Debug)
         .try_init()
         .expect("Logger failed to init!");
+
+    debug!("Args handed in: {:?}", args);
+
+    debug!(
+        "Rayon is operating with {} threads.",
+        rayon::current_num_threads()
+    );
 
     if !args.skip_lama {
         lama_attack(

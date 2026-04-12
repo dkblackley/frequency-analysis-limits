@@ -73,6 +73,7 @@ export SINGULARITYENV_LIBCLANG_PATH="$LLVM_DIR/lib"
 
 CONTAINER="/scratch/dblackle/rust_env.sif"
 
+export SINGULARITYENV_RAYON_NUM_THREADS=$SLURM_CPUS_PER_TASK
 
 SG_RUN="singularity exec --bind /scratch/dblackle --bind /scratch/dblackle/cargo:/usr/local/cargo $CONTAINER"
 echo "Wiping corrupted global Cargo registry cache..."

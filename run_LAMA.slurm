@@ -85,9 +85,10 @@ $SG_RUN cargo clean
 echo "Building project inside container..."
 $SG_RUN cargo rustc --bin frequency_analysis_limits --release -- -Clink-arg=-lprotobuf
 
-NAMES=("shopparis" "highway" "busstop" "drink" "spitz" "cali")
+# NAMES=("shopparis" "highway" "busstop" "drink" "spitz" "cali")
+NAMES=("spitz")
 DISTS=("uniform" "gaussian" "beta")
-DATA_DIRS=("$SLURM_SUBMIT_DIR/databases/25x25" "$SLURM_SUBMIT_DIR/databases/50x50" "$SLURM_SUBMIT_DIR/databases/75x75")
+DATA_DIRS=("$SLURM_SUBMIT_DIR/databases/25x25" "$SLURM_SUBMIT_DIR/databases/50x50" "$SLURM_SUBMIT_DIR/databases/75x75" "$SLURM_SUBMIT_DIR/databases/350x50")
 
 echo "Starting batch processing..."
 
@@ -109,7 +110,7 @@ for data_dir in "${DATA_DIRS[@]}"; do
 
             # Determine initial 't' value based on distribution type
             if [ "$dist" == "uniform" ]; then
-                t_val=3
+                t_val=2
             else
                 t_val=2
             fi
@@ -130,7 +131,7 @@ for data_dir in "${DATA_DIRS[@]}"; do
                 $SG_RUN ./target/release/frequency_analysis_limits \
                         --dir-path "$data_dir" \
                         --name "$name" \
-                        --t 4 \
+                        --t 3 \
                         --dist "$dist" \
                         --plot
 

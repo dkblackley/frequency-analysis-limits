@@ -33,7 +33,7 @@ impl<'a> QueryDistribution<'a> {
         let (lowest_rec, largest_rec) = encrypted_db.get_dom_pair();
         info!("Beginning to set up {dist} distribution");
         let (_probs_and_dom_pairs_raw, sampler, weights, total_weight) = match dist {
-            DistributionType::Uniform => Self::new_uniform_internal(&pairs),
+            DistributionType::Uniform => Self::new_uniform_internal(pairs.clone()),
             DistributionType::Gaussian => Self::new_gaussian(&pairs),
             DistributionType::Beta => Self::new_beta(&pairs),
         };
@@ -54,6 +54,14 @@ impl<'a> QueryDistribution<'a> {
         let atom_count = AtomicU64::new(0);
 
         info!("Computing true cumulative probabilities for every MBQ");
+
+        // Combine your existing pairs and weights into a flat Vec
+        let mut sorted_known_probs: Vec<(DomPair, f64)> =
+            pairs.iter().cloned().zip(weights.iter().copied()).collect();
+
+        // Sort lexicographically by the DomPair to enable O(log N) binary search
+        sorted_known_probs.sort_unstable_by(|a, b| a.0.cmp(&b.0));
+
         // Compute the True CUMULATIVE probability for every possible MBQ
         let computed_results: Vec<_> = pairs
             .par_iter() // Attaches the indicatif progress bar to Rayon
@@ -63,7 +71,8 @@ impl<'a> QueryDistribution<'a> {
                     &dist, // Note: `dist`, `lowest_rec`, etc. must implement `Sync`
                     &lowest_rec,
                     &largest_rec,
-                    &dom_pair_to_known_prob,
+                    // &dom_pair_to_known_prob,
+                    &sorted_known_probs,
                     total_weight,
                 );
 
@@ -107,7 +116,8 @@ impl<'a> QueryDistribution<'a> {
         dist: &DistributionType,
         lowest_rec: &[Value],
         largest_rec: &[Value],
-        dom_pair_to_known_prob: &FxHashMap<DomPair, f64>,
+        // dom_pair_to_known_prob: &FxHashMap<DomPair, f64>,
+        dom_pair_slice: &[(DomPair, f64)], // Now a sorted flat slice
         total_weight: f64,
     ) -> Probability {
         // TODO: instead of hashmap, flatten/unflatten dompairs and do O(1) index based lookup!
@@ -126,7 +136,6 @@ impl<'a> QueryDistribution<'a> {
                 count / total_weight
             }
             _ => {
-                // Every other dist: Sum Cartesian space of enclosing queries.
                 let (target_lower, target_upper) = mbq;
                 let mut true_prob: f64 = 0.0;
 
@@ -143,12 +152,43 @@ impl<'a> QueryDistribution<'a> {
                     .multi_cartesian_product();
 
                 for (c_lower, c_upper) in lower_combos.cartesian_product(upper_combos) {
-                    if let Some(&weight) = dom_pair_to_known_prob.get(&(c_lower, c_upper)) {
-                        true_prob += weight;
+                    let target_pair = (c_lower, c_upper);
+
+                    // Binary search avoids hashing entirely and stays hot in the CPU cache.
+                    // NOTE: dom_pair_slice MUST be sorted by DomPair before passing it here!
+                    if let Ok(idx) =
+                        dom_pair_slice.binary_search_by(|(pair, _)| pair.cmp(&target_pair))
+                    {
+                        true_prob += dom_pair_slice[idx].1;
                     }
                 }
                 true_prob / total_weight
-            }
+            } // _ => {
+              //
+              //
+              //     // Every other dist: Sum Cartesian space of enclosing queries.
+              //     let (target_lower, target_upper) = mbq;
+              //     let mut true_prob: f64 = 0.0;
+              //
+              //     let lower_combos = lowest_rec
+              //         .iter()
+              //         .zip(target_lower.iter())
+              //         .map(|(&min_val, &t_val)| min_val..=t_val)
+              //         .multi_cartesian_product();
+              //
+              //     let upper_combos = target_upper
+              //         .iter()
+              //         .zip(largest_rec.iter())
+              //         .map(|(&t_val, &max_val)| t_val..=max_val)
+              //         .multi_cartesian_product();
+              //
+              //     for (c_lower, c_upper) in lower_combos.cartesian_product(upper_combos) {
+              //         if let Some(&weight) = dom_pair_to_known_prob.get(&(c_lower, c_upper)) {
+              //             true_prob += weight;
+              //         }
+              //     }
+              //     true_prob / total_weight
+              // }
         }
     }
 
@@ -186,8 +226,9 @@ impl<'a> QueryDistribution<'a> {
         let sampler = WeightedIndex::new(&weights).unwrap();
         let probs_and_pairs = pairs
             .into_par_iter()
-            .zip(weights.par_iter()) // Ensure both are parallel iterators
-            .map(|(p, w)| (w, p))
+            .zip(weights.par_iter())
+            // Destructure the reference here with &w
+            .map(|(p, &w)| (w, p))
             .collect();
         (probs_and_pairs, sampler, weights_clone, total_weight)
     }

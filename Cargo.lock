@@ -408,8 +408,8 @@ dependencies = [
 
 [[package]]
 name = "cp_sat"
-version = "0.3.3"
-source = "git+https://github.com/KardinalAI/cp_sat.git?branch=master#307c87bde930a93fb8eb684fd6332dcc12f0866a"
+version = "0.4.0"
+source = "git+https://github.com/KardinalAI/cp_sat.git?rev=4cf0d8929a7eb60b80e1f6ddb2e22bf62b8e2071#4cf0d8929a7eb60b80e1f6ddb2e22bf62b8e2071"
 dependencies = [
  "bytes",
  "cc",

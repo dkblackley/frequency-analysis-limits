@@ -116,11 +116,11 @@ fn end_to_end() {
         .build_global()
         .unwrap();
 
-    let rows = 8;
-    let cols = 8;
+    let rows = 10;
+    let cols = 10;
 
     info!("Loading test DB ({}x{})", rows, cols);
-    let loaded_db: Box<dyn Searchable + Sync> = Box::new(testDB::new(rows, cols, 75));
+    let loaded_db: Box<dyn Searchable + Sync> = Box::new(testDB::new(rows, cols, 65));
 
     let dist = "uniform";
     let eps = 0.0; // Perfect knowledge constraint
@@ -131,12 +131,6 @@ fn end_to_end() {
     let (low_pair, high_pair) = loaded_db.get_dom_pair();
     let universe = loaded_db.get_universe();
     let largest_enc_val = universe.iter().max().unwrap();
-
-    info!("1. Precomputing observed encrypted tuples for t=1...");
-    let obs_t1 = selector.precompute_perfect_t_observed(1);
-
-    info!("2. Making known theoretical probability map for t=1");
-    let query_dist_over_one = selector.build_theoretical_t_dict(1);
 
     info!(
         "3. Initializing Translator with universe size: {}",
@@ -196,8 +190,8 @@ fn end_to_end() {
     info!("--> Processing Recursive Case (t=3) sequentially across chunk models...");
     translator.process_t_greater_than_1(3, &universe, &validate_candidate);
 
-    // t=3 is usually good enough for every dist type, uniform MIGHT has further optimisation
-    // at t=4 but it is usually good enough.
+    // t=3 is usually good enough for every dist type, uniform mostly is good after t=2 but sometimes
+    // gets better at t=3. t=4 is almost always actually overkill
     // info!("Remember: Computing for DB size {} by {}...", rows, cols);
     // info!("--> Processing Recursive Case (t=4) sequentially across chunk models...");
     // translator.process_t_greater_than_1(4, &universe, &validate_candidate);

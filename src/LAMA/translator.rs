@@ -256,8 +256,6 @@ impl Translator {
                 .progress_chars("##-"),
         );
 
-        let counter = AtomicUsize::new(0);
-
         // We parallelize over the outer t-1 mapping.
         // flat_map lets us yield an arbitrary number of valid t-tuples from each t-1 tuple.
         let table_constraints: Vec<(Vec<i64>, Vec<Vec<i64>>)> = t_minus_1_assignments
@@ -292,8 +290,23 @@ impl Translator {
                     for sub_assign in sub_assigns {
                         for single_assign in single_assigns {
                             let mut candidate = Vec::with_capacity(sub_assign.len() + 1);
-                            candidate.extend_from_slice(sub_assign);
 
+                            // candidate.extend_from_slice(sub_assign);
+                            // candidate.push(*single_assign);
+                            //
+                            // // Get the total number of items to generate full-length permutations
+                            // let len = candidate.len();
+                            //
+                            // // .into_iter() consumes the original 'candidate' vector and
+                            // // .permutations(len) yields a new Vec<T> for each permutation.
+                            // for perm in candidate.into_iter().permutations(len) {
+                            //     // 4. Validate each permutation BEFORE adding it as a constraint
+                            //     if validate_candidate(&t_tuple, &perm) {
+                            //         pre_validated_assignments.push(perm);
+                            //     }
+                            // }
+
+                            candidate.extend_from_slice(sub_assign);
                             // Note: Assuming `single_assigns` is Vec<Vec<i64>>.
                             // If it's just Vec<i64>, change this to `candidate.push(*single_assign);`
                             candidate.push(*single_assign);
@@ -327,7 +340,7 @@ impl Translator {
         // The solver needs variables to be strictly bounded (0..N), so we create a mapping
         // from your internal IDs (i64) to the CP-SAT local indices.
 
-        let mut current_model = &mut self.proto_model;
+        let mut raw_model = &mut self.proto_model.clone();
         let mut current_t_cache = HashMap::with_capacity(table_constraints.len());
 
         for (enc_t_tuple, valid_assignments) in &table_constraints {
@@ -337,7 +350,7 @@ impl Translator {
                 .collect();
 
             Self::add_allowed_assignments(
-                &mut current_model,
+                &mut raw_model,
                 &main_vars,
                 &valid_assignments,
                 &self.var_index_map,
@@ -353,6 +366,7 @@ impl Translator {
         let mut params = SatParameters::default();
         params.enumerate_all_solutions = Some(true);
         params.fill_additional_solutions_in_response = Some(true);
+        params.solution_pool_size = Some(self.upper as i32);
         // Since this is a global solve, the solution pool needs to be reasonably bounded or omitted.
         // We'll leave it to the defaults or handle it purely through the 'enumerate_all_solutions' flag.
 
@@ -371,7 +385,7 @@ impl Translator {
                 .template("{spinner:.blue} [{elapsed_precise}] Mini-Solver thinking (no strict ETA for SAT problems)...")
                 .unwrap()
         );
-        let response = cp_sat::ffi::solve_with_parameters(&current_model.clone(), &params);
+        let response = cp_sat::ffi::solve_with_parameters(&raw_model.clone(), &params);
         pb.finish_with_message(format!("Mini-Solver finished in {:?}", pb.elapsed()));
         if response.status() != CpSolverStatus::Optimal
             && response.status() != CpSolverStatus::Feasible
@@ -380,8 +394,9 @@ impl Translator {
             return None;
         }
         debug!(
-            "Finished mini-solve with {} possible reconstructions",
-            response.additional_solutions.len()
+            "Finished mini-solve with {} possible reconstructions in {:?} seconds",
+            response.additional_solutions.len(),
+            pb.elapsed().as_secs()
         );
 
         let mut all_global_solutions = Vec::new();
@@ -425,10 +440,29 @@ impl Translator {
                 .map(|global_sol| solver_indices.iter().map(|&idx| global_sol[idx]).collect())
                 .collect();
 
-            // 3. Deduplicate!
-            // Multiple distinct global solutions often share the exact same local sub-assignment.
-            surviving_assignments.sort_unstable();
-            surviving_assignments.dedup();
+            // as a sanity check, the surviving assignments MUST match the probs
+            for survived in &surviving_assignments {
+                if !validate_candidate(&enc_t_tuple, survived) {
+                    panic!("Solver broken!")
+                }
+            }
+
+            let main_vars: Vec<_> = enc_t_tuple
+                .iter()
+                .map(|rec| *self.enc_id_to_intvar.get(rec).unwrap())
+                .collect();
+
+            Self::add_allowed_assignments(
+                &mut self.proto_model,
+                &main_vars,
+                &surviving_assignments,
+                &self.var_index_map,
+            );
+
+            // // 3. Deduplicate!
+            // // Multiple distinct global solutions often share the exact same local sub-assignment.
+            // surviving_assignments.sort_unstable();
+            // surviving_assignments.dedup();
 
             // 4. Store in the new cache
             if !surviving_assignments.is_empty() {

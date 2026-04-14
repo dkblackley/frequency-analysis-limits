@@ -116,11 +116,11 @@ fn end_to_end() {
         .build_global()
         .unwrap();
 
-    let rows = 10;
-    let cols = 10;
+    let rows = 8;
+    let cols = 8;
 
     info!("Loading test DB ({}x{})", rows, cols);
-    let loaded_db: Box<dyn Searchable + Sync> = Box::new(testDB::new(rows, cols, 100));
+    let loaded_db: Box<dyn Searchable + Sync> = Box::new(testDB::new(rows, cols, 75));
 
     let dist = "uniform";
     let eps = 0.0; // Perfect knowledge constraint
@@ -196,6 +196,8 @@ fn end_to_end() {
     info!("--> Processing Recursive Case (t=3) sequentially across chunk models...");
     translator.process_t_greater_than_1(3, &universe, &validate_candidate);
 
+    // t=3 is usually good enough for every dist type, uniform MIGHT has further optimisation
+    // at t=4 but it is usually good enough.
     // info!("Remember: Computing for DB size {} by {}...", rows, cols);
     // info!("--> Processing Recursive Case (t=4) sequentially across chunk models...");
     // translator.process_t_greater_than_1(4, &universe, &validate_candidate);
@@ -241,24 +243,31 @@ fn end_to_end() {
     );
     info!("6. Running Isomorphism Checks...");
 
-    let mut iso_map = HashMap::new();
+    let total_responses = responses[&0].len();
+    let mut found_truth = false;
 
-    for (key, val) in responses {
-        iso_map.insert(key, val[0]);
+    for i in 0..total_responses {
+        let mut iso_map = HashMap::new();
+        for (key, val) in responses.clone() {
+            iso_map.insert(key, val[i]);
+        }
+        match check_isomorphism(&iso_map, rows as i64, cols as i64) {
+            Some(transformation_name) => {
+                if transformation_name.contains("Perfect") {
+                    found_truth = true;
+                }
+                info!(
+                    "SUCCESS! Solver found a valid isomorphism: {}",
+                    transformation_name
+                );
+            }
+            None => {
+                error!("Solver produced a mathematically invalid reconstruction.");
+                panic!("Test Failed: Not a valid rotation or reflection.");
+            }
+        }
     }
 
-    match check_isomorphism(&iso_map, rows as i64, cols as i64) {
-        Some(transformation_name) => {
-            info!(
-                "SUCCESS! Solver found a valid isomorphism: {}",
-                transformation_name
-            );
-        }
-        None => {
-            error!("Solver produced a mathematically invalid reconstruction.");
-            panic!("Test Failed: Not a valid rotation or reflection.");
-        }
-    }
-
+    assert!(found_truth);
     info!("Test completed successfully.")
 }

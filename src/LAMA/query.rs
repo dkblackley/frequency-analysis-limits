@@ -1,9 +1,9 @@
 use crate::dataloader::Searchable;
 use crate::LAMA::utility::DistributionType;
 use crate::{DomPair, Probability, Value};
-use indicatif::{ProgressBar, ProgressStyle};
+use indicatif::{ParallelProgressIterator, ProgressBar, ProgressStyle};
 use itertools::Itertools;
-use log::info;
+use log::{debug, info};
 use rand::distributions::WeightedIndex;
 use rayon::prelude::*;
 use rustc_hash::FxHashMap;
@@ -38,18 +38,19 @@ impl<'a> QueryDistribution<'a> {
             DistributionType::Beta => Self::new_beta(&pairs),
         };
 
-        let dom_pair_to_known_prob = Self::make_vec_to_prob_map(&pairs, &weights);
+        debug!("Making vec to probability mapping...");
+        let dom_pair_to_known_prob = Self::make_vec_to_prob_map(pairs.clone(), weights.clone());
 
         let mut mbq_to_cumulative_prob = FxHashMap::default();
         let mut probs_and_dom_pairs = Vec::with_capacity(pairs.len());
 
-        let pb = ProgressBar::new(pairs.len() as u64);
-        pb.set_style(
-            ProgressStyle::default_bar()
-                .template("[{elapsed_precise}] {bar:40.cyan/blue} {pos:>7}/{len:7} {eta}")
-                .unwrap()
-                .progress_chars("##-"),
-        );
+        // let pb = ProgressBar::new(pairs.len() as u64);
+        // pb.set_style(
+        //     ProgressStyle::default_bar()
+        //         .template("[{elapsed_precise}] {bar:40.cyan/blue} {pos:>7}/{len:7} {eta}")
+        //         .unwrap()
+        //         .progress_chars("##-"),
+        // );
 
         let atom_count = AtomicU64::new(0);
 
@@ -64,28 +65,30 @@ impl<'a> QueryDistribution<'a> {
 
         // Compute the True CUMULATIVE probability for every possible MBQ
         let computed_results: Vec<_> = pairs
-            .par_iter() // Attaches the indicatif progress bar to Rayon
+            .par_iter()
+            .progress() // Attaches the indicatif progress bar to Rayon
             .map(|pair| {
                 let cum_prob = Self::compute_cumulative_prob(
                     pair,
                     &dist, // Note: `dist`, `lowest_rec`, etc. must implement `Sync`
                     &lowest_rec,
                     &largest_rec,
-                    // &dom_pair_to_known_prob,
-                    &sorted_known_probs,
+                    &dom_pair_to_known_prob,
+                    //&sorted_known_probs,
                     total_weight,
                 );
 
-                let current = atom_count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                if current % 1000 == 0 {
-                    pb.set_position(current);
-                }
+                // let current = atom_count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                // if current % 1000 == 0 {
+                //     pb.set_position(current);
+                // }
 
                 // Return a tuple of references/clones needed for insertion
                 (pair, cum_prob)
             })
             .collect();
 
+        debug!("Finished computing true cumulative probabilities");
         // 3. Sequential Insertion Phase
         // Iterating over the pre-computed results to insert is virtually instantaneous.
         for (pair, cum_prob) in computed_results {
@@ -93,8 +96,9 @@ impl<'a> QueryDistribution<'a> {
             probs_and_dom_pairs.push((cum_prob, pair.clone()));
         }
 
-        probs_and_dom_pairs.sort_unstable_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
+        probs_and_dom_pairs.par_sort_unstable_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
 
+        debug!("Done pre-computing probability dist");
         Box::new(Self {
             encrypted_db,
             pairs,
@@ -116,8 +120,8 @@ impl<'a> QueryDistribution<'a> {
         dist: &DistributionType,
         lowest_rec: &[Value],
         largest_rec: &[Value],
-        // dom_pair_to_known_prob: &FxHashMap<DomPair, f64>,
-        dom_pair_slice: &[(DomPair, f64)], // Now a sorted flat slice
+        dom_pair_to_known_prob: &FxHashMap<DomPair, f64>,
+        //dom_pair_slice: &[(DomPair, f64)], // Now a sorted flat slice
         total_weight: f64,
     ) -> Probability {
         // TODO: instead of hashmap, flatten/unflatten dompairs and do O(1) index based lookup!
@@ -135,7 +139,37 @@ impl<'a> QueryDistribution<'a> {
                 let count = (dominated_vals * dominating_vals) as f64;
                 count / total_weight
             }
+            // _ => {
+            //     let (target_lower, target_upper) = mbq;
+            //     let mut true_prob: f64 = 0.0;
+            //
+            //     let lower_combos = lowest_rec
+            //         .iter()
+            //         .zip(target_lower.iter())
+            //         .map(|(&min_val, &t_val)| min_val..=t_val)
+            //         .multi_cartesian_product();
+            //
+            //     let upper_combos = target_upper
+            //         .iter()
+            //         .zip(largest_rec.iter())
+            //         .map(|(&t_val, &max_val)| t_val..=max_val)
+            //         .multi_cartesian_product();
+            //
+            //     for (c_lower, c_upper) in lower_combos.cartesian_product(upper_combos) {
+            //         let target_pair = (c_lower, c_upper);
+            //
+            //         // Binary search avoids hashing entirely and stays hot in the CPU cache.
+            //         // NOTE: dom_pair_slice MUST be sorted by DomPair before passing it here!
+            //         if let Ok(idx) =
+            //             dom_pair_slice.binary_search_by(|(pair, _)| pair.cmp(&target_pair))
+            //         {
+            //             true_prob += dom_pair_slice[idx].1;
+            //         }
+            //     }
+            //     true_prob / total_weight
+            // }
             _ => {
+                // Every other dist: Sum Cartesian space of enclosing queries.
                 let (target_lower, target_upper) = mbq;
                 let mut true_prob: f64 = 0.0;
 
@@ -152,43 +186,12 @@ impl<'a> QueryDistribution<'a> {
                     .multi_cartesian_product();
 
                 for (c_lower, c_upper) in lower_combos.cartesian_product(upper_combos) {
-                    let target_pair = (c_lower, c_upper);
-
-                    // Binary search avoids hashing entirely and stays hot in the CPU cache.
-                    // NOTE: dom_pair_slice MUST be sorted by DomPair before passing it here!
-                    if let Ok(idx) =
-                        dom_pair_slice.binary_search_by(|(pair, _)| pair.cmp(&target_pair))
-                    {
-                        true_prob += dom_pair_slice[idx].1;
+                    if let Some(&weight) = dom_pair_to_known_prob.get(&(c_lower, c_upper)) {
+                        true_prob += weight;
                     }
                 }
                 true_prob / total_weight
-            } // _ => {
-              //
-              //
-              //     // Every other dist: Sum Cartesian space of enclosing queries.
-              //     let (target_lower, target_upper) = mbq;
-              //     let mut true_prob: f64 = 0.0;
-              //
-              //     let lower_combos = lowest_rec
-              //         .iter()
-              //         .zip(target_lower.iter())
-              //         .map(|(&min_val, &t_val)| min_val..=t_val)
-              //         .multi_cartesian_product();
-              //
-              //     let upper_combos = target_upper
-              //         .iter()
-              //         .zip(largest_rec.iter())
-              //         .map(|(&t_val, &max_val)| t_val..=max_val)
-              //         .multi_cartesian_product();
-              //
-              //     for (c_lower, c_upper) in lower_combos.cartesian_product(upper_combos) {
-              //         if let Some(&weight) = dom_pair_to_known_prob.get(&(c_lower, c_upper)) {
-              //             true_prob += weight;
-              //         }
-              //     }
-              //     true_prob / total_weight
-              // }
+            }
         }
     }
 
@@ -241,28 +244,44 @@ impl<'a> QueryDistribution<'a> {
         let sigma = pairs.len() as f64 / 5.0;
 
         let normal_dist = Normal::new(mu, sigma).expect("Sigma must be > 0.0");
+        debug!("Finished creating normal distribution");
+
         // Calculate the 'weights' - The actual prob of sampling this index/Dom pair
         let weights: Vec<f64> = pairs
             .par_iter()
+            .progress()
             .enumerate()
             .map(|(i, _)| normal_dist.pdf(i as f64))
             .collect();
-        let total_weight: f64 = weights.par_iter().sum();
+        debug!("Finished calculating weights");
+
+        let total_weight: f64 = weights.par_iter().progress().sum();
+        debug!("Finished calculating total weight");
+
         let sampler = WeightedIndex::new(&weights).expect("Failed to create WeightedIndex");
+        debug!("Finished creating WeightedIndex sampler");
 
         // Store each pairs probability of being sampled in a vec
-        let mut weight_pair: Vec<(f64, DomPair)> =
-            weights.iter().copied().zip(pairs.iter().cloned()).collect();
-        weight_pair.sort_unstable_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
+        let mut weight_pair: Vec<(f64, DomPair)> = weights
+            .par_iter()
+            .copied()
+            .zip(pairs.par_iter().cloned())
+            .progress()
+            .collect();
+        weight_pair.par_sort_unstable_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
+        debug!("Finished storing and sorting weight pairs");
+
         (weight_pair, sampler, weights, total_weight)
     }
 
     pub fn new_beta(pairs: &[DomPair]) -> (Vec<(f64, DomPair)>, WeightedIndex<f64>, Vec<f64>, f64) {
         // The other methods were slightly 'off' when calculating this dist I think.
         let beta_dist = Beta::new(2.0, 1.0).expect("Alpha/Beta must be > 0.0");
+
         let n = pairs.len() as f64;
         let weights: Vec<f64> = pairs
             .par_iter()
+            .progress()
             .enumerate()
             .map(|(i, _)| {
                 // this prevents 0 prob or 1 prob (I think)
@@ -270,18 +289,34 @@ impl<'a> QueryDistribution<'a> {
                 beta_dist.pdf(x)
             })
             .collect();
-        let total_weight: f64 = weights.par_iter().sum();
+        debug!("Finished calculating weights");
+
+        let total_weight: f64 = weights.par_iter().progress().sum();
+        debug!("Finished calculating total weight");
+
         let sampler = WeightedIndex::new(&weights).expect("Failed to create WeightedIndex");
-        let weight_pair: Vec<(f64, DomPair)> =
-            weights.iter().copied().zip(pairs.iter().cloned()).collect();
+        debug!("Finished creating WeightedIndex sampler");
+
+        let mut weight_pair: Vec<(f64, DomPair)> = weights
+            .par_iter()
+            .copied()
+            .zip(pairs.par_iter().cloned())
+            .progress()
+            .collect();
+        debug!("Finished storing weight pairs");
+        weight_pair.par_sort_unstable_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
+        debug!("Finished storing and sorting weight pairs");
+
         (weight_pair, sampler, weights, total_weight)
     }
 
-    fn make_vec_to_prob_map(pairs: &[DomPair], weights: &[f64]) -> FxHashMap<DomPair, f64> {
-        let mut vec_to_index = FxHashMap::default();
-        for (pair, &weight) in pairs.iter().zip(weights.iter()) {
-            vec_to_index.insert(pair.clone(), weight);
-        }
-        vec_to_index
+    fn make_vec_to_prob_map(pairs: Vec<DomPair>, weights: Vec<f64>) -> FxHashMap<DomPair, f64> {
+        //let mut vec_to_index = FxHashMap::default();
+
+        pairs.into_par_iter().zip(weights.into_par_iter()).collect()
+        // for (pair, &weight) in pairs.into_par_iter().zip(weights.par_iter()) {
+        //     vec_to_index.insert(pair, weight);
+        // }
+        // vec_to_index
     }
 }

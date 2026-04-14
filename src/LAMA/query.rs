@@ -178,17 +178,18 @@ impl<'a> QueryDistribution<'a> {
     }
 
     fn new_uniform_internal(
-        pairs: &[DomPair],
+        pairs: Vec<DomPair>,
     ) -> (Vec<(f64, DomPair)>, WeightedIndex<f64>, Vec<f64>, f64) {
         let weights = vec![1.0; pairs.len()];
+        let weights_clone = weights.clone();
         let total_weight = pairs.len() as f64;
         let sampler = WeightedIndex::new(&weights).unwrap();
         let probs_and_pairs = pairs
-            .iter()
-            .zip(weights.iter())
-            .map(|(p, &w)| (w, p.clone()))
+            .into_par_iter()
+            .zip(weights.par_iter()) // Ensure both are parallel iterators
+            .map(|(p, w)| (w, p))
             .collect();
-        (probs_and_pairs, sampler, weights, total_weight)
+        (probs_and_pairs, sampler, weights_clone, total_weight)
     }
 
     pub fn new_gaussian(

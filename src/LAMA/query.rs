@@ -110,6 +110,7 @@ impl<'a> QueryDistribution<'a> {
         dom_pair_to_known_prob: &FxHashMap<DomPair, f64>,
         total_weight: f64,
     ) -> Probability {
+        // TODO: instead of hashmap, flatten/unflatten dompairs and do O(1) index based lookup!
         match dist {
             DistributionType::Uniform => {
                 // This is faster than a hash lookup for uniform (I think)

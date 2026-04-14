@@ -110,13 +110,19 @@ fn end_to_end() {
         .filter_level(log::LevelFilter::Debug)
         .try_init();
 
+    // Force rayon to one thread
+    rayon::ThreadPoolBuilder::new()
+        .num_threads(1)
+        .build_global()
+        .unwrap();
+
     let rows = 10;
     let cols = 10;
 
     info!("Loading test DB ({}x{})", rows, cols);
     let loaded_db: Box<dyn Searchable + Sync> = Box::new(testDB::new(rows, cols, 90));
 
-    let dist = "gaussian";
+    let dist = "uniform";
     let eps = 0.0; // Perfect knowledge constraint
     let delt = 0.0;
 

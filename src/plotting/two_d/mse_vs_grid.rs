@@ -1,9 +1,9 @@
 use crate::plotting::post::calculate_mse;
 use crate::plotting::{load_limits_method, load_standard_method};
+use log::error;
 use plotters::prelude::*;
 use std::collections::HashMap;
 use std::error::Error;
-use std::path::Path;
 
 pub fn plot_grid_by_mse(
     grid_sizes: &[(u32, &str)],
@@ -11,18 +11,18 @@ pub fn plot_grid_by_mse(
     methods: &[&str],
     distributions: &[&str],
 ) -> Result<(), Box<dyn Error>> {
-    // Base directory for your data
     let base_dir = "databases";
 
-    for db in datasets {
-        for dist in distributions {
-            // This will hold the lines for your plot:
-            // Key: Method Name -> Value: Vec of (Grid Size, MSE)
+    for &db in datasets {
+        // Data structure: dist -> method -> vec of (grid_size, mse)
+        let mut db_data: HashMap<&str, HashMap<String, Vec<(u32, f64)>>> = HashMap::new();
+
+        for &dist in distributions {
             let mut plot_data: HashMap<String, Vec<(u32, f64)>> = HashMap::new();
 
-            for method in methods {
-                for (grid_val, grid_str) in grid_sizes {
-                    let mse_result = match *method {
+            for &method in methods {
+                for &(grid_val, grid_str) in grid_sizes {
+                    let mse_result = match method {
                         "even_less" => {
                             let path = format!(
                                 "{}/{}/{}/even_less/{}_prob100.0_{}_{}_even_less.json",
@@ -31,7 +31,6 @@ pub fn plot_grid_by_mse(
                             load_standard_method(&path).map(|data| calculate_mse(&data))
                         }
                         "remin" => {
-                            // Note: directory is 'remin' but file suffix is 'classic' based on your `ls`
                             let path = format!(
                                 "{}/{}/{}/remin/{}_prob100.0_{}_{}_classic.json",
                                 base_dir, grid_str, db, db, dist, grid_str
@@ -39,27 +38,15 @@ pub fn plot_grid_by_mse(
                             load_standard_method(&path).map(|data| calculate_mse(&data))
                         }
                         "limits" => {
-                            // Tries the specific named file first
                             let path = format!(
                                 "{}/{}/{}/limits/{}_{}_e0_d0.9_reconstruction.json",
                                 base_dir, grid_str, db, db, dist
                             );
-
-                            // If the specific file is missing, try the generic fallback
-                            let final_path = if Path::new(&path).exists() {
-                                path
-                            } else {
-                                format!(
-                                    "{}/{}/{}/limits/reconstruction.json",
-                                    base_dir, grid_str, db
-                                )
-                            };
-
-                            load_limits_method(&final_path).map(|reconstructions| {
-                                // Take the minimum MSE across all possible reconstructions for 'limits'
+                            load_limits_method(&path).map(|reconstructions| {
                                 reconstructions
                                     .iter()
                                     .map(|recon| calculate_mse(recon))
+                                    .filter(|m| m.is_finite()) // Prevents propagating NaNs
                                     .fold(f64::INFINITY, f64::min)
                             })
                         }
@@ -67,120 +54,215 @@ pub fn plot_grid_by_mse(
                     };
 
                     match mse_result {
-                        Ok(mse) => {
+                        // The is_finite check prevents freezing if limits folded to Infinity
+                        Ok(mse) if mse.is_finite() => {
                             plot_data
                                 .entry(method.to_string())
                                 .or_default()
-                                .push((*grid_val, mse));
+                                .push((grid_val, mse));
                         }
-                        Err(_) => {
-                            // Suppress errors for missing files to keep the console clean,
-                            // or replace with an eprintln! to debug missing specific paths.
+                        Ok(_) => {
+                            // Because our method is perfect, MSE sometimes accidentally becomes NAN
+                            // due to floating point errors (I think?).
+                            plot_data
+                                .entry(method.to_string())
+                                .or_default()
+                                .push((grid_val, 0.0));
+                        }
+                        Err(e) => {
+                            // Replace with log::error! or your preferred macro
+                            error!("failed to plot for {method}, {dist}, {db} at {grid_str}: {e}")
                         }
                     }
                 }
             }
+            db_data.insert(dist, plot_data);
+        }
 
-            // At this point, `plot_data` contains all the lines needed for 1 figure.
-            // Example map contents:
-            // {
-            //    "even_less": [(25, 0.04), (50, 0.08), (75, 0.12)],
-            //    "remin": [(25, 0.03), (50, 0.07), (75, 0.10)],
-            //    "limits": [(25, 0.01), (50, 0.02), (75, 0.04)]
-            // }
-
-            if !plot_data.is_empty() {
-                let real_output_path = format!("figures/{}_{}_mse_vs_grid.svg", db, dist);
-
-                // You can now pass this grouped data to an updated version of your plotting function
-                // plot_multiple_methods_vs_grid_size(&plot_data, dist, &output_path)?;
-
-                println!(
-                    "Generated plot data for {} - {} -> saved to {}",
-                    db, dist, real_output_path
-                );
-            }
+        if !db_data.is_empty() {
+            let output_path = format!("figures/{}_mse_vs_grid_combined.svg", db);
+            plot_db_side_by_side(db, &db_data, distributions, &output_path)?;
+            println!(
+                "Generated combined plot for {} -> saved to {}",
+                db, output_path
+            );
         }
     }
 
     Ok(())
 }
 
-fn plot_mse_vs_grid_size(
-    data: &[(u32, f64)], // Slice of (Grid Size, MSE)
-    dist_name: &str,
+fn format_db_name(db: &str) -> &str {
+    match db {
+        "shopparis" => "Paris",
+        "busstop" => "Shanghai",
+        "cali" => "Cali",
+        "drink" => "Amsterdam",
+        "highway" => "Manhattan",
+        "spitz" => "Spitz",
+        _ => db,
+    }
+}
+
+fn plot_db_side_by_side(
+    db: &str,
+    db_data: &HashMap<&str, HashMap<String, Vec<(u32, f64)>>>,
+    distributions: &[&str],
     output_path: &str,
 ) -> Result<(), Box<dyn Error>> {
-    let root = SVGBackend::new(output_path, (800, 600)).into_drawing_area();
-    root.fill(&TRANSPARENT)?;
-
-    if data.is_empty() {
+    let num_dists = distributions.len();
+    if num_dists == 0 {
         return Ok(());
     }
 
-    let min_grid = data.iter().map(|(g, _)| *g).min().unwrap_or(0) as f64;
-    let max_grid = data.iter().map(|(g, _)| *g).max().unwrap_or(100) as f64;
+    // Allocate 800px width per distribution subplot
+    let total_width = 800 * num_dists as u32;
+    let total_height = 600;
 
-    let min_mse = data.iter().map(|(_, m)| *m).fold(f64::INFINITY, f64::min);
-    let max_mse = data
-        .iter()
-        .map(|(_, m)| *m)
-        .fold(f64::NEG_INFINITY, f64::max);
+    let root = SVGBackend::new(output_path, (total_width, total_height)).into_drawing_area();
 
-    let x_pad = (max_grid - min_grid) * 0.1;
-    let y_pad = if max_mse == min_mse {
-        0.1
-    } else {
-        (max_mse - min_mse) * 0.1
-    };
+    // Explicitly enforce transparency over the entire canvas block
+    root.fill(&TRANSPARENT)?;
 
-    let mut chart = ChartBuilder::on(&root)
-        .margin(40)
-        .caption(
-            format!("MSE vs Grid Size ({})", dist_name),
-            ("sans-serif", 30).into_font(),
-        )
-        .x_label_area_size(60)
-        .y_label_area_size(70)
-        .build_cartesian_2d(
-            (min_grid - x_pad)..(max_grid + x_pad),
-            (min_mse - y_pad)..(max_mse + y_pad),
-        )?;
+    // Horizontally split our parent drawing area by the number of distributions
+    let sub_areas = root.split_evenly((1, num_dists));
+    let pretty_db = format_db_name(db);
 
-    chart
-        .configure_mesh()
-        .bold_line_style(RGBColor(220, 220, 220))
-        .axis_style(BLACK)
-        .x_desc("Grid Size")
-        .y_desc("Mean Squared Error")
-        .label_style(("sans-serif", 18).into_font())
-        .draw()?;
+    // High-contrast, colorblind-friendly palette (Wong)
+    let palette = [
+        RGBColor(0, 114, 178),   // Blue
+        RGBColor(213, 94, 0),    // Vermilion
+        RGBColor(0, 158, 115),   // Bluish Green
+        RGBColor(204, 121, 167), // Reddish Purple
+        RGBColor(230, 159, 0),   // Orange
+        RGBColor(86, 180, 233),  // Sky Blue
+    ];
 
-    // Assign a distinct color-blind safe palette color based on distribution name
-    let color = match dist_name.to_lowercase().as_str() {
-        "uniform" => RGBColor(0, 114, 178), // Blue
-        "gaussian" => RGBColor(213, 94, 0), // Vermilion
-        "beta" => RGBColor(0, 158, 115),    // Bluish Green
-        _ => RGBColor(230, 159, 0),         // Orange (Fallback)
-    };
+    for (i, &dist) in distributions.iter().enumerate() {
+        let area = &sub_areas[i];
 
-    // Guarantee data is sorted along the X-axis for unbroken lines
-    let mut sorted_data = data.to_vec();
-    sorted_data.sort_by(|a, b| a.0.cmp(&b.0));
+        let plot_data = match db_data.get(dist) {
+            Some(data) if !data.is_empty() => data,
+            _ => continue, // Skip entirely if no lines populated this subplot
+        };
 
-    // Draw the continuous line
-    chart.draw_series(LineSeries::new(
-        sorted_data.iter().map(|(g, m)| (*g as f64, *m)),
-        color.stroke_width(3),
-    ))?;
+        // Determine min/max boundaries manually to frame out the graph space
+        let mut min_grid = f64::INFINITY;
+        let mut max_grid = f64::NEG_INFINITY;
+        let mut min_mse = f64::INFINITY;
+        let mut max_mse = f64::NEG_INFINITY;
 
-    // Draw the data point dots
-    chart.draw_series(
-        sorted_data
-            .iter()
-            .map(|(g, m)| Circle::new((*g as f64, *m), 6, color.filled())),
-    )?;
+        for points in plot_data.values() {
+            for &(g, m) in points {
+                let g_f = g as f64;
+                if g_f < min_grid {
+                    min_grid = g_f;
+                }
+                if g_f > max_grid {
+                    max_grid = g_f;
+                }
+                if m < min_mse {
+                    min_mse = m;
+                }
+                if m > max_mse {
+                    max_mse = m;
+                }
+            }
+        }
 
+        if min_grid.is_infinite() || min_mse.is_infinite() {
+            continue; // No valid finite points to build the mesh
+        }
+
+        // Prevent infinite tick-generation loops if min == max
+        let mut x_pad = (max_grid - min_grid) * 0.1;
+        if x_pad == 0.0 {
+            x_pad = 1.0;
+        }
+
+        let mut y_pad = (max_mse - min_mse) * 0.1;
+        if y_pad == 0.0 {
+            y_pad = 0.1;
+        }
+
+        // Formatting the title: Capitalize the distribution strings nicely
+        let mut chars = dist.chars();
+        let pretty_dist = match chars.next() {
+            None => String::new(),
+            Some(f) => f.to_uppercase().collect::<String>() + chars.as_str(),
+        };
+
+        let title = format!(
+            "{} MSE by grid size ({} Query Distribution)",
+            pretty_db, pretty_dist
+        );
+
+        let mut chart = ChartBuilder::on(area)
+            .margin(40)
+            .caption(title, ("sans-serif", 28).into_font().color(&BLACK))
+            .x_label_area_size(60)
+            .y_label_area_size(70)
+            .build_cartesian_2d(
+                (min_grid - x_pad)..(max_grid + x_pad),
+                (min_mse - y_pad)..(max_mse + y_pad),
+            )?;
+
+        // Sleek configuration: lighter grid lines and distinct axis lines
+        chart
+            .configure_mesh()
+            .bold_line_style(RGBColor(230, 230, 230))
+            .light_line_style(TRANSPARENT)
+            .axis_style(RGBColor(100, 100, 100))
+            .x_desc("Grid Size")
+            .y_desc("Mean Squared Error")
+            .label_style(("sans-serif", 18).into_font())
+            .draw()?;
+
+        // Stabilize legend rendering sequence by alphabetically sorting methods
+        let mut methods: Vec<_> = plot_data.keys().collect();
+        methods.sort();
+
+        for (color_idx, &method) in methods.iter().enumerate() {
+            let color = palette[color_idx % palette.len()];
+
+            // Unbroken lines demand strict X-axis sorting
+            let mut sorted_data = plot_data[method].clone();
+            sorted_data.sort_by(|a, b| a.0.cmp(&b.0));
+
+            let continuous_data: Vec<_> =
+                sorted_data.iter().map(|(g, m)| (*g as f64, *m)).collect();
+
+            // Draw line
+            chart
+                .draw_series(LineSeries::new(
+                    continuous_data.clone(),
+                    color.stroke_width(4),
+                ))?
+                .label(method.clone())
+                .legend(move |(x, y)| {
+                    PathElement::new(vec![(x, y), (x + 25, y)], color.stroke_width(4))
+                });
+
+            // Draw smooth solid dots
+            chart.draw_series(
+                continuous_data
+                    .iter()
+                    .map(|(x, y)| Circle::new((*x, *y), 5, color.filled())),
+            )?;
+        }
+
+        // Beautiful academic legend placement
+        chart
+            .configure_series_labels()
+            .position(SeriesLabelPosition::UpperRight)
+            .background_style(RGBColor(255, 255, 255).mix(0.9))
+            .border_style(RGBColor(200, 200, 200))
+            .label_font(("sans-serif", 16))
+            .margin(10)
+            .draw()?;
+    }
+
+    // Flush and save the SVG
     root.present()?;
     Ok(())
 }

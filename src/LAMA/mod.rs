@@ -1,7 +1,7 @@
 use crate::dataloader::datasets::TwoDMap;
 use crate::dataloader::tester::testDB;
 use crate::dataloader::{unflatten_nd, Searchable};
-use crate::plotting::plot::{DbResult, ReconstructionDataPoint};
+use crate::plotting::{DbResult, ReconstructionDataPoint};
 use crate::LAMA::error::LAMAError;
 use crate::LAMA::selector::Selector;
 use crate::LAMA::solver::Solver;
@@ -37,7 +37,9 @@ pub fn lama_attack(
     let unique_name = format!("{db_name}_{dist}_e{eps}_d{delt}");
 
     if db_name == "grid" {
-        loaded_db = Box::new(testDB::new(15, 15, 50))
+        loaded_db = Box::new(testDB::new(15, 15, 70))
+    } else if db_name == "nh" {
+        todo!()
     } else {
         info!("Starting LAMA attack using {} dataset", db_name);
         debug!("Loading data from {full_datapath}/{db_name}.json");
@@ -161,6 +163,7 @@ pub fn lama_attack(
         debug!("Intvars workings: {:?}", solver);
         debug!("CPModel: {:?}", model);
         debug!("Solver Status: {:?}", solver.solution_stat);
+        return;
     }
 
     let mut correct = 0;

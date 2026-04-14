@@ -1,7 +1,7 @@
 // Include your structs
 // #[derive(Debug, Serialize, Deserialize, Clone)]
 // pub struct ReconstructionData2dPoint { ... }
-use crate::plotting::plot::ReconstructionDataPoint;
+use crate::plotting::ReconstructionDataPoint;
 use plotters::prelude::*;
 use std::error::Error;
 

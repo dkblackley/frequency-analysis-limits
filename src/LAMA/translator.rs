@@ -118,13 +118,11 @@ impl Translator {
         for var in vars {
             let var_index = var_index_map.get(var).expect("Unknown variable");
 
-            table_proto
-                .exprs
-                .push(cp_sat::proto::LinearExpressionProto {
-                    vars: vec![var_index.0],
-                    coeffs: vec![1],
-                    offset: 0,
-                });
+            table_proto.exprs.push(LinearExpressionProto {
+                vars: vec![var_index.0],
+                coeffs: vec![1],
+                offset: 0,
+            });
         }
 
         for tuple in allowed_plaintexts {
@@ -233,347 +231,182 @@ impl Translator {
         direct_map
     }
 
-    /// Generates valid t-tuples by taking combinations of previously seen items
-    /// and ensuring they have at least one valid, non-overlapping plaintext assignment.
-    pub fn generate_candidates_with_assignments(
-        prev_t_tuples: &[Vec<i64>], // the 'prev t tuples' the mini solver was ran on. So each item in this vec will be of len 2 if t=3 here.
-        t: usize,
-        found_assignments: &HashMap<i64, HashSet<i64>>, // A direct 'enc id'-> 'set of possible found values'
-    ) -> Vec<Vec<i64>> {
-        // 1. Extract all unique encrypted elements from the previous round
-        let unique_elements: HashSet<i64> = prev_t_tuples.iter().flatten().copied().collect();
-        let unique_elements_sorted: Vec<i64> = unique_elements.into_iter().sorted().collect();
-
-        debug!("Attempting to find candidates for t={t} using assignment mapping");
-
-        // Calculate total combinations for the progress bar (n choose t)
-        // Note: for large n, this exact calculation might overflow, so just use a generic spinner
-        // or calculate an approximate bound if needed.
-        let total_combinations = binomial_coefficient(unique_elements_sorted.len(), t);
-        let pb = ProgressBar::new(total_combinations);
-        pb.set_style(
-            ProgressStyle::default_bar()
-                .template("{spinner:.green} [{elapsed_precise}] [{wide_bar:.cyan/blue}] {pos}/{len} (ETA: {eta_precise}) - Checking candidates...")
-                .unwrap()
-                .progress_chars("#>-")
-        );
-
-        let counter = AtomicUsize::new(0);
-
-        // For O(1) lookups.
-        let prev_t_tuples_hashset: HashSet<Vec<i64>> = prev_t_tuples.iter().cloned().collect();
-
-        // for better multi-threading
-        let all_combinations: Vec<Vec<i64>> =
-            unique_elements_sorted.into_iter().combinations(t).collect();
-
-        // 2. Generate all combinations of size 't'
-        // From the proof of optimal selection, we know we don't need to consider both [A, B] and [B, A],
-        // it's just n choose t. This means that we can only consider the proba of seeing [A, B]
-        let valid_candidates: Vec<Vec<i64>> = all_combinations
-            .into_par_iter()
-            .filter(|candidate| {
-                let current = counter.fetch_add(1, Ordering::Relaxed);
-
-                // Only pay the Mutex cost of updating the progress bar every 10,000 iterations
-                if current % 10_000 == 0 {
-                    pb.set_position(current as u64);
-                }
-
-                // A trick called the 'apriori trick' says that any valid set t must be made from
-                // valid t-1 subsets. For t=2, any t=1 tuple could be any encrypted record, but at the
-                // end of this we update to the new 'possible' sub-tuples. Ensure all (t-1) subsets of
-                // 'candidate' exist in `prev_t_tuples`.
-                let mut all_subsets_exist = true;
-
-                // Generate every possible (t-1) length subset from our current candidate
-                // e.g. if candidate is [1, 2, 3], subsets are [1, 2], [1, 3], [2, 3]
-                for subset in candidate.clone().into_iter().combinations(t - 1) {
-                    // If the previous round didn't find this subset to be valid,
-                    // then this current 't' candidate CANNOT be valid.
-                    if !prev_t_tuples_hashset.contains(&subset) {
-                        all_subsets_exist = false;
-                        break; // Break out of the subset loop early
-                    }
-                }
-
-                if !all_subsets_exist {
-                    return false;
-                }
-
-                // Trim the space using the assignment map
-                return Self::has_valid_injective_assignment(&candidate, found_assignments);
-            })
-            .collect();
-
-        pb.finish_with_message(format!("Found {} valid candidates", valid_candidates.len()));
-
-        debug!(
-            "Found {} valid candidates in round {}",
-            valid_candidates.len(),
-            t
-        );
-
-        valid_candidates
-    }
-
-    /// You could think of this function as being equivalent to getting a t-tuple we might be
-    /// considering into the SAT solver with the simple 'all different' clause. That is, if we are
-    /// considering this t-tuple, is there even t unique plaintexts we can assign - based on
-    /// previous results? (Note we don't actually use a SAT solver as this is simple enough)
-    fn has_valid_injective_assignment(
-        encrypted_tuple: &[i64],
-        possible_assignments: &HashMap<i64, HashSet<i64>>,
-    ) -> bool {
-        // RUNNING EXAMPLE:
-        // Let's say we are checking a t=3 tuple: encrypted_tuple = [10, 20, 30]
-        //
-        // Our possible_assignments map says:
-        // 10 -> [1, 2]
-        // 20 -> [2, 3]
-        // 30 -> [2]
-
-        // The `stack` holds "paths". A path is just a list of plaintext assignments
-        // we are currently testing.
-        // We start by pushing an empty path `[]` onto the stack.
-        let mut stack: Vec<Vec<i64>> = Vec::new();
-        stack.push(Vec::new());
-
-        // Loop until we run out of paths to try.
-        while let Some(current_path) = stack.pop() {
-            // The length of our path tells us which encrypted item we are trying to map next.
-            // Example: If current_path is [1], its len is 1.
-            // This means we successfully mapped index 0 (item 10).
-            // Now we need to map index 1 (item 20).
-            let current_index = current_path.len();
-
-            // If our path is as long as our target tuple, we found a full, valid mapping!
-            if current_index == encrypted_tuple.len() {
-                return true;
-            }
-
-            // Grab the encrypted value we need to find an assignment for.
-            let target_encrypted_val = encrypted_tuple[current_index];
-
-            // EXPLORE OPTIONS
-            // Look up the possible plaintexts for this encrypted value.
-            if let Some(plaintexts) = possible_assignments.get(&target_encrypted_val) {
-                // Loop through every possible plaintext option
-                for &candidate_plaintext in plaintexts {
-                    // The crucial 'Injective' check: Are we already using this plaintext in our path?
-                    // Because 't' is small (e.g., 3 or 4), a simple .contains() on a Vec is
-                    // actually faster and cleaner than maintaining a HashSet.
-                    if !current_path.contains(&candidate_plaintext) {
-                        // This plaintext is free!
-                        // Clone our current path, add this new choice to it, and push it to the stack
-                        // so we can evaluate the next index on the next loop iteration.
-                        let mut new_path = current_path.clone();
-                        new_path.push(candidate_plaintext);
-                        stack.push(new_path);
-                    }
-                }
-            }
-        }
-
-        // If the while loop finishes and the stack is empty, it means every single path
-        // hit a collision or a dead end. No valid mapping exists.
-        false
-    }
-
-    /// Helper for processing chunks in parallel using bare-metal CP-SAT Protobufs. Returns A vec of
-    /// tuples, the first inner item is the vec of size t we attempted to solve and the second
-    /// item is the vec of all found solutions for that t-tuple.
-    fn process_cpsat<V>(
-        candidates: &[Vec<i64>],
-        upper_bound: i64,
-        tuples_to_assignments: &HashMap<Vec<i64>, Vec<Vec<i64>>>,
-        domain_sizes: &FxHashMap<i64, usize>,
+    /// Helper for building allowed candidate tables in parallel and running ONE global CP-SAT solve.
+    /// Returns an Option containing a tuple:
+    /// 1. The ordered list of the unique global variables used in the model.
+    /// 2. A Vec of all found global solutions for those variables.
+    fn process_cpsat_global<V>(
+        &mut self,
+        t_minus_1_assignments: &HashMap<Vec<i64>, Vec<Vec<i64>>>,
+        single_assignments: &HashMap<i64, HashSet<i64>>, // Mapping of 1-tuple (var) -> [val_1, val_2, ...]
         validate_candidate: &V,
-    ) -> Vec<(Vec<i64>, Vec<Vec<i64>>)>
+    ) -> Option<HashMap<Vec<i64>, Vec<Vec<i64>>>>
     where
         V: Fn(&[i64], &[i64]) -> bool + Sync + Send,
     {
-        let pb = ProgressBar::new(candidates.len() as u64);
-        pb.set_style(
-            ProgressStyle::default_bar()
-                .template("{spinner:.green} [{elapsed_precise}] [{wide_bar:.cyan/blue}] {pos}/{len} ({eta})")
-                .unwrap()
-                .progress_chars("#>-"),
-        );
+        // ------------------------------------------------------------------------
+        // PHASE 1: Parallel Dynamic Candidate Generation
+        // ------------------------------------------------------------------------
 
-        let counter = AtomicUsize::new(0);
+        // We parallelize over the outer t-1 mapping.
+        // flat_map lets us yield an arbitrary number of valid t-tuples from each t-1 tuple.
+        let table_constraints: Vec<(Vec<i64>, Vec<Vec<i64>>)> = t_minus_1_assignments
+            .par_iter()
+            .flat_map(|(t_minus_1_tuple, sub_assigns)| {
+                // A local buffer to collect the valid constraints generated by this t-1 tuple
+                let mut local_constraints = Vec::new();
 
-        candidates
-            .into_par_iter()
-            .filter_map(|enc_t_tuple| {
-                counter.fetch_add(1, Ordering::Relaxed);
-
-                if counter.load(Ordering::Relaxed) % 10_000 == 0 {
-                    pb.set_position(counter.load(Ordering::Relaxed) as u64);
-                }
-
-                let t = enc_t_tuple.len();
-
-                let mut raw_model = CpModelProto::default();
-
-                // Add variables 0 to t-1
-                for _ in 0..t {
-                    // Don't given them a name, we just know we're considering t-items just now
-                    // We can always 'find' the right value with a linear loop.
-                    let mut var_proto = IntegerVariableProto::default();
-                    var_proto.domain.push(0);
-                    var_proto.domain.push(upper_bound);
-                    raw_model.variables.push(var_proto);
-                }
-
-                // force each var to be unique
-                let mut all_diff = cp_sat::proto::AllDifferentConstraintProto::default();
-                for i in 0..t {
-                    // endure the model commits to having one value per variable
-                    all_diff.exprs.push(LinearExpressionProto {
-                        vars: vec![i as i32],
-                        coeffs: vec![1],
-                        offset: 0,
-                    });
-                }
-
-                let mut constraint_proto = ConstraintProto::default();
-                constraint_proto.constraint = Some(Constraint::AllDiff(all_diff));
-                raw_model.constraints.push(constraint_proto);
-
-                // We need to know the potential number of solutions in the output. We work this
-                // out dynamically.
-                let mut lowest_solution_bound: usize = usize::MAX;
-
-                // Now we do a 'OR' operation for this t-round. We take the results from the
-                // previous round and say "from the previous round, we know that only these specific
-                // tuples from the t combinations were possible" and then for all these combinations,
-                // we pass in a closure that checks if we're within eps distance of the known prob
-                // for this tuple. If we are, add this as a possible assignment. Notice that the
-                // frequency-probability check actually comes AFTER.
-                for sub_indices in (0..t).combinations(t - 1) {
-                    let mut sub_tuple = Vec::with_capacity(t - 1);
-                    for &idx in &sub_indices {
-                        sub_tuple.push(enc_t_tuple[idx]);
+                for (&single_var, single_assigns) in single_assignments.iter() {
+                    // 1. Avoid self-intersection: make sure the single variable isn't already in our tuple
+                    if t_minus_1_tuple.contains(&single_var) {
+                        continue;
                     }
 
-                    // What plaintexts did we find for this tuple in t-1?
-                    let previously_found_plaintexts: &Vec<Vec<i64>> =
-                        tuples_to_assignments.get(&sub_tuple).unwrap();
+                    // 2. Construct the new t-tuple
+                    let mut t_tuple = Vec::with_capacity(t_minus_1_tuple.len() + 1);
+                    // add the 'one-tuple' s unkown var to the vec of vars
+                    t_tuple.extend_from_slice(t_minus_1_tuple);
+                    t_tuple.push(single_var);
 
-                    // 1. Find which index is missing
-                    let missing_idx = (0..t).find(|x| !sub_indices.contains(x)).unwrap();
-                    let missing_enc_val = enc_t_tuple[missing_idx];
+                    let mut pre_validated_assignments = Vec::new();
 
-                    // 2. Lightning fast lookup of the precomputed size
-                    let missing_domain_size = domain_sizes
-                        .get(&missing_enc_val)
-                        .copied() // FxHashMap yields a reference, so we copy the usize
-                        .unwrap_or((upper_bound + 1) as usize);
+                    // These unknown vars should map to: For each unknown in the t-1 tuple,
+                    // the cartesian product over the possible plaintexts.
+                    for sub_assign in sub_assigns {
+                        for single_assign in single_assigns {
+                            let mut candidate = Vec::with_capacity(sub_assign.len() + 1);
+                            candidate.extend_from_slice(sub_assign);
 
-                    // 3. Calculate max solutions bounded by THIS specific table
-                    let max_from_this_table =
-                        previously_found_plaintexts.len() * missing_domain_size;
+                            // Note: Assuming `single_assigns` is Vec<Vec<i64>>.
+                            // If it's just Vec<i64>, change this to `candidate.push(*single_assign);`
+                            candidate.push(*single_assign);
 
-                    if max_from_this_table < lowest_solution_bound {
-                        lowest_solution_bound = max_from_this_table;
+                            // 4. Validate assignment BEFORE adding it as a constraint
+                            if validate_candidate(&t_tuple, &candidate) {
+                                pre_validated_assignments.push(candidate);
+                            }
+                        }
                     }
 
-                    // This table does a CP SAT OR. If this t-tuple (found in the previous round)
-                    // has a possible assignment (do a lookup in the prob table) then add it here
-                    // as a possible assignment
-                    let mut table_proto = TableConstraintProto::default();
-
-                    // Bind the local variable indices (0 to t-1) to the table
-                    for &idx in &sub_indices {
-                        table_proto.exprs.push(LinearExpressionProto {
-                            vars: vec![idx as i32],
-                            coeffs: vec![1],
-                            offset: 0,
-                        });
-                    }
-
-                    // Flatten the valid assignments into the table constraint
-                    for pt_tuple in previously_found_plaintexts {
-                        table_proto.values.extend(pt_tuple);
-                    }
-
-                    let mut constraint_proto = ConstraintProto::default();
-                    constraint_proto.constraint = Some(Constraint::Table(table_proto));
-                    raw_model.constraints.push(constraint_proto);
-                }
-
-                // Because we're trying to solve many many small
-                // SAT problems, the 'precompute' ends up taking more
-                // time than the actual solution. We turn all that off with these params
-                let mut params = SatParameters::default();
-                params.enumerate_all_solutions = Some(true);
-                params.fill_additional_solutions_in_response = Some(true);
-                params.solution_pool_size = Some(lowest_solution_bound as i32);
-                params.num_search_workers = Some(1);
-
-                // params.cp_model_presolve = Some(false);
-                // params.linearization_level = Some(0);
-                // params.log_search_progress = Some(false);
-                // params.catch_sigint_signal = Some(false);
-
-                params.catch_sigint_signal = Some(false);
-                params.log_search_progress = Some(false);
-
-                // 2. Kill the "Smart" Heuristics (Overhead reducers)
-                params.cp_model_presolve = Some(false);
-                params.cp_model_probing_level = Some(0);
-                params.symmetry_level = Some(0);
-                params.use_probing_search = Some(false);
-
-                // 3. Kill the LP Engine
-                params.linearization_level = Some(0);
-                params.add_cg_cuts = Some(false);
-                params.add_mir_cuts = Some(false);
-                params.add_lin_max_cuts = Some(false);
-
-                // 4. Force a simple search strategy
-                params.random_branches_ratio = Some(0.0);
-
-                // Run the solver, which now tells ALL us valid assignments for this specific
-                // t-tuple given the constraints found from the previous rounds. Notice that we
-                // don't use the probability table YET.
-                let response = cp_sat::ffi::solve_with_parameters(&raw_model, &params);
-
-                if response.status() != CpSolverStatus::Optimal
-                    && response.status() != CpSolverStatus::Feasible
-                {
-                    return None;
-                }
-
-                let mut valid_t_assignments = Vec::new();
-
-                // CP Sat has now given us all POSSIBLE t=3 assignments given our t=2 constraints.
-                // However, we don't actually know if these t=3 possible assignments make sense
-                // in regards to our known plaintext/prob pairs for this 3-tuple. We now
-                // 'validate' the candidate by using it's observed frequency vs the known plaintext
-                // match. If frequency of the possible 3-tuple matches the known probability of
-                // observing it then. If it matches, keep it as valid, else discard it.
-                let primary_vals: Vec<i64> = (0..t).map(|i| response.solution[i]).collect();
-                if validate_candidate(enc_t_tuple, &primary_vals) {
-                    valid_t_assignments.push(primary_vals);
-                }
-                // extract all the other possible solutions
-                for add_sol in &response.additional_solutions {
-                    let add_vals: Vec<i64> = (0..t).map(|i| add_sol.values[i]).collect();
-
-                    if validate_candidate(enc_t_tuple, &add_vals) {
-                        valid_t_assignments.push(add_vals);
+                    // If we found valid candidates for this specific t-tuple, keep them for the solver
+                    if !pre_validated_assignments.is_empty() {
+                        local_constraints.push((t_tuple, pre_validated_assignments));
                     }
                 }
 
-                if valid_t_assignments.is_empty() {
-                    None
-                } else {
-                    Some((enc_t_tuple.clone(), valid_t_assignments))
-                }
+                local_constraints
             })
-            .collect()
+            .collect();
+
+        if table_constraints.is_empty() {
+            return None; // No valid configurations found to even build a model
+        }
+
+        // ------------------------------------------------------------------------
+        // PHASE 2: Single Global CP-SAT Model
+        // ------------------------------------------------------------------------
+
+        // Gather all unique variables to build the global model.
+        // The solver needs variables to be strictly bounded (0..N), so we create a mapping
+        // from your internal IDs (i64) to the CP-SAT local indices.
+
+        let mut current_model = &mut self.proto_model;
+        let mut current_t_cache = HashMap::with_capacity(table_constraints.len());
+
+        for (enc_t_tuple, valid_assignments) in &table_constraints {
+            let main_vars: Vec<_> = enc_t_tuple
+                .iter()
+                .map(|rec| *self.enc_id_to_intvar.get(rec).unwrap())
+                .collect();
+
+            Self::add_allowed_assignments(
+                &mut current_model,
+                &main_vars,
+                &valid_assignments,
+                &self.var_index_map,
+            );
+
+            current_t_cache.insert(enc_t_tuple, valid_assignments);
+        }
+
+        // ------------------------------------------------------------------------
+        // PHASE 3: Solve
+        // ------------------------------------------------------------------------
+
+        let mut params = SatParameters::default();
+        params.enumerate_all_solutions = Some(true);
+        params.fill_additional_solutions_in_response = Some(true);
+        // Since this is a global solve, the solution pool needs to be reasonably bounded or omitted.
+        // We'll leave it to the defaults or handle it purely through the 'enumerate_all_solutions' flag.
+
+        // Kill the LP Engine
+        params.linearization_level = Some(0);
+        params.add_cg_cuts = Some(false);
+        params.add_mir_cuts = Some(false);
+        params.add_lin_max_cuts = Some(false);
+
+        // Run the solver.
+        let response = cp_sat::ffi::solve_with_parameters(&current_model.clone(), &params);
+
+        if response.status() != CpSolverStatus::Optimal
+            && response.status() != CpSolverStatus::Feasible
+        {
+            return None;
+        }
+
+        let mut all_global_solutions = Vec::new();
+
+        // Extract the primary solution
+        let primary_vals: Vec<i64> = (0..self.enc_id_to_intvar.len())
+            .map(|i| response.solution[i])
+            .collect();
+        all_global_solutions.push(primary_vals);
+
+        // Extract all additional solutions
+        for add_sol in &response.additional_solutions {
+            let add_vals: Vec<i64> = (0..self.enc_id_to_intvar.len())
+                .map(|i| add_sol.values[i])
+                .collect();
+            all_global_solutions.push(add_vals);
+        }
+
+        // Create the final, filtered cache mapping valid t-tuples to their surviving assignments.
+        let mut updated_t_cache: HashMap<Vec<i64>, Vec<Vec<i64>>> =
+            HashMap::with_capacity(table_constraints.len());
+
+        // Create the final, filtered cache mapping valid t-tuples to their surviving assignments.
+        let mut updated_t_cache: HashMap<Vec<i64>, Vec<Vec<i64>>> =
+            HashMap::with_capacity(table_constraints.len());
+
+        for (enc_t_tuple, _old_valid_assignments) in table_constraints {
+            // 1. Get the indices for the variables in this specific tuple.
+            let solver_indices: Vec<usize> = enc_t_tuple
+                .iter()
+                .map(|rec| {
+                    let intvar = self.enc_id_to_intvar.get(rec).unwrap();
+                    let (index, _) = self.var_index_map.get(intvar).unwrap();
+                    *index as usize
+                })
+                .collect();
+
+            // 2. Project every global solution down to just this tuple's variables.
+            let mut surviving_assignments: Vec<Vec<i64>> = all_global_solutions
+                .iter()
+                .map(|global_sol| solver_indices.iter().map(|&idx| global_sol[idx]).collect())
+                .collect();
+
+            // 3. Deduplicate!
+            // Multiple distinct global solutions often share the exact same local sub-assignment.
+            surviving_assignments.sort_unstable();
+            surviving_assignments.dedup();
+
+            // 4. Store in the new cache
+            if !surviving_assignments.is_empty() {
+                updated_t_cache.insert(enc_t_tuple, surviving_assignments);
+            }
+        }
+
+        Some(updated_t_cache)
     }
 
     /// The translator in the paper and the translator in code work differently but functionally the same.
@@ -591,89 +424,20 @@ impl Translator {
         V: Fn(&[i64], &[i64]) -> bool + Sync + Send,
     {
         // This should be a mapping of (t-1)-tuples to their found values
-        let prev_t_cache = self
+        let prev_t_cache = &self
             .t_assignment_archive
             .get(&(t - 1))
             .expect("Missing previous round cache!")
             .clone();
 
-        let direct_map = Self::genereate_direct_mapping(&prev_t_cache);
-
-        let mut domain_sizes: FxHashMap<i64, usize> = FxHashMap::default();
-        for (&enc_val, plaintexts) in &direct_map {
-            domain_sizes.insert(enc_val, plaintexts.len());
-        }
-
+        let direct_map = Self::genereate_direct_mapping(prev_t_cache);
         // Extract just the keys (the valid (t-1)-tuples of ENCRYPTED records)
-        let prev_valid_tuples: Vec<Vec<i64>> = prev_t_cache.keys().cloned().collect();
 
-        // Generate the Apriori candidates for round t
-        // let candidate_combinations = Self::generate_apriori_candidates(&mut prev_valid_tuples, t);
-        let candidate_combinations =
-            Self::generate_candidates_with_assignments(&prev_valid_tuples, t, &direct_map);
-
-        let _chunk_size = 25_000;
-        let mut all_results = Vec::new();
-
-        // let total_combinations = binomial_coefficient(encrypted_records.len() as usize, t);
-        let pb = ProgressBar::new(candidate_combinations.len() as u64);
-        pb.set_style(
-            ProgressStyle::default_bar()
-                .template("{spinner:.green} [{elapsed_precise}] [{wide_bar:.cyan/blue}] {pos}/{len} ({eta})")
-                .unwrap()
-                .progress_chars("#>-"),
+        let current_t_cache =
+            self.process_cpsat_global(prev_t_cache, &direct_map, &validate_candidate);
+        self.t_assignment_archive.insert(
+            t,
+            current_t_cache.expect("WHAT IN THE GOOD GOD DAMN IS GOING ON"),
         );
-
-        //  Batch combinations to avoid eager memory bombs
-
-        let results = Self::process_cpsat(
-            &*candidate_combinations, // Pass it as a slice directly
-            self.upper,
-            &prev_t_cache,
-            &domain_sizes,
-            &validate_candidate,
-        );
-        all_results.extend(results);
-
-        pb.finish_with_message(format!("Finished finding tuples for t={t}"));
-        debug!("Found {} results for t={}", all_results.len(), t);
-
-        debug!("Updating t-cache for next round...");
-        let pb = ProgressBar::new(all_results.len() as u64);
-        pb.set_style(
-            ProgressStyle::default_bar()
-                .template("{spinner:.green} [{elapsed_precise}] [{wide_bar:.cyan/blue}] {pos}/{len} ({eta})")
-                .unwrap()
-                .progress_chars("#>-"),
-        );
-
-        // OPTIMIZATION: Pre-allocate the exact capacity so the HashMap doesn't have to
-        // constantly re-allocate and move memory as it grows to 700k items.
-        let mut current_t_cache = HashMap::with_capacity(all_results.len());
-
-        for (enc_t_tuple, valid_assignments) in all_results {
-            let main_vars: Vec<_> = enc_t_tuple
-                .iter()
-                .map(|rec| *self.enc_id_to_intvar.get(rec).unwrap())
-                .collect();
-
-            Self::add_allowed_assignments(
-                &mut self.proto_model,
-                &main_vars,
-                &valid_assignments,
-                &self.var_index_map,
-            );
-
-            current_t_cache.insert(enc_t_tuple, valid_assignments);
-
-            // FIX: Increment the progress bar INSIDE the loop!
-            // (Indicatif handles internal throttling automatically, so calling this
-            // 700k times will not slow down your loop).
-            pb.inc(1);
-        }
-
-        pb.finish_with_message("Finished updating t-cache");
-
-        self.t_assignment_archive.insert(t, current_t_cache);
     }
 }

@@ -1,4 +1,5 @@
-use crate::plotting::plot::ReconstructionDataPoint;
+use crate::plotting::ReconstructionDataPoint;
+use log::{debug, info};
 use nalgebra::DMatrix;
 use serde::Deserialize;
 use serde_json::json;
@@ -6,7 +7,161 @@ use std::collections::{HashMap, HashSet};
 use std::error::Error;
 use std::fs;
 use std::fs::File;
-use std::io::Write;
+use std::io::{BufReader, Write};
+
+fn quick_convert(file_path: &str, out_path: &str) {
+    // Pre-allocate the vectors using the length of the hashmap to avoid reallocations
+    let file = File::open(file_path).unwrap();
+    let reader = BufReader::new(file);
+    let data: Vec<ReconstructionDataPoint> = serde_json::from_reader(reader).unwrap();
+
+    let recon_points_vec: Vec<Vec<f64>> = data
+        .iter()
+        .map(|point| point.reconstructed_points.clone())
+        .collect();
+
+    export_to_geojson(recon_points_vec, out_path).unwrap();
+}
+
+pub fn export_to_geo_and_align(
+    dir: &str,
+    remin_path: &str,
+    less_path: &str,
+    unique_name: &str,
+    out_path: &str,
+    db_name: &str,
+) {
+    // let dir = &args.dir_path;
+    // let remin_path = format!("{dir}/{0}/remin", args.name,);
+    // let less_path = format!("{dir}/{0}/even_less", args.name,);
+    // let unique_name = format!("{0}_prob{1}.0_{2}", args.name, args.percent, args.dist);
+
+    let unique_rem_name = format!("{unique_name}_classic.json");
+    let unique_less_name = format!("{unique_name}_even_less.json");
+
+    let remin_res = format!("{remin_path}/{unique_rem_name}");
+    let even_less_res = format!("{less_path}/{unique_less_name}");
+
+    debug!("About to load data {remin_res}, {even_less_res}");
+
+    let content = fs::read_to_string(&remin_res).unwrap();
+    let remin_data: Vec<ReconstructionDataPoint> = serde_json::from_str(&content).unwrap();
+
+    let content = fs::read_to_string(&even_less_res).unwrap();
+    let less_data: Vec<ReconstructionDataPoint> = serde_json::from_str(&content).unwrap();
+
+    let aligned = procrustes_align(&*remin_data, true, true, true);
+    info!("MSE of Remin (Original): {:?}", aligned.1);
+
+    let aligned = procrustes_align(&*less_data, true, true, true);
+    info!("MSE of Even Less (Original): {:?}", aligned.1);
+
+    let out = procrustes_align(&*remin_data, true, true, true);
+    let new_vec = out.0;
+    let _mse = out.1;
+
+    let mut output_file =
+        File::create(format!("{0}{1}/reconstruction.json", out_path, db_name).as_str()).unwrap();
+    let procrus = serde_json::to_string_pretty(&new_vec).unwrap();
+    output_file.write_all(procrus.as_bytes()).unwrap();
+
+    quick_convert(
+        format!("{0}{1}/reconstruction.json", out_path, db_name).as_str(),
+        format!(
+            "{0}{1}/reconstruction_{2}.geojson",
+            out_path, db_name, db_name
+        )
+        .as_str(),
+    )
+}
+
+fn print_min_val_2d(points: &Vec<Vec<f64>>) {
+    let (min_x, max_x, min_y, max_y) = points.iter().fold(
+        (
+            f64::INFINITY,
+            f64::NEG_INFINITY,
+            f64::INFINITY,
+            f64::NEG_INFINITY,
+        ),
+        |(min_x, max_x, min_y, max_y), x_y| {
+            let (x, y) = (x_y[0], x_y[1]);
+            (min_x.min(x), max_x.max(x), min_y.min(y), max_y.max(y))
+        },
+    );
+
+    println!("X: min={}, max={}", min_x, max_x);
+    println!("Y: min={}, max={}", min_y, max_y);
+}
+
+// "fix" the spitz DB to the original.
+pub fn do_spitz_align(
+    remin_data: Vec<ReconstructionDataPoint>,
+    remin_path: &str,
+    unique_rem_name: &str,
+    less_data: Vec<ReconstructionDataPoint>,
+    less_path: &str,
+    unique_less_name: &str,
+    dir: &str,
+) {
+    let spitz_orig = "/home/yelnat/Nextcloud/10TB-STHDD/datasets/freq_an/graw_drawing".to_string();
+    let lat_long_truth = process_and_map_points(
+        &format!("{spitz_orig}/metadata.json"),
+        &format!("{spitz_orig}/Spitz.csv"),
+        remin_data.clone(),
+    )
+    .unwrap();
+
+    // For debug purposes/evgenios request
+    print_min_val_2d(
+        &lat_long_truth
+            .iter()
+            .map(|point| point.true_points.clone())
+            .collect(),
+    );
+
+    let aligned = procrustes_align(&*lat_long_truth, true, true, true);
+
+    info!("MSE of Remin (On map): {:?}", aligned.1);
+
+    let out_path = format!("{remin_path}/{unique_rem_name}.geojson");
+    let recon_points_vec: Vec<Vec<f64>> = aligned
+        .0
+        .iter()
+        .map(|point| point.reconstructed_points.clone())
+        .collect();
+
+    export_to_geojson(recon_points_vec, &out_path).unwrap();
+
+    let true_points: Vec<Vec<f64>> = aligned
+        .0
+        .iter()
+        .map(|point| point.true_points.clone())
+        .collect();
+    let true_path = format!("{dir}spitz/true.geojson");
+    export_to_geojson(true_points, &true_path).unwrap();
+
+    let lat_long_truth = process_and_map_points(
+        &format!("{spitz_orig}/metadata.json"),
+        &format!("{spitz_orig}/Spitz.csv"),
+        less_data,
+    )
+    .unwrap();
+
+    let aligned = procrustes_align(&*lat_long_truth, true, true, true);
+
+    info!("MSE of even less (On map): {:?}", aligned.1);
+
+    let out_path = format!("{less_path}/{unique_less_name}.geojson");
+
+    let recon_points_vec: Vec<Vec<f64>> = aligned
+        .0
+        .iter()
+        .map(|point| point.reconstructed_points.clone())
+        .collect();
+    export_to_geojson(recon_points_vec, &out_path).unwrap();
+
+    info!("Saved lili to geojson");
+}
 
 /// Calculates the standard Mean Squared Error (MSE) across N dimensions
 pub fn calculate_mse(data: &[ReconstructionDataPoint]) -> f64 {
@@ -293,6 +448,7 @@ pub fn process_and_map_points(
 
     Ok(processed_results)
 }
+
 
 #[cfg(test)]
 mod tests {

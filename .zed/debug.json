@@ -33,6 +33,43 @@
     "sourceLanguages": ["rust"],
   },
   {
+    "label": "Debug frequency_analysis_limits Plotting (spitz 350x50)",
+    "adapter": "GDB",
+    "request": "launch",
+    "program": "$ZED_WORKTREE_ROOT/target/debug/frequency_analysis_limits",
+    "args": [
+      "--name",
+      "spitz",
+      "--dist",
+      "uniform",
+      "--t",
+      "4",
+      "spitz",
+      "--dir-path",
+      "databases/350x50",
+      "--plot",
+      "--post",
+      "--skip-lama",
+    ],
+    "env": {
+      "RUSTFLAGS": "-l protobuf",
+    },
+    "build": {
+      "command": "cargo",
+      "args": [
+        "build",
+        "--package",
+        "frequency_analysis_limits",
+        "--bin",
+        "frequency_analysis_limits",
+      ],
+      "env": {
+        "RUSTFLAGS": "-l protobuf",
+      },
+    },
+    "sourceLanguages": ["rust"],
+  },
+  {
     "label": "Debug Integration Test: end_to_end GDB",
     "adapter": "GDB",
     "request": "launch",

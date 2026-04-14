@@ -52,16 +52,19 @@ impl<'a> QueryDistribution<'a> {
         //         .progress_chars("##-"),
         // );
 
-        let atom_count = AtomicU64::new(0);
+        // let atom_count = AtomicU64::new(0);
 
         info!("Computing true cumulative probabilities for every MBQ");
 
         // Combine your existing pairs and weights into a flat Vec
-        let mut sorted_known_probs: Vec<(DomPair, f64)> =
-            pairs.iter().cloned().zip(weights.iter().copied()).collect();
+        // let mut sorted_known_probs: Vec<(DomPair, f64)> = pairs
+        //     .par_iter()
+        //     .cloned()
+        //     .zip(weights.par_iter().copied())
+        //     .collect();
 
         // Sort lexicographically by the DomPair to enable O(log N) binary search
-        sorted_known_probs.sort_unstable_by(|a, b| a.0.cmp(&b.0));
+        // sorted_known_probs.par_sort_unstable_by(|a, b| a.0.cmp(&b.0));
 
         // Compute the True CUMULATIVE probability for every possible MBQ
         let computed_results: Vec<_> = pairs

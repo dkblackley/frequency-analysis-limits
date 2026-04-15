@@ -90,7 +90,7 @@ NAMES=("spitz")
 # DISTS=("uniform" "gaussian" "beta")
 DISTS=("uniform")
 # DATA_DIRS=("$SLURM_SUBMIT_DIR/databases/25x25" "$SLURM_SUBMIT_DIR/databases/50x50" "$SLURM_SUBMIT_DIR/databases/75x75")
-DATA_DIRS=("$SLURM_SUBMIT_DIR/databases/25x125" "$SLURM_SUBMIT_DIR/databases/50x350")
+DATA_DIRS=("$SLURM_SUBMIT_DIR/databases/25x175" "$SLURM_SUBMIT_DIR/databases/50x350")
 
 # DATA_DIRS=(
 #     "$SLURM_SUBMIT_DIR/databases/20x20"

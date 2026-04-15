@@ -88,7 +88,23 @@ $SG_RUN cargo rustc --bin frequency_analysis_limits --release -- -Clink-arg=-lpr
 NAMES=("shopparis" "highway" "busstop" "drink" "spitz" "cali")
 #NAMES=("spitz")
 DISTS=("uniform" "gaussian" "beta")
-DATA_DIRS=("$SLURM_SUBMIT_DIR/databases/25x25" "$SLURM_SUBMIT_DIR/databases/50x50" "$SLURM_SUBMIT_DIR/databases/75x75")
+#DATA_DIRS=("$SLURM_SUBMIT_DIR/databases/25x25" "$SLURM_SUBMIT_DIR/databases/50x50" "$SLURM_SUBMIT_DIR/databases/75x75")
+
+DATA_DIRS=(
+    "$SLURM_SUBMIT_DIR/databases/20x20"
+    "$SLURM_SUBMIT_DIR/databases/25x25"
+    "$SLURM_SUBMIT_DIR/databases/30x30"
+    "$SLURM_SUBMIT_DIR/databases/35x35"
+    "$SLURM_SUBMIT_DIR/databases/40x40"
+    "$SLURM_SUBMIT_DIR/databases/45x45"
+    "$SLURM_SUBMIT_DIR/databases/50x50"
+    "$SLURM_SUBMIT_DIR/databases/55x55"
+    "$SLURM_SUBMIT_DIR/databases/60x60"
+    "$SLURM_SUBMIT_DIR/databases/65x65"
+    "$SLURM_SUBMIT_DIR/databases/70x70"
+    "$SLURM_SUBMIT_DIR/databases/75x75"
+)
+
 #DATA_DIRS=("$SLURM_SUBMIT_DIR/databases/350x50")
 
 echo "Starting batch processing..."

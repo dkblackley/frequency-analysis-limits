@@ -1,6 +1,7 @@
 use crate::plotting::two_d::mse_by_all_reconstructions::plot_histograms_of_all_reconstructions;
 use crate::plotting::two_d::mse_vs_grid::plot_grid_by_mse;
 use crate::plotting::two_d::spatial_plot::run_spatial_plots;
+use crate::plotting::two_d::worst_case::do_convex_hull_plots;
 use serde::{Deserialize, Serialize};
 use std::error::Error;
 use std::fs;
@@ -64,15 +65,25 @@ pub fn do_plotting() {
     // let datasets = vec!["spitz"];
     let methods = vec!["even_less", "remin", "limits"];
     let distributions = vec!["uniform", "gaussian", "beta"];
-    let databases = vec!["databases/25x25", "databases/50x50", "databases/75x75"];
+
+    let databases: Vec<String> = (20..=50)
+        .step_by(5)
+        .map(|n| format!("databases/{}x{}", n, n))
+        .collect();
+
+    let grid_sizes: Vec<(u32, String)> = (20..=50)
+        .step_by(5)
+        .map(|n| (n, format!("{}x{}", n, n)))
+        .collect();
 
     // Do spatial plots
-
-    let dir = "databases/50x50";
-
-    run_spatial_plots(&datasets, dir);
     plot_grid_by_mse(&grid_sizes, &datasets, &methods, &distributions).unwrap();
-    
+    run_spatial_plots(&datasets, "databases/50x50");
+
+    let dir = "databases/350x50";
+    let name = "spitz";
+    plot_histograms_of_all_reconstructions();
+    do_convex_hull_plots("spitz", "databases/350x50");
 
     // do JSUT 350x50 spitz stuff
     let grid = (350, 50);

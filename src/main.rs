@@ -108,7 +108,6 @@ fn main() {
 
     if args.plot {
         info!("Plotting data");
-
         do_plotting();
     }
 

@@ -85,11 +85,11 @@ $SG_RUN cargo clean
 echo "Building project inside container..."
 $SG_RUN cargo rustc --bin frequency_analysis_limits --release -- -Clink-arg=-lprotobuf
 
-#NAMES=("shopparis" "highway" "busstop" "drink" "spitz" "cali")
-NAMES=("spitz")
+NAMES=("shopparis" "highway" "busstop" "drink" "spitz" "cali")
+# NAMES=("spitz")
 DISTS=("uniform" "gaussian" "beta")
-DATA_DIRS=("$SLURM_SUBMIT_DIR/databases/25x25" "$SLURM_SUBMIT_DIR/databases/50x50" "$SLURM_SUBMIT_DIR/databases/75x75")
-DATA_DIRS=("$SLURM_SUBMIT_DIR/databases/350x50")
+# DATA_DIRS=("$SLURM_SUBMIT_DIR/databases/25x25" "$SLURM_SUBMIT_DIR/databases/50x50" "$SLURM_SUBMIT_DIR/databases/75x75")
+# DATA_DIRS=("$SLURM_SUBMIT_DIR/databases/350x50")
 
 DATA_DIRS=(
     "$SLURM_SUBMIT_DIR/databases/20x20"
@@ -101,7 +101,7 @@ DATA_DIRS=(
     "$SLURM_SUBMIT_DIR/databases/50x50"
 )
 
-#DATA_DIRS=("$SLURM_SUBMIT_DIR/databases/350x50")
+DATA_DIRS=("$SLURM_SUBMIT_DIR/databases/350x50")
 
 echo "Starting batch processing..."
 
@@ -162,28 +162,6 @@ for data_dir in "${DATA_DIRS[@]}"; do
         done
     done
 done
-
-# Do specific spitz run at the end.
-$SG_RUN ./target/release/frequency_analysis_limits \
-                        --dir-path "$SLURM_SUBMIT_DIR/databases/350x50" \
-                        --name "spitz" \
-                        --t 3 \
-                        --dist "gaussian" \
-                        --plot
-
-$SG_RUN ./target/release/frequency_analysis_limits \
-                        --dir-path "$SLURM_SUBMIT_DIR/databases/350x50" \
-                        --name "spitz" \
-                        --t 3 \
-                        --dist "uniform" \
-                        --plot
-
-$SG_RUN ./target/release/frequency_analysis_limits \
-                        --dir-path "$SLURM_SUBMIT_DIR/databases/350x50" \
-                        --name "spitz" \
-                        --t 3 \
-                        --dist "beta" \
-                        --plot
 
 echo "All runs completed."
 

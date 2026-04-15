@@ -112,8 +112,8 @@ pub fn lama_attack(
         query_dist_ref.get_cumulative_prob(&pt_mbq)
     };
 
-    // 3. Unified Validator
-    let active_eps = if *eps == 0.0 { 1e-3 } else { *eps };
+    // if in the 'perfect' world only use things within 0.01\% of the true
+    let active_eps = if *eps == 0.0 { 1e-4 } else { *eps };
     let validate_candidate = |enc_tuple: &[i64], proposed_plaintexts: &[i64]| -> bool {
         let obs_prob = get_observed_prob(enc_tuple);
         if obs_prob == 0.0 {

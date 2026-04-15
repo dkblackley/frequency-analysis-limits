@@ -4,14 +4,15 @@ use plotters::prelude::*;
 use std::error::Error;
 use std::fs;
 
-pub fn run_spatial_plots(datasets: &Vec<&str>, dir: &str) {
+pub fn run_spatial_plots(datasets: &Vec<&str>, dir: &str, grid: u32) {
     for name in datasets {
         let path_to_root = format!("{}/{}", dir, name);
 
-        let even_less =
-            format!("{path_to_root}/even_less/{name}_prob100.0_uniform_50x50_even_less.json");
+        let even_less = format!(
+            "{path_to_root}/even_less/{name}_prob100.0_uniform_{grid}x{grid}_even_less.json"
+        );
         let remin_path =
-            format!("{path_to_root}/remin/{name}_prob100.0_uniform_50x50_classic.json");
+            format!("{path_to_root}/remin/{name}_prob100.0_uniform_{grid}x{grid}_classic.json");
         let limits = format!("{path_to_root}/limits/{name}_uniform_e0_d0.9_reconstruction.json");
 
         debug!(

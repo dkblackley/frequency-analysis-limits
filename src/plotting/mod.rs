@@ -58,11 +58,11 @@ fn load_limits_method(path: &str) -> Result<Vec<Vec<ReconstructionDataPoint>>, B
 
 pub fn do_plotting() {
     // Hardcoded vectors for easy modification
-    let grid_sizes = vec![(25, "25x25"), (50, "50x50"), (75, "75x75")];
+    // let grid_sizes = vec![(25, "25x25"), (50, "50x50"), (75, "75x75")];
     // let grid_sizes = vec![(25, "25x25"), (50, "50x50")];
     // let datasets = vec!["shopparis", "busstop", "cali", "drink", "highway", "spitz"];
-    let datasets = vec!["shopparis", "busstop", "drink", "spitz"];
-    // let datasets = vec!["spitz"];
+    //let datasets = vec!["shopparis", "busstop", "drink", "spitz"];
+    let datasets = vec!["drink"];
     let methods = vec!["even_less", "remin", "limits"];
     let distributions = vec!["uniform", "gaussian", "beta"];
 
@@ -77,16 +77,16 @@ pub fn do_plotting() {
         .collect();
 
     // Do spatial plots
-    plot_grid_by_mse(&grid_sizes, &datasets, &methods, &distributions).unwrap();
-    run_spatial_plots(&datasets, "databases/50x50");
+    //plot_grid_by_mse(&grid_sizes, &datasets, &methods, &distributions).unwrap();
+    run_spatial_plots(&datasets, "databases/25x25", 25);
 
     let dir = "databases/350x50";
     let name = "spitz";
-    plot_histograms_of_all_reconstructions();
     do_convex_hull_plots("spitz", "databases/350x50");
 
     // do JSUT 350x50 spitz stuff
     let grid = (350, 50);
+    //plot_histograms_of_all_reconstructions();
 }
 
 fn get_remin_even_less(recon_path: &str, procrustes: bool) -> (Vec<Vec<f64>>, Vec<Vec<f64>>) {

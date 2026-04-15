@@ -37,6 +37,30 @@
     },
   },
   {
+    "label": "cargo run amsterdam 25x25",
+    "command": "cargo",
+    "args": [
+      "run",
+      "--package",
+      "frequency_analysis_limits",
+      "--bin",
+      "frequency_analysis_limits",
+      "--",
+      "--name",
+      "drink",
+      "--dir-path",
+      "databases/25x25",
+      "--dist",
+      "gaussian",
+      "--t",
+      "2",
+      "--plot",
+    ],
+    "env": {
+      "RUSTFLAGS": "-l protobuf",
+    },
+  },
+  {
     "label": "cargo run grid 15x15",
     "command": "cargo",
     "args": [

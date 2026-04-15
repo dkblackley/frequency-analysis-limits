@@ -101,7 +101,7 @@ DATA_DIRS=(
     "$SLURM_SUBMIT_DIR/databases/50x50"
 )
 
-DATA_DIRS=("$SLURM_SUBMIT_DIR/databases/350x50")
+#DATA_DIRS=("$SLURM_SUBMIT_DIR/databases/350x50")
 
 echo "Starting batch processing..."
 

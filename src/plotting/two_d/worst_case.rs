@@ -1,4 +1,4 @@
-use crate::plotting::ReconstructionDataPoint;
+use crate::plotting::{flip_coordinates, ReconstructionDataPoint};
 // Adjust to your crate's path
 use geo::{ConvexHull, MultiPoint, Point};
 use log::{debug, error};
@@ -25,7 +25,17 @@ pub fn do_convex_hull_plots(db_name: &str, data_dir: &str) {
     let all_data: Vec<Vec<ReconstructionDataPoint>> =
         serde_json::from_str(&content).expect("Failed to parse JSON");
 
-    let simplified_data = calculate_sleek_connections(&all_data);
+    let flipped: Vec<Vec<ReconstructionDataPoint>> = all_data
+        .iter()
+        .map(|cluster| {
+            cluster
+                .iter()
+                .map(|point| flip_coordinates(point.clone()))
+                .collect()
+        })
+        .collect();
+
+    let simplified_data = calculate_sleek_connections(&flipped);
     let output_path = format!("figures/{}_worst_case_sleek_modern.svg", db_name);
 
     if let Err(e) = plot_sleek_convex_hull_worst_case(&simplified_data, &output_path, 0.1, 0.1) {

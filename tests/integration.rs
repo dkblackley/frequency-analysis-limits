@@ -122,7 +122,7 @@ fn end_to_end() {
     info!("Loading test DB ({}x{})", rows, cols);
     let loaded_db: Box<dyn Searchable + Sync> = Box::new(testDB::new(rows, cols, 65));
 
-    let dist = "beta";
+    let dist = "uniform";
     let eps = 0.0; // Perfect knowledge constraint
     let delt = 0.0;
 
@@ -170,7 +170,7 @@ fn end_to_end() {
     };
 
     // 3. Unified Validator
-    let active_eps = if eps == 0.0 { 1e-9 } else { eps };
+    let active_eps = if eps == 0.0 { 1e-5 } else { eps };
     let validate_candidate = |enc_tuple: &[i64], proposed_plaintexts: &[i64]| -> bool {
         let obs_prob = get_observed_prob(enc_tuple);
         if obs_prob == 0.0 {

@@ -15,6 +15,27 @@ pub struct DataWrapper {
     pub mapping: Vec<ReconstructionDataPoint>,
 }
 
+pub fn flip_coordinates(mut data_point: ReconstructionDataPoint) -> ReconstructionDataPoint {
+    // Swap the x and y values for true_points
+    if data_point.true_points.len() == 2 {
+        data_point.true_points.swap(0, 1);
+    }
+
+    // Swap the x and y values for reconstructed_points
+    if data_point.reconstructed_points.len() == 2 {
+        data_point.reconstructed_points.swap(0, 1);
+    }
+
+    // Optional: Flipped the unscaled points as well if they happen to exist
+    if let Some(unscaled) = &mut data_point.unscaled_points {
+        if unscaled.len() == 2 {
+            unscaled.swap(0, 1);
+        }
+    }
+
+    data_point
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ReconstructionDataPoint {
     #[serde(rename = "true")]

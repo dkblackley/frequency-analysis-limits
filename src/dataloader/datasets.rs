@@ -45,8 +45,8 @@ impl TwoDMap {
         let locations = raw_data
             .into_iter()
             .map(|arr| Location {
-                latitude: arr[0] as f64,
-                longitude: arr[1] as f64,
+                latitude: arr[1] as f64,
+                longitude: arr[0] as f64,
             })
             .collect();
 
@@ -57,8 +57,8 @@ impl TwoDMap {
     pub fn load_from_embedded(data: &[[Value; 2]]) -> Vec<Location> {
         data.iter()
             .map(|arr| Location {
-                latitude: arr[0] as f64,
-                longitude: arr[1] as f64,
+                latitude: arr[1] as f64,
+                longitude: arr[0] as f64,
             })
             .collect()
     }

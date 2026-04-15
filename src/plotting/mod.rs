@@ -60,9 +60,9 @@ pub fn do_plotting() {
     // Hardcoded vectors for easy modification
     // let grid_sizes = vec![(25, "25x25"), (50, "50x50"), (75, "75x75")];
     // let grid_sizes = vec![(25, "25x25"), (50, "50x50")];
-    // let datasets = vec!["shopparis", "busstop", "cali", "drink", "highway", "spitz"];
+    let datasets = vec!["shopparis", "busstop", "cali", "drink", "highway", "spitz"];
     //let datasets = vec!["shopparis", "busstop", "drink", "spitz"];
-    let datasets = vec!["drink"];
+    // let datasets = vec!["drink"];
     let methods = vec!["even_less", "remin", "limits"];
     let distributions = vec!["uniform", "gaussian", "beta"];
 

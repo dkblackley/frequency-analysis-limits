@@ -3,7 +3,7 @@
 
 use cp_sat::proto::CpSolverStatus;
 use frequency_analysis_limits::dataloader::tester::testDB;
-use frequency_analysis_limits::dataloader::{unflatten_nd, Searchable};
+use frequency_analysis_limits::dataloader::{flatten_nd, unflatten_nd, Searchable};
 use frequency_analysis_limits::LAMA::solver::Solver;
 use frequency_analysis_limits::LAMA::utility::get_mbq;
 use frequency_analysis_limits::{DomPair, Probability, Value};
@@ -116,8 +116,8 @@ fn end_to_end() {
         .build_global()
         .unwrap();
 
-    let rows = 10;
-    let cols = 10;
+    let rows = 8;
+    let cols = 8;
 
     info!("Loading test DB ({}x{})", rows, cols);
     let loaded_db: Box<dyn Searchable + Sync> = Box::new(testDB::new(rows, cols, 65));
@@ -130,13 +130,13 @@ fn end_to_end() {
 
     let (low_pair, high_pair) = loaded_db.get_dom_pair();
     let universe = loaded_db.get_universe();
-    let largest_enc_val = universe.iter().max().unwrap();
+    let largest_enc_val: i64 = flatten_nd(&high_pair, &high_pair, &low_pair);
 
     info!(
         "3. Initializing Translator with universe size: {}",
         universe.len()
     );
-    let mut translator = Translator::new(*largest_enc_val, universe.clone());
+    let mut translator = Translator::new(largest_enc_val, universe.clone());
 
     // Grab references to avoid lifetime closure issues
     let query_dist_ref = &selector.query_distribution;

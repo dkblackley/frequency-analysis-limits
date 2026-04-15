@@ -1,6 +1,6 @@
 use crate::dataloader::datasets::TwoDMap;
 use crate::dataloader::tester::testDB;
-use crate::dataloader::{unflatten_nd, Searchable};
+use crate::dataloader::{flatten_nd, unflatten_nd, Searchable};
 use crate::plotting::{DbResult, ReconstructionDataPoint};
 use crate::LAMA::error::LAMAError;
 use crate::LAMA::selector::Selector;
@@ -64,7 +64,7 @@ pub fn lama_attack(
     let start = Instant::now();
     let (low_pair, high_pair) = loaded_db.get_dom_pair();
     let binding = loaded_db.get_universe();
-    let largest_enc_val = binding.iter().max().unwrap();
+    let largest_possible_val: i64 = flatten_nd(&high_pair, &high_pair, &low_pair);
 
     let selector = Selector::new(dist, &loaded_db, *eps, *delt);
 
@@ -83,18 +83,18 @@ pub fn lama_attack(
     info!("Computing True Probabilities -> 1 tuple");
     let _query_dist_over_one = selector.build_theoretical_t_dict(1);
 
-    let mut translator = Translator::new(*largest_enc_val, loaded_db.get_universe());
+    let mut translator = Translator::new(largest_possible_val, loaded_db.get_universe());
 
     let query_dist_ref = &selector.query_distribution;
     let high_pair_ref = &high_pair;
     let low_pair_ref = &low_pair;
 
     let get_observed_prob = |enc_tuple: &[i64]| -> f64 {
-        let true_plaintexts: Vec<Record> = enc_tuple
+        let true_point: Vec<Record> = enc_tuple
             .iter()
             .map(|rec| unflatten_nd(*rec, high_pair_ref, low_pair_ref))
             .collect();
-        let dom_pair = get_mbq(&true_plaintexts);
+        let dom_pair = get_mbq(&true_point);
 
         // Use the native cumulative probability directly
         query_dist_ref.get_cumulative_prob(&dom_pair)

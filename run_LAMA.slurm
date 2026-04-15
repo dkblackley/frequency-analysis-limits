@@ -98,11 +98,6 @@ DATA_DIRS=(
     "$SLURM_SUBMIT_DIR/databases/40x40"
     "$SLURM_SUBMIT_DIR/databases/45x45"
     "$SLURM_SUBMIT_DIR/databases/50x50"
-    "$SLURM_SUBMIT_DIR/databases/55x55"
-    "$SLURM_SUBMIT_DIR/databases/60x60"
-    "$SLURM_SUBMIT_DIR/databases/65x65"
-    "$SLURM_SUBMIT_DIR/databases/70x70"
-    "$SLURM_SUBMIT_DIR/databases/75x75"
 )
 
 #DATA_DIRS=("$SLURM_SUBMIT_DIR/databases/350x50")

@@ -85,22 +85,22 @@ $SG_RUN cargo clean
 echo "Building project inside container..."
 $SG_RUN cargo rustc --bin frequency_analysis_limits --release -- -Clink-arg=-lprotobuf
 
-#NAMES=("shopparis" "highway" "busstop" "drink" "spitz" "cali")
-NAMES=("spitz")
-# DISTS=("uniform" "gaussian" "beta")
-DISTS=("uniform")
+NAMES=("shopparis" "highway" "busstop" "drink" "spitz" "cali")
+# NAMES=("spitz")
+DISTS=("uniform" "gaussian" "beta")
+# DISTS=("uniform")
 # DATA_DIRS=("$SLURM_SUBMIT_DIR/databases/25x25" "$SLURM_SUBMIT_DIR/databases/50x50" "$SLURM_SUBMIT_DIR/databases/75x75")
-DATA_DIRS=("$SLURM_SUBMIT_DIR/databases/25x175" "$SLURM_SUBMIT_DIR/databases/50x350")
+# DATA_DIRS=("$SLURM_SUBMIT_DIR/databases/25x175" "$SLURM_SUBMIT_DIR/databases/50x350")
 
-# DATA_DIRS=(
-#     "$SLURM_SUBMIT_DIR/databases/20x20"
-#     "$SLURM_SUBMIT_DIR/databases/25x25"
-#     "$SLURM_SUBMIT_DIR/databases/30x30"
-#     "$SLURM_SUBMIT_DIR/databases/35x35"
-#     "$SLURM_SUBMIT_DIR/databases/40x40"
-#     "$SLURM_SUBMIT_DIR/databases/45x45"
-#     "$SLURM_SUBMIT_DIR/databases/50x50"
-# )
+ DATA_DIRS=(
+     "$SLURM_SUBMIT_DIR/databases/20x20"
+     "$SLURM_SUBMIT_DIR/databases/25x25"
+     "$SLURM_SUBMIT_DIR/databases/30x30"
+     "$SLURM_SUBMIT_DIR/databases/35x35"
+     "$SLURM_SUBMIT_DIR/databases/40x40"
+     "$SLURM_SUBMIT_DIR/databases/45x45"
+     "$SLURM_SUBMIT_DIR/databases/50x50"
+ )
 
 #DATA_DIRS=("$SLURM_SUBMIT_DIR/databases/350x50")
 
@@ -124,7 +124,7 @@ for data_dir in "${DATA_DIRS[@]}"; do
 
             # Determine initial 't' value based on distribution type
             if [ "$dist" == "uniform" ]; then
-                t_val=2
+                t_val=3
             else
                 t_val=2
             fi

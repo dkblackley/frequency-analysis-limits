@@ -1,4 +1,5 @@
 use crate::plotting::post::{calculate_mse, procrustes_align};
+use crate::plotting::two_d::format_db_name;
 use crate::plotting::ReconstructionDataPoint;
 use indicatif::ParallelProgressIterator;
 use itertools::iproduct;
@@ -14,8 +15,8 @@ use std::fs;
 
 pub fn plot_histograms_of_all_reconstructions() {
     let name = "spitz";
-    let grid = "50x50";
-    let domain = (50, 50);
+    let domain = (50, 350);
+    let grid = format!("{}x{}", domain.0, domain.1);
     let path_to_root = format!("databases/{grid}/{name}");
 
     let shift_step = 5.0;
@@ -70,7 +71,7 @@ pub fn plot_histograms_of_all_reconstructions() {
     let worst = even_less_mse[len - 10..].to_vec();
     let middle_sampled = sample_uniformly(&even_less_mse, 10_000);
 
-    let mut final_less = Vec::with_capacity(10 + 10_000 + 10);
+    let mut final_less = Vec::with_capacity(11 + 10_000 + 10);
     final_less.extend_from_slice(&best);
     final_less.extend(middle_sampled);
     final_less.extend_from_slice(&worst);
@@ -81,7 +82,7 @@ pub fn plot_histograms_of_all_reconstructions() {
     let worst = remin_mse[len - 10..].to_vec();
     let middle_sampled = sample_uniformly(&remin_mse, 10_000);
 
-    let mut final_remin = Vec::with_capacity(10 + 10_000 + 10);
+    let mut final_remin = Vec::with_capacity(11 + 10_000 + 10);
     final_remin.extend_from_slice(&best);
     final_remin.extend(middle_sampled);
     final_remin.extend_from_slice(&worst);
@@ -101,8 +102,12 @@ pub fn plot_histograms_of_all_reconstructions() {
     plot_filled_step_mse(&methods_to_mse, "figures/mse_distributions_step_filled.svg").unwrap();
 
     debug!("About to plot MSE frequency histogram");
-    plot_mse_frequency_histogram_split(&methods_to_mse, "figures/mse_frequency_histogram.svg")
-        .unwrap();
+    plot_mse_frequency_histogram_split(
+        &methods_to_mse,
+        format_db_name(name),
+        "figures/mse_frequency_histogram.svg",
+    )
+    .unwrap();
 }
 
 /// Uniformly samples a slice of f64 down to `num_samples` items.
@@ -810,13 +815,33 @@ pub fn plot_line_step_mse(
     Ok(())
 }
 
+/// Helper function to format large numbers with 'k' or 'M' suffixes.
+fn format_metric(val: f64) -> String {
+    if val == 0.0 {
+        return "0".to_string();
+    }
+    let abs_val = val.abs();
+    if abs_val >= 1_000_000_000.0 {
+        format!("{:.1}B", val / 1_000_000_000.0).replace(".0B", "B")
+    } else if abs_val >= 1_000_000.0 {
+        format!("{:.1}M", val / 1_000_000.0).replace(".0M", "M")
+    } else if abs_val >= 1_000.0 {
+        format!("{:.1}k", val / 1_000.0).replace(".0k", "K")
+    } else {
+        format!("{:.0}", val) // Standard whole number for anything < 1000
+    }
+}
+
+/// Generates a Histogram split into individual side-by-side plots.
+/// - Features separate bars with clean gaps.
+/// - Formats large axis numbers with metric suffixes (k, M).
 pub fn plot_mse_frequency_histogram_split(
     mse_data: &HashMap<String, (Vec<f64>, f64)>,
+    database_name: &str,
     output_path: &str,
 ) -> Result<(), Box<dyn Error>> {
     let num_plots = mse_data.len().max(1);
 
-    // Create a wider canvas to accommodate side-by-side plots (e.g., 1800x600 for 3 plots)
     let root = SVGBackend::new(output_path, (600 * num_plots as u32, 600)).into_drawing_area();
     root.fill(&WHITE)?;
 
@@ -824,11 +849,22 @@ pub fn plot_mse_frequency_histogram_split(
         return Ok(());
     }
 
-    let num_bins = 10; // Aggressive bucketing
+    // 1. Vertical Split for Super Title
+    let (title_area, plot_area) = root.split_vertically(80);
 
-    // Layout Splitting & Typography
     let text_color = BLACK;
     let font_family = "Linux Biolinum";
+    let super_title_font = (font_family, 40, FontStyle::Bold)
+        .into_font()
+        .color(&text_color);
+
+    ChartBuilder::on(&title_area)
+        .caption(format!("{} Database", database_name), super_title_font)
+        .build_cartesian_2d(0f32..1f32, 0f32..1f32)?;
+
+    let num_bins = 8;
+
+    // Typography
     let label_font = (font_family, 20).into_font().color(&text_color);
     let axis_font = (font_family, 26, FontStyle::Bold)
         .into_font()
@@ -850,17 +886,27 @@ pub fn plot_mse_frequency_histogram_split(
     let mut alpha_methods: Vec<&String> = mse_data.keys().collect();
     alpha_methods.sort();
 
-    // Split the root area into 1 row, `num_plots` columns
-    let panels = root.split_evenly((1, num_plots));
-
-    // Draw each plot in its respective panel with independent axes
+    let mut color_map = HashMap::new();
     for (i, method) in alpha_methods.iter().enumerate() {
-        let color = palette[i % palette.len()];
+        color_map.insert(method.to_string(), palette[i % palette.len()]);
+    }
+
+    let mut plot_methods = alpha_methods.clone();
+    plot_methods.sort_by_key(|&m| match m.as_str() {
+        "LAMa" => 0,
+        "Even Less" => 1,
+        "Remin" => 2,
+        _ => 3,
+    });
+
+    let panels = plot_area.split_evenly((1, num_plots));
+
+    for (i, method) in plot_methods.iter().enumerate() {
+        let color = color_map[*method];
         let mses = &mse_data[*method].0;
         let panel = &panels[i];
 
-        // 1. Calculate Local Bounds specific to this method
-        let min_mse = 0.0f64; // Force start at 0
+        let min_mse = 0.0f64;
         let mut local_max_mse = 0.0f64;
 
         for &mse in mses {
@@ -869,7 +915,6 @@ pub fn plot_mse_frequency_histogram_split(
             }
         }
 
-        // Safety catch & 5% padding for the axis bounds
         if local_max_mse <= 0.0 {
             local_max_mse = 1.0;
         } else {
@@ -878,63 +923,64 @@ pub fn plot_mse_frequency_histogram_split(
 
         let bin_width = (local_max_mse - min_mse) / num_bins as f64;
 
-        // 2. Bucketize Data for this specific method
+        // Bucketize Data
         let mut bins = vec![0; num_bins];
         for &mse in mses {
             let mut bin_idx = ((mse - min_mse) / bin_width).floor() as usize;
-
-            // Safety clamp
             if bin_idx >= num_bins {
                 bin_idx = num_bins - 1;
             }
             bins[bin_idx] += 1;
         }
 
-        // Add 10% vertical padding to the Y-axis max (local maximum!)
         let local_max_freq = *bins.iter().max().unwrap_or(&0);
         let max_y = ((local_max_freq as f64 * 1.1).ceil() as usize).max(1);
 
-        // 3. Render Chart
+        // Render Chart
         let mut chart = ChartBuilder::on(panel)
             .margin(40)
             .caption(*method, title_font.clone())
-            .x_label_area_size(60)
-            .y_label_area_size(70)
+            .x_label_area_size(90) // Kept the increased spacing from before
+            .y_label_area_size(90) // Increased to accommodate wider "k"/"M" labels if needed
             .build_cartesian_2d(min_mse..local_max_mse, 0..max_y)?;
 
         chart
             .configure_mesh()
             .disable_x_mesh()
-            .y_desc("Reconstruction")
+            .x_labels(8)
+            .y_desc("Number of Solutions")
             .x_desc("Mean Squared Error (MSE)")
-            // {x:.0} formats the f64 without decimal points (e.g., 0, 10, 150)
-            .x_label_formatter(&|x| format!("{:.0}", x))
-            .y_label_formatter(&|y| y.to_string())
+            .x_label_formatter(&|x| format_metric(*x)) // Apply custom formatting
+            .y_label_formatter(&|y| format_metric(*y as f64)) // Apply custom formatting
             .label_style(label_font.clone())
             .axis_desc_style(axis_font.clone())
             .light_line_style(WHITE.mix(0.0))
             .bold_line_style(BLACK.mix(0.1))
             .draw()?;
 
-        let mut step_data = Vec::with_capacity(num_bins * 2 + 2);
-        step_data.push((min_mse, 0)); // Anchor to bottom left
+        // Calculate a small gap width (e.g., 5% of the bin width on each side = 10% total gap)
+        let gap = bin_width * 0.05;
 
         for (bin_idx, &count) in bins.iter().enumerate() {
+            if count == 0 {
+                continue; // Skip drawing empty bins
+            }
+
             let x_start = min_mse + (bin_idx as f64) * bin_width;
             let x_end = min_mse + ((bin_idx + 1) as f64) * bin_width;
 
-            // Step hard corners
-            step_data.push((x_start, count));
-            step_data.push((x_end, count));
+            // Draw individual distinct rectangles with the calculated gap
+            chart.draw_series(std::iter::once(Rectangle::new(
+                [(x_start + gap, 0), (x_end - gap, count)],
+                color.mix(0.5).filled(),
+            )))?;
+
+            // Draw a slightly darker border around each rectangle for crispness
+            chart.draw_series(std::iter::once(Rectangle::new(
+                [(x_start + gap, 0), (x_end - gap, count)],
+                color.stroke_width(2),
+            )))?;
         }
-
-        step_data.push((local_max_mse, 0)); // Anchor to bottom right
-
-        // Draw with border and translucent fill (No .legend() called)
-        chart.draw_series(
-            AreaSeries::new(step_data, 0, color.mix(0.4).filled())
-                .border_style(color.stroke_width(3)),
-        )?;
     }
 
     root.present()?;

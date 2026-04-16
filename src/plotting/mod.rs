@@ -98,6 +98,8 @@ pub fn do_plotting() {
         .collect();
 
     // Do spatial plots
+    run_spatial_plots(&datasets, "databases/50x50", 50);
+
     plot_grid_by_mse(&grid_sizes, &datasets, &methods, &distributions).unwrap();
     // do_table_plot(
     //     "databases",

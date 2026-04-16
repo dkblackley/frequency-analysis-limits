@@ -126,7 +126,7 @@ for data_dir in "${DATA_DIRS[@]}"; do
 
             # Determine initial 't' value based on distribution type
             if [ "$dist" == "uniform" ]; then
-                t_val=3
+                t_val=2
             else
                 t_val=2
             fi
@@ -147,7 +147,7 @@ for data_dir in "${DATA_DIRS[@]}"; do
                 $SG_RUN ./target/release/frequency_analysis_limits \
                         --dir-path "$data_dir" \
                         --name "$name" \
-                        --t 4 \
+                        --t 2 \
                         --dist "$dist"
 
                 # Check if the retry also failed

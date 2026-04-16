@@ -1,4 +1,5 @@
 use crate::plotting::post::calculate_mse;
+use crate::plotting::two_d::format_db_name;
 use crate::plotting::{load_limits_method, load_standard_method};
 use log::error;
 use plotters::prelude::*;
@@ -91,18 +92,6 @@ pub fn plot_grid_by_mse(
     }
 
     Ok(())
-}
-
-fn format_db_name(db: &str) -> &str {
-    match db {
-        "shopparis" => "Paris",
-        "busstop" => "Shanghai",
-        "cali" => "Cali",
-        "drink" => "Amsterdam",
-        "highway" => "Manhattan",
-        "spitz" => "Spitz",
-        _ => db,
-    }
 }
 
 fn plot_db_side_by_side(

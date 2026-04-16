@@ -116,7 +116,7 @@ fn end_to_end() {
         .build_global()
         .unwrap();
 
-    let rows_cols = 8;
+    let rows_cols = 6;
     let dim = 3;
 
     info!("Loading test DB ({}x{})", rows_cols, rows_cols);

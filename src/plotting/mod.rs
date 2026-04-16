@@ -1,3 +1,6 @@
+use crate::plotting::tables::running_time::do_table_plot;
+use crate::plotting::two_d::mse_by_all_reconstructions::plot_histograms_of_all_reconstructions;
+use crate::plotting::two_d::mse_vs_grid::plot_grid_by_mse;
 use crate::plotting::two_d::spatial_plot::run_spatial_plots;
 use crate::plotting::two_d::worst_case::do_convex_hull_plots;
 use serde::{Deserialize, Serialize};
@@ -6,6 +9,7 @@ use std::fs;
 
 mod metrics;
 pub mod post;
+pub mod tables;
 pub mod two_d;
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -80,9 +84,7 @@ pub fn do_plotting() {
     // Hardcoded vectors for easy modification
     // let grid_sizes = vec![(25, "25x25"), (50, "50x50"), (75, "75x75")];
     // let grid_sizes = vec![(25, "25x25"), (50, "50x50")];
-    // let datasets = vec!["shopparis", "busstop", "cali", "drink", "highway", "spitz"];
-    //let datasets = vec!["shopparis", "busstop", "drink", "spitz"];
-    let datasets = vec!["spitz"];
+    let datasets = vec!["shopparis", "busstop", "cali", "drink", "highway", "spitz"];
     let methods = vec!["even_less", "remin", "limits"];
     let distributions = vec!["uniform", "gaussian", "beta"];
 
@@ -97,16 +99,25 @@ pub fn do_plotting() {
         .collect();
 
     // Do spatial plots
-    //plot_grid_by_mse(&grid_sizes, &datasets, &methods, &distributions).unwrap();
-    run_spatial_plots(&datasets, "databases/50x350", 350);
+    plot_grid_by_mse(&grid_sizes, &datasets, &methods, &distributions).unwrap();
+    do_table_plot(
+        "databases",
+        &grid_sizes.iter().map(|x| x.0).collect(),
+        &datasets,
+        &distributions,
+    );
 
     let dir = "databases/350x50";
     let name = "spitz";
-    do_convex_hull_plots("spitz", "databases/350x50");
 
     // do JSUT 350x50 spitz stuff
+    let datasets = vec!["spitz"];
     let grid = (350, 50);
-    //plot_histograms_of_all_reconstructions();
+    run_spatial_plots(&datasets, "databases/50x350", 350);
+    do_convex_hull_plots("spitz", "databases/350x50");
+
+    // this takes a long time to run...
+    plot_histograms_of_all_reconstructions();
 }
 
 fn get_remin_even_less(recon_path: &str, procrustes: bool) -> (Vec<Vec<f64>>, Vec<Vec<f64>>) {

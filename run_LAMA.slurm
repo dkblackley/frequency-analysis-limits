@@ -190,9 +190,9 @@ fi
  for dim in {3..6}; do
 
      # 2. Dynamically build the "10x10x..." string based on the dimension
-     dim_str="10"
+     dim_str="5"
      for ((i=1; i<dim; i++)); do
-         dim_str+="x10"
+         dim_str+="x5"
      done
 
      # 3. Set the directory path for this dimension

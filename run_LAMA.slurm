@@ -85,28 +85,26 @@ $SG_RUN cargo clean
 echo "Building project inside container..."
 $SG_RUN cargo rustc --bin frequency_analysis_limits --release -- -Clink-arg=-lprotobuf
 
-# NAMES=("shopparis" "highway" "busstop" "drink" "spitz" "cali")
-# DISTS=("uniform" "gaussian" "beta")
-# DATA_DIRS=("$SLURM_SUBMIT_DIR/databases/25x25" "$SLURM_SUBMIT_DIR/databases/50x50" "$SLURM_SUBMIT_DIR/databases/75x75")
 
 #NAMES=("spitz")
 #DISTS=("uniform")
 #DATA_DIRS=("$SLURM_SUBMIT_DIR/databases/350x50" "$SLURM_SUBMIT_DIR/databases/175x25" "$SLURM_SUBMIT_DIR/databases/25x175" "$SLURM_SUBMIT_DIR/databases/50x350" )
 
+ NAMES=("shopparis" "highway" "busstop" "drink" "spitz" "cali")
+ DISTS=("uniform" "gaussian" "beta")
+ DATA_DIRS=(
+     "$SLURM_SUBMIT_DIR/databases/20x20"
+     "$SLURM_SUBMIT_DIR/databases/25x25"
+     "$SLURM_SUBMIT_DIR/databases/30x30"
+     "$SLURM_SUBMIT_DIR/databases/35x35"
+     "$SLURM_SUBMIT_DIR/databases/40x40"
+     "$SLURM_SUBMIT_DIR/databases/45x45"
+     "$SLURM_SUBMIT_DIR/databases/50x50"
+ )
 
-# DATA_DIRS=(
-#     "$SLURM_SUBMIT_DIR/databases/20x20"
-#     "$SLURM_SUBMIT_DIR/databases/25x25"
-#     "$SLURM_SUBMIT_DIR/databases/30x30"
-#     "$SLURM_SUBMIT_DIR/databases/35x35"
-#     "$SLURM_SUBMIT_DIR/databases/40x40"
-#     "$SLURM_SUBMIT_DIR/databases/45x45"
-#     "$SLURM_SUBMIT_DIR/databases/50x50"
-# )
-
-NAMES=("nh")
-DISTS=("uniform" "gaussian" "beta")
-DATA_DIRS=("$SLURM_SUBMIT_DIR/databases/16x16x14")
+#NAMES=("nh")
+#DISTS=("uniform" "gaussian" "beta")
+#DATA_DIRS=("$SLURM_SUBMIT_DIR/databases/16x16x14")
 
 echo "Starting batch processing..."
 

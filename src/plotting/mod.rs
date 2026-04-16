@@ -1,5 +1,3 @@
-use crate::plotting::two_d::mse_by_all_reconstructions::plot_histograms_of_all_reconstructions;
-use crate::plotting::two_d::mse_vs_grid::plot_grid_by_mse;
 use crate::plotting::two_d::spatial_plot::run_spatial_plots;
 use crate::plotting::two_d::worst_case::do_convex_hull_plots;
 use serde::{Deserialize, Serialize};
@@ -81,9 +79,9 @@ pub fn do_plotting() {
     // Hardcoded vectors for easy modification
     // let grid_sizes = vec![(25, "25x25"), (50, "50x50"), (75, "75x75")];
     // let grid_sizes = vec![(25, "25x25"), (50, "50x50")];
-    let datasets = vec!["shopparis", "busstop", "cali", "drink", "highway", "spitz"];
+    // let datasets = vec!["shopparis", "busstop", "cali", "drink", "highway", "spitz"];
     //let datasets = vec!["shopparis", "busstop", "drink", "spitz"];
-    // let datasets = vec!["drink"];
+    let datasets = vec!["spitz"];
     let methods = vec!["even_less", "remin", "limits"];
     let distributions = vec!["uniform", "gaussian", "beta"];
 
@@ -99,7 +97,7 @@ pub fn do_plotting() {
 
     // Do spatial plots
     //plot_grid_by_mse(&grid_sizes, &datasets, &methods, &distributions).unwrap();
-    run_spatial_plots(&datasets, "databases/25x25", 25);
+    run_spatial_plots(&datasets, "databases/50x350", 350);
 
     let dir = "databases/350x50";
     let name = "spitz";

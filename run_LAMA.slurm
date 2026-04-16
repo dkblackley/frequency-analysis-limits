@@ -235,7 +235,7 @@ fi
              $SG_RUN ./target/release/frequency_analysis_limits \
                      --dir-path "$data_dir" \
                      --name "$name" \
-                     --t 3 \
+                     --t 2 \
                      --dist "$dist" \
                      --dim "$dim"
 

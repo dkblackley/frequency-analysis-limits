@@ -47,9 +47,6 @@ pub struct Args {
     #[arg(long, default_value = "100.0")]
     percent: f64,
 
-    #[arg(long, default_value = "5")]
-    dim: usize,
-
     #[arg(long, default_value = "uniform")]
     dist: String,
 
@@ -86,7 +83,6 @@ fn main() {
             &args.dir_path,
             &args.dist,
             &args.t,
-            &args.dim,
             &args.save,
             &args.eps,
             &args.delta,
@@ -112,6 +108,7 @@ fn main() {
 
     if args.plot {
         info!("Plotting data");
+
         do_plotting();
     }
 

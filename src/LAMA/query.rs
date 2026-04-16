@@ -44,7 +44,27 @@ impl<'a> QueryDistribution<'a> {
         let mut mbq_to_cumulative_prob = FxHashMap::default();
         let mut probs_and_dom_pairs = Vec::with_capacity(pairs.len());
 
+        // let pb = ProgressBar::new(pairs.len() as u64);
+        // pb.set_style(
+        //     ProgressStyle::default_bar()
+        //         .template("[{elapsed_precise}] {bar:40.cyan/blue} {pos:>7}/{len:7} {eta}")
+        //         .unwrap()
+        //         .progress_chars("##-"),
+        // );
+
+        // let atom_count = AtomicU64::new(0);
+
         info!("Computing true cumulative probabilities for every MBQ");
+
+        // Combine your existing pairs and weights into a flat Vec
+        // let mut sorted_known_probs: Vec<(DomPair, f64)> = pairs
+        //     .par_iter()
+        //     .cloned()
+        //     .zip(weights.par_iter().copied())
+        //     .collect();
+
+        // Sort lexicographically by the DomPair to enable O(log N) binary search
+        // sorted_known_probs.par_sort_unstable_by(|a, b| a.0.cmp(&b.0));
 
         // Compute the True CUMULATIVE probability for every possible MBQ
         let computed_results: Vec<_> = pairs

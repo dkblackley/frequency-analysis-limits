@@ -1,10 +1,9 @@
 use crate::{Record, Value};
 
+pub mod datasets;
 mod error;
-pub mod two_d;
 // mod raw_data;
 pub mod tester;
-pub mod three_d;
 
 // Your shared trait
 pub trait Searchable: Sync {

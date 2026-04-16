@@ -190,7 +190,8 @@ impl Translator {
                 // Insert the specific 1-tuple into the cache for Apriori round t=2
                 t1_cache.insert(enc_tuple, valid_plaintexts);
             } else {
-                // Might happen in EVC but will never in perfect...
+                // If it maps to nothing, it's good to log a warning so you know
+                // something is mathematically mismatched in the epsilon bounds
                 warn!(
                     "Encrypted record {} has no valid plaintext assignments!",
                     enc_id
@@ -418,6 +419,10 @@ impl Translator {
         let mut updated_t_cache: HashMap<Vec<i64>, Vec<Vec<i64>>> =
             HashMap::with_capacity(table_constraints.len());
 
+        // Create the final, filtered cache mapping valid t-tuples to their surviving assignments.
+        let mut updated_t_cache: HashMap<Vec<i64>, Vec<Vec<i64>>> =
+            HashMap::with_capacity(table_constraints.len());
+
         for (enc_t_tuple, _old_valid_assignments) in table_constraints {
             // 1. Get the indices for the variables in this specific tuple.
             let solver_indices: Vec<usize> = enc_t_tuple
@@ -434,35 +439,6 @@ impl Translator {
                 .iter()
                 .map(|global_sol| solver_indices.iter().map(|&idx| global_sol[idx]).collect())
                 .collect();
-
-            // let len = surviving_assignments.len();
-            // for survivor in surviving_assignments.into_iter().permutations(len) {
-            //     for survived in &survivor {
-            //         if validate_candidate(&enc_t_tuple, &*survived) {
-            //             let main_vars: Vec<_> = enc_t_tuple
-            //                 .iter()
-            //                 .map(|rec| *self.enc_id_to_intvar.get(rec).unwrap())
-            //                 .collect();
-            //
-            //             Self::add_allowed_assignments(
-            //                 &mut self.proto_model,
-            //                 &main_vars,
-            //                 &survivor,
-            //                 &self.var_index_map,
-            //             );
-            //
-            //             // // 3. Deduplicate!
-            //             // // Multiple distinct global solutions often share the exact same local sub-assignment.
-            //             // surviving_assignments.sort_unstable();
-            //             // surviving_assignments.dedup();
-            //
-            //             // 4. Store in the new cache
-            //             if !survivor.is_empty() {
-            //                 updated_t_cache.insert(enc_t_tuple.clone(), survivor.clone());
-            //             }
-            //         }
-            //     }
-            // }
 
             // as a sanity check, the surviving assignments MUST match the probs
             for survived in &surviving_assignments {

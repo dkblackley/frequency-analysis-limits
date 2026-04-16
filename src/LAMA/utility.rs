@@ -1,6 +1,5 @@
 use crate::{Coord, DomPair, Record};
 use itertools::Itertools;
-use std::collections::HashMap;
 use std::str::FromStr;
 
 // Helper to determine if point u dominates point v (u_i >= v_i for all i)
@@ -82,70 +81,6 @@ pub fn get_mbq(t_tup: &[Record]) -> DomPair {
         }
     }
     (minima, maxima)
-}
-
-pub fn check_isomorphism(
-    responses: &HashMap<i64, i64>,
-    rows: i64,
-    cols: i64,
-) -> Option<&'static str> {
-    // 2. Build the solver's actual mapping: True_Plaintext_ID -> Guessed_Plaintext_ID
-    let mut true_to_guessed = HashMap::new();
-    for (encrypted_alias, guessed_id) in responses {
-        true_to_guessed.insert(encrypted_alias, *guessed_id);
-    }
-
-    let max_r = rows - 1;
-    let max_c = cols - 1;
-
-    // Helper closures to translate between 1D IDs and 2D Coordinates
-    // This matches the math from your `flatten_nd` function
-    let to_coord = |id: i64| -> (i64, i64) { (id / cols, id % cols) };
-    let to_id = |r: i64, c: i64| -> i64 { r * cols + c };
-
-    // 3. Define the 8 valid geometric transformations for a 2D grid
-    let transformations: Vec<(&str, Box<dyn Fn(i64, i64) -> (i64, i64)>)> = vec![
-        ("Identity (Perfect Match)", Box::new(|r, c| (r, c))),
-        ("Rotated 90°", Box::new(move |r, c| (c, max_r - r))),
-        ("Rotated 180°", Box::new(move |r, c| (max_r - r, max_c - c))),
-        ("Rotated 270°", Box::new(move |r, c| (max_c - c, r))),
-        (
-            "Reflected Horizontal (Flip Y)",
-            Box::new(move |r, c| (r, max_c - c)),
-        ),
-        (
-            "Reflected Vertical (Flip X)",
-            Box::new(move |r, c| (max_r - r, c)),
-        ),
-        ("Reflected Main Diagonal", Box::new(|r, c| (c, r))),
-        (
-            "Reflected Anti-Diagonal",
-            Box::new(move |r, c| (max_c - c, max_r - r)),
-        ),
-    ];
-
-    // 4. Test the solver's mapping against each transformation
-    for (name, transform) in transformations {
-        let mut is_match = true;
-
-        for (&true_id, &guessed_id) in &true_to_guessed {
-            let (r, c) = to_coord(*true_id);
-            let (trans_r, trans_c) = transform(r, c);
-            let expected_guessed_id = to_id(trans_r, trans_c);
-
-            if guessed_id != expected_guessed_id {
-                is_match = false;
-                break;
-            }
-        }
-
-        // If all points conform to this specific transformation, we cracked it
-        if is_match {
-            return Some(name);
-        }
-    }
-
-    None
 }
 
 pub fn binomial_coefficient(n: usize, t: usize) -> u64 {

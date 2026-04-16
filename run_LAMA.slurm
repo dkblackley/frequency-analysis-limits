@@ -86,11 +86,13 @@ echo "Building project inside container..."
 $SG_RUN cargo rustc --bin frequency_analysis_limits --release -- -Clink-arg=-lprotobuf
 
 # NAMES=("shopparis" "highway" "busstop" "drink" "spitz" "cali")
-NAMES=("spitz")
 # DISTS=("uniform" "gaussian" "beta")
-DISTS=("uniform")
 # DATA_DIRS=("$SLURM_SUBMIT_DIR/databases/25x25" "$SLURM_SUBMIT_DIR/databases/50x50" "$SLURM_SUBMIT_DIR/databases/75x75")
-DATA_DIRS=("$SLURM_SUBMIT_DIR/databases/350x50" "$SLURM_SUBMIT_DIR/databases/175x25" "$SLURM_SUBMIT_DIR/databases/25x175" "$SLURM_SUBMIT_DIR/databases/50x350" )
+
+#NAMES=("spitz")
+#DISTS=("uniform")
+#DATA_DIRS=("$SLURM_SUBMIT_DIR/databases/350x50" "$SLURM_SUBMIT_DIR/databases/175x25" "$SLURM_SUBMIT_DIR/databases/25x175" "$SLURM_SUBMIT_DIR/databases/50x350" )
+
 
 # DATA_DIRS=(
 #     "$SLURM_SUBMIT_DIR/databases/20x20"
@@ -102,7 +104,9 @@ DATA_DIRS=("$SLURM_SUBMIT_DIR/databases/350x50" "$SLURM_SUBMIT_DIR/databases/175
 #     "$SLURM_SUBMIT_DIR/databases/50x50"
 # )
 
-#DATA_DIRS=("$SLURM_SUBMIT_DIR/databases/350x50")
+NAMES=("nh")
+DISTS=("uniform" "gaussian" "beta")
+DATA_DIRS=("$SLURM_SUBMIT_DIR/databases/16x16x14")
 
 echo "Starting batch processing..."
 
@@ -145,9 +149,8 @@ for data_dir in "${DATA_DIRS[@]}"; do
                 $SG_RUN ./target/release/frequency_analysis_limits \
                         --dir-path "$data_dir" \
                         --name "$name" \
-                        --t 3 \
-                        --dist "$dist" \
-                        --plot
+                        --t 4 \
+                        --dist "$dist"
 
                 # Check if the retry also failed
                 if [ $? -ne 0 ]; then
@@ -176,3 +179,92 @@ if [ ${#FAILED_RUNS[@]} -ne 0 ]; then
 else
     echo "All configurations processed successfully."
 fi
+
+
+ # Define the main variables
+ name="grid"
+ DISTS=("uniform" "gaussian" "beta")
+
+ # Initialize an array to track failures
+ FAILED_RUNS=()
+
+ # 1. Loop through dimensions 3, 4, 5, and 6
+ for dim in {3..6}; do
+
+     # 2. Dynamically build the "10x10x..." string based on the dimension
+     dim_str="10"
+     for ((i=1; i<dim; i++)); do
+         dim_str+="x10"
+     done
+
+     # 3. Set the directory path for this dimension
+     data_dir="$SLURM_SUBMIT_DIR/databases/$dim_str"
+
+     echo "================================================================"
+     echo "Starting runs for Dimension: $dim"
+     echo "Data Dir: $data_dir"
+     echo "================================================================"
+     echo ""
+
+     # 4. Loop through each distribution type
+     for dist in "${DISTS[@]}"; do
+         echo "----------------------------------------"
+         echo "Running configuration:"
+         echo "  Name:     $name"
+         echo "  Dist:     $dist"
+         echo "----------------------------------------"
+
+         # Determine initial 't' value based on distribution type
+         if [ "$dist" == "uniform" ]; then
+             t_val=3
+         else
+             t_val=2
+         fi
+
+         # Initial run
+         $SG_RUN ./target/release/frequency_analysis_limits \
+             --dir-path "$data_dir" \
+             --name "$name" \
+             --t "$t_val" \
+             --dim "$dim" \
+             --dist "$dist"
+
+         # Check if the initial run failed ($? checks the exit code of the last command)
+         if [ $? -ne 0 ]; then
+             echo "Error: Initial run failed for $name (Dist: $dist, Dir: $data_dir). Retrying with t=4..."
+
+             # Retry one more time with t=4
+             $SG_RUN ./target/release/frequency_analysis_limits \
+                     --dir-path "$data_dir" \
+                     --name "$name" \
+                     --t 4 \
+                     --dist "$dist" \
+                     --dim "$dim"
+
+             # Check if the retry also failed
+             if [ $? -ne 0 ]; then
+                 echo "Error: Retry failed."
+                 FAILED_RUNS+=("$name | Dist: $dist | Dir: $data_dir")
+             else
+                 echo "Successfully completed on retry."
+             fi
+         else
+             echo "Successfully completed."
+         fi
+         echo "" # Add a blank line for terminal readability
+     done
+ done
+
+ # 5. Print a clean summary of failures at the very end
+ if [ ${#FAILED_RUNS[@]} -gt 0 ]; then
+     echo "========================================"
+     echo "SUMMARY OF FAILED RUNS:"
+     for failure in "${FAILED_RUNS[@]}"; do
+         echo "- $failure"
+     done
+     echo "========================================"
+ else
+     echo "========================================"
+     echo "ALL RUNS COMPLETED SUCCESSFULLY."
+     echo "========================================"
+ fi

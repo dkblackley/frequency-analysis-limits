@@ -3,7 +3,7 @@
 
 use cp_sat::proto::CpSolverStatus;
 use frequency_analysis_limits::dataloader::tester::testDB;
-use frequency_analysis_limits::dataloader::{unflatten_nd, Searchable};
+use frequency_analysis_limits::dataloader::{flatten_nd, unflatten_nd, Searchable};
 use frequency_analysis_limits::LAMA::solver::Solver;
 use frequency_analysis_limits::LAMA::utility::get_mbq;
 use frequency_analysis_limits::{DomPair, Probability, Value};
@@ -112,17 +112,17 @@ fn end_to_end() {
 
     // Force rayon to one thread
     rayon::ThreadPoolBuilder::new()
-        .num_threads(1)
+        .num_threads(0)
         .build_global()
         .unwrap();
 
-    let rows = 10;
-    let cols = 10;
+    let rows_cols = 6;
+    let dim = 3;
 
-    info!("Loading test DB ({}x{})", rows, cols);
-    let loaded_db: Box<dyn Searchable + Sync> = Box::new(testDB::new(rows, cols, 65));
+    info!("Loading test DB ({}x{})", rows_cols, rows_cols);
+    let loaded_db: Box<dyn Searchable + Sync> = Box::new(testDB::new(dim, rows_cols, 25));
 
-    let dist = "beta";
+    let dist = "uniform";
     let eps = 0.0; // Perfect knowledge constraint
     let delt = 0.0;
 
@@ -130,13 +130,13 @@ fn end_to_end() {
 
     let (low_pair, high_pair) = loaded_db.get_dom_pair();
     let universe = loaded_db.get_universe();
-    let largest_enc_val = universe.iter().max().unwrap();
+    let largest_enc_val: i64 = flatten_nd(&high_pair, &high_pair, &low_pair);
 
     info!(
         "3. Initializing Translator with universe size: {}",
         universe.len()
     );
-    let mut translator = Translator::new(*largest_enc_val, universe.clone());
+    let mut translator = Translator::new(largest_enc_val, universe.clone());
 
     // Grab references to avoid lifetime closure issues
     let query_dist_ref = &selector.query_distribution;
@@ -170,7 +170,7 @@ fn end_to_end() {
     };
 
     // 3. Unified Validator
-    let active_eps = if eps == 0.0 { 1e-9 } else { eps };
+    let active_eps = if eps == 0.0 { 1e-5 } else { eps };
     let validate_candidate = |enc_tuple: &[i64], proposed_plaintexts: &[i64]| -> bool {
         let obs_prob = get_observed_prob(enc_tuple);
         if obs_prob == 0.0 {
@@ -192,9 +192,12 @@ fn end_to_end() {
 
     // t=3 is usually good enough for every dist type, uniform mostly is good after t=2 but sometimes
     // gets better at t=3. t=4 is almost always actually overkill
-    // info!("Remember: Computing for DB size {} by {}...", rows, cols);
-    // info!("--> Processing Recursive Case (t=4) sequentially across chunk models...");
-    // translator.process_t_greater_than_1(4, &universe, &validate_candidate);
+    info!(
+        "Remember: Computing for DB size {} by {}...",
+        rows_cols, rows_cols
+    );
+    info!("--> Processing Recursive Case (t=4) sequentially across chunk models...");
+    translator.process_t_greater_than_1(4, &universe, &validate_candidate);
 
     info!("5. Building and executing the CP-SAT Solver for the final constraint graph...");
     let mut solver = Solver::new(translator.get_var_index_map());
@@ -245,7 +248,7 @@ fn end_to_end() {
         for (key, val) in responses.clone() {
             iso_map.insert(key, val[i]);
         }
-        match check_isomorphism(&iso_map, rows as i64, cols as i64) {
+        match check_isomorphism(&iso_map, rows_cols as i64, rows_cols as i64) {
             Some(transformation_name) => {
                 if transformation_name.contains("Perfect") {
                     found_truth = true;

@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use std::error::Error;
 
 pub fn plot_grid_by_mse(
-    grid_sizes: &[(u32, &str)],
+    grid_sizes: &[(u32, String)],
     datasets: &[&str],
     methods: &[&str],
     distributions: &[&str],
@@ -16,29 +16,30 @@ pub fn plot_grid_by_mse(
     for &db in datasets {
         // Data structure: dist -> method -> vec of (grid_size, mse)
         let mut db_data: HashMap<&str, HashMap<String, Vec<(u32, f64)>>> = HashMap::new();
+        let mut path = "".to_string();
 
         for &dist in distributions {
             let mut plot_data: HashMap<String, Vec<(u32, f64)>> = HashMap::new();
 
             for &method in methods {
-                for &(grid_val, grid_str) in grid_sizes {
+                for (grid_val, grid_str) in grid_sizes {
                     let mse_result = match method {
                         "even_less" => {
-                            let path = format!(
+                            path = format!(
                                 "{}/{}/{}/even_less/{}_prob100.0_{}_{}_even_less.json",
                                 base_dir, grid_str, db, db, dist, grid_str
                             );
                             load_standard_method(&path).map(|data| calculate_mse(&data))
                         }
                         "remin" => {
-                            let path = format!(
+                            path = format!(
                                 "{}/{}/{}/remin/{}_prob100.0_{}_{}_classic.json",
                                 base_dir, grid_str, db, db, dist, grid_str
                             );
                             load_standard_method(&path).map(|data| calculate_mse(&data))
                         }
                         "limits" => {
-                            let path = format!(
+                            path = format!(
                                 "{}/{}/{}/limits/{}_{}_e0_d0.9_reconstruction.json",
                                 base_dir, grid_str, db, db, dist
                             );
@@ -59,19 +60,19 @@ pub fn plot_grid_by_mse(
                             plot_data
                                 .entry(method.to_string())
                                 .or_default()
-                                .push((grid_val, mse));
+                                .push((grid_val.clone(), mse));
                         }
                         Ok(_) => {
                             // Because our method is perfect, MSE sometimes accidentally becomes NAN
-                            // due to floating point errors (I think?).
+                            // due to floating point/division errors (I think?).
                             plot_data
                                 .entry(method.to_string())
                                 .or_default()
-                                .push((grid_val, 0.0));
+                                .push((grid_val.clone(), 0.0));
                         }
                         Err(e) => {
                             // Replace with log::error! or your preferred macro
-                            error!("failed to plot for {method}, {dist}, {db} at {grid_str}: {e}")
+                            error!("failed to plot for {method}, {dist}, {db} at {grid_str}. Path was {path}: {e}")
                         }
                     }
                 }

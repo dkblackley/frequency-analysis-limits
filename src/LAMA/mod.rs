@@ -1,12 +1,13 @@
-use crate::dataloader::datasets::TwoDMap;
 use crate::dataloader::tester::testDB;
-use crate::dataloader::{unflatten_nd, Searchable};
+use crate::dataloader::three_d::ThreeDMap;
+use crate::dataloader::two_d::TwoDMap;
+use crate::dataloader::{flatten_nd, unflatten_nd, Searchable};
 use crate::plotting::{DbResult, ReconstructionDataPoint};
 use crate::LAMA::error::LAMAError;
 use crate::LAMA::selector::Selector;
 use crate::LAMA::solver::Solver;
 use crate::LAMA::translator::Translator;
-use crate::LAMA::utility::get_mbq;
+use crate::LAMA::utility::{check_isomorphism, get_mbq};
 use crate::{Frequency, Record, Value};
 use cp_sat::proto::CpSolverStatus;
 use log::{debug, error, info, warn};
@@ -28,6 +29,7 @@ pub fn lama_attack(
     dir_path: &String,
     dist: &String,
     t: &u64,
+    dim: &usize,
     _save: &bool,
     eps: &f64,
     delt: &f64,
@@ -37,9 +39,15 @@ pub fn lama_attack(
     let unique_name = format!("{db_name}_{dist}_e{eps}_d{delt}");
 
     if db_name == "grid" {
-        loaded_db = Box::new(testDB::new(15, 15, 70))
+        loaded_db = Box::new(testDB::new(*dim, 10, 35));
     } else if db_name == "nh" {
-        todo!()
+        info!("Starting LAMA attack using {} dataset", db_name);
+        debug!("Loading data from {full_datapath}/{db_name}.json");
+
+        let loaded_locs =
+            ThreeDMap::load_array_locations_from_file(&format!("{full_datapath}/{db_name}.json"))
+                .unwrap();
+        loaded_db = Box::new(ThreeDMap::new_unscaled(loaded_locs, db_name.as_str()).unwrap());
     } else {
         info!("Starting LAMA attack using {} dataset", db_name);
         debug!("Loading data from {full_datapath}/{db_name}.json");
@@ -61,10 +69,9 @@ pub fn lama_attack(
 
     debug!("Using eps: {}, delta: {}", eps, delt);
 
-    let start = Instant::now();
     let (low_pair, high_pair) = loaded_db.get_dom_pair();
     let binding = loaded_db.get_universe();
-    let largest_enc_val = binding.iter().max().unwrap();
+    let largest_possible_val: i64 = flatten_nd(&high_pair, &high_pair, &low_pair);
 
     let selector = Selector::new(dist, &loaded_db, *eps, *delt);
 
@@ -83,18 +90,18 @@ pub fn lama_attack(
     info!("Computing True Probabilities -> 1 tuple");
     let _query_dist_over_one = selector.build_theoretical_t_dict(1);
 
-    let mut translator = Translator::new(*largest_enc_val, loaded_db.get_universe());
+    let mut translator = Translator::new(largest_possible_val, loaded_db.get_universe());
 
     let query_dist_ref = &selector.query_distribution;
     let high_pair_ref = &high_pair;
     let low_pair_ref = &low_pair;
 
     let get_observed_prob = |enc_tuple: &[i64]| -> f64 {
-        let true_plaintexts: Vec<Record> = enc_tuple
+        let true_point: Vec<Record> = enc_tuple
             .iter()
             .map(|rec| unflatten_nd(*rec, high_pair_ref, low_pair_ref))
             .collect();
-        let dom_pair = get_mbq(&true_plaintexts);
+        let dom_pair = get_mbq(&true_point);
 
         // Use the native cumulative probability directly
         query_dist_ref.get_cumulative_prob(&dom_pair)
@@ -112,8 +119,8 @@ pub fn lama_attack(
         query_dist_ref.get_cumulative_prob(&pt_mbq)
     };
 
-    // 3. Unified Validator
-    let active_eps = if *eps == 0.0 { 1e-9 } else { *eps };
+    // if in the 'perfect' world only use things within 0.01\% of the true
+    let active_eps = if *eps == 0.0 { 1e-5 } else { *eps };
     let validate_candidate = |enc_tuple: &[i64], proposed_plaintexts: &[i64]| -> bool {
         let obs_prob = get_observed_prob(enc_tuple);
         if obs_prob == 0.0 {
@@ -125,6 +132,8 @@ pub fn lama_attack(
     };
 
     let universe = loaded_db.get_universe();
+
+    let start = Instant::now();
     translator.process_t1(&universe, &validate_candidate);
 
     for i in 2..(*t as usize + 1) {
@@ -171,7 +180,6 @@ pub fn lama_attack(
 
     for (key, val) in responses.clone() {
         first_resp.insert(key, val[0]); // just pretend first resp is the correct one.
-
         for i in 0..val.len() {
             if key == val[i] {
                 correct += 1;

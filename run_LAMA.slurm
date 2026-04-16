@@ -231,11 +231,11 @@ fi
          if [ $? -ne 0 ]; then
              echo "Error: Initial run failed for $name (Dist: $dist, Dir: $data_dir). Retrying with t=4..."
 
-             # Retry one more time with t=4
+             # If it fails, retry with t=4
              $SG_RUN ./target/release/frequency_analysis_limits \
                      --dir-path "$data_dir" \
                      --name "$name" \
-                     --t 4 \
+                     --t 3 \
                      --dist "$dist" \
                      --dim "$dim"
 

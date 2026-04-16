@@ -1,9 +1,10 @@
-use crate::plotting::post::calculate_mse;
+use crate::plotting::post::{calculate_mse, procrustes_align};
 use crate::plotting::ReconstructionDataPoint;
 use indicatif::ParallelProgressIterator;
 use itertools::iproduct;
 use log::debug;
 use plotters::prelude::*;
+use plotters::style::FontStyle;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -12,7 +13,7 @@ use std::fmt::format;
 use std::fs;
 
 pub fn plot_histograms_of_all_reconstructions() {
-    let name = "cali";
+    let name = "spitz";
     let grid = "50x50";
     let domain = (50, 50);
     let path_to_root = format!("databases/{grid}/{name}");
@@ -21,20 +22,22 @@ pub fn plot_histograms_of_all_reconstructions() {
     let scale_step = 10.0;
     let rotate = 30.0;
 
-    let shift_step = 1.0;
-    let scale_step = 1.0;
-    let rotate = 15.0;
+    // let shift_step = 1.0;
+    // let scale_step = 1.0;
+    // let rotate = 15.0;
 
     let path = format!("{path_to_root}/even_less/{name}_prob100.0_uniform_{grid}_even_less.json");
     debug!("About to load data from {}", &path);
     let content = fs::read_to_string(&path).unwrap();
     let all_data: Vec<ReconstructionDataPoint> = serde_json::from_str(&content).unwrap();
+    let even_less_best = procrustes_align(&all_data, true, true, true).1;
     let even_less_data = combined_search(&all_data, domain, shift_step, rotate, domain, scale_step);
 
     let path = format!("{path_to_root}/remin/{name}_prob100.0_uniform_{grid}_classic.json");
     debug!("About to load data from {}", &path);
     let content = fs::read_to_string(&path).unwrap();
     let all_data: Vec<ReconstructionDataPoint> = serde_json::from_str(&content).unwrap();
+    let remin_best = procrustes_align(&all_data, true, true, true).1;
     let remin_data = combined_search(&all_data, domain, shift_step, rotate, domain, scale_step);
 
     let path = format!("{path_to_root}/limits/{name}_uniform_e0_d0.9_reconstruction.json");
@@ -62,7 +65,8 @@ pub fn plot_histograms_of_all_reconstructions() {
     }
 
     let len = even_less_mse.len();
-    let best = even_less_mse[..10].to_vec();
+    let mut best = even_less_mse[..10].to_vec();
+    best.insert(0, even_less_best);
     let worst = even_less_mse[len - 10..].to_vec();
     let middle_sampled = sample_uniformly(&even_less_mse, 10_000);
 
@@ -72,7 +76,8 @@ pub fn plot_histograms_of_all_reconstructions() {
     final_less.extend_from_slice(&worst);
 
     let len = remin_mse.len();
-    let best = remin_mse[..10].to_vec();
+    let mut best = remin_mse[..10].to_vec();
+    best.insert(0, remin_best);
     let worst = remin_mse[len - 10..].to_vec();
     let middle_sampled = sample_uniformly(&remin_mse, 10_000);
 
@@ -82,8 +87,8 @@ pub fn plot_histograms_of_all_reconstructions() {
     final_remin.extend_from_slice(&worst);
 
     let mut methods_to_mse = HashMap::new();
-    methods_to_mse.insert("Remin".to_string(), (final_remin, 1892.0));
-    methods_to_mse.insert("Even Less".to_string(), (final_less, 2813.0));
+    methods_to_mse.insert("Remin".to_string(), (final_remin, remin_best));
+    methods_to_mse.insert("Even Less".to_string(), (final_less, even_less_best));
     methods_to_mse.insert("LAMA".to_string(), (limits_mse, 0.0));
 
     // saving as a .svg can be very big.....
@@ -94,6 +99,9 @@ pub fn plot_histograms_of_all_reconstructions() {
     plot_line_step_mse(&methods_to_mse, "figures/mse_distributions_step.svg").unwrap();
     debug!("About to plot step filled");
     plot_filled_step_mse(&methods_to_mse, "figures/mse_distributions_step_filled.svg").unwrap();
+
+    debug!("About to plot MSE frequency histogram");
+    plot_mse_frequency_histogram(&methods_to_mse, "figures/mse_frequency_histogram.svg").unwrap();
 }
 
 /// Uniformly samples a slice of f64 down to `num_samples` items.
@@ -795,6 +803,160 @@ pub fn plot_line_step_mse(
         .background_style(WHITE.mix(0.9).filled())
         .border_style(BLACK)
         .label_font(("Linux Biolinum", 18).into_font().color(&text_color))
+        .draw()?;
+
+    root.present()?;
+    Ok(())
+}
+
+/// Generates a step-filled Histogram (Frequency Polygon) of MSEs.
+/// - X-axis: Log-scaled MSE (binned into uniform logarithmic buckets).
+/// - Y-axis: Frequency of Reconstructions.
+/// - Features: Flattens the 0-1000 spike by starting at 10, uses standard academic 10^x notation.
+pub fn plot_mse_frequency_histogram(
+    mse_data: &HashMap<String, (Vec<f64>, f64)>,
+    output_path: &str,
+) -> Result<(), Box<dyn Error>> {
+    let root = SVGBackend::new(output_path, (1200, 800)).into_drawing_area();
+    // Use a solid white background instead of transparent for a cleaner, flat UI look in papers
+    root.fill(&WHITE)?;
+
+    if mse_data.is_empty() {
+        return Ok(());
+    }
+
+    // 1. Configuration & Bounds
+    let min_mse = 10.0f64; // Start from 10 to skip the MSE=0 gap
+    let mut max_mse = 10.0f64;
+    let num_bins = 50; // Number of buckets
+
+    let mut valid_data = HashMap::new();
+
+    // Filter out data < 10 and determine the global maximum MSE
+    for (method, (mses, _baseline)) in mse_data {
+        let filtered: Vec<f64> = mses.iter().copied().filter(|&mse| mse >= min_mse).collect();
+
+        for &mse in &filtered {
+            if mse > max_mse {
+                max_mse = mse;
+            }
+        }
+        valid_data.insert(method.clone(), filtered);
+    }
+
+    // Calculate logarithmic bounds for mathematical binning
+    let log_min = min_mse.log10();
+    let log_max = (max_mse * 1.05).log10(); // 5% right padding for breathing room
+    let bin_width = (log_max - log_min) / num_bins as f64;
+
+    // 2. Bucketize (Histogram Logic)
+    let mut binned_methods = HashMap::new();
+    let mut max_freq = 0;
+
+    for (method, mses) in valid_data {
+        let mut bins = vec![0; num_bins];
+        for mse in mses {
+            let log_mse = mse.log10();
+            let mut bin_idx = ((log_mse - log_min) / bin_width).floor() as usize;
+
+            // Safety clamp to ensure the maximum value stays in the last bin
+            if bin_idx >= num_bins {
+                bin_idx = num_bins - 1;
+            }
+            bins[bin_idx] += 1;
+        }
+
+        let local_max = *bins.iter().max().unwrap_or(&0);
+        if local_max > max_freq {
+            max_freq = local_max;
+        }
+        binned_methods.insert(method, bins);
+    }
+
+    // Add 10% vertical padding to the Y-axis max
+    let max_y = (max_freq as f64 * 1.1).ceil() as usize;
+
+    // 3. Setup Chart Typography & Flat UI
+    let text_color = BLACK;
+    let font_family = "Linux Biolinum";
+    let label_font = (font_family, 24).into_font().color(&text_color);
+    let axis_font = (font_family, 32, FontStyle::Bold)
+        .into_font()
+        .color(&text_color);
+
+    // Using a Cartesian 2D linear space mapping to log_min..log_max
+    let mut chart = ChartBuilder::on(&root)
+        .margin(50)
+        .x_label_area_size(70)
+        .y_label_area_size(90)
+        .build_cartesian_2d(log_min..log_max, 0..max_y)?;
+
+    chart
+        .configure_mesh()
+        .disable_x_mesh() // Remove vertical grid lines for a modern flat UI
+        .y_desc("Number Of Solutions")
+        .x_desc("Mean Squared Error (MSE)")
+        // Format strictly as 10^x (e.g., 10^2, 10^3)
+        .x_label_formatter(&|x| format!("10^{{{:.0}}}", x))
+        .y_label_formatter(&|y| y.to_string())
+        .label_style(label_font.clone())
+        .axis_desc_style(axis_font)
+        .light_line_style(WHITE.mix(0.0)) // Hide light grid lines completely
+        .bold_line_style(BLACK.mix(0.1)) // Very faint horizontal grid lines
+        .draw()?;
+
+    // 4. Colors & Sorting
+    let palette = [
+        RGBColor(230, 159, 0),   // Orange
+        RGBColor(86, 180, 233),  // Sky Blue
+        RGBColor(0, 158, 115),   // Bluish Green
+        RGBColor(240, 228, 66),  // Yellow
+        RGBColor(0, 114, 178),   // Blue
+        RGBColor(213, 94, 0),    // Vermilion
+        RGBColor(204, 121, 167), // Reddish Purple
+    ];
+
+    let mut alpha_methods: Vec<&String> = binned_methods.keys().collect();
+    alpha_methods.sort();
+
+    // 5. Draw the Overlapping Step Histograms
+    for (i, method) in alpha_methods.iter().enumerate() {
+        let color = palette[i % palette.len()];
+        let bins = binned_methods.get(*method).unwrap();
+
+        let mut step_data = Vec::with_capacity(num_bins * 2 + 2);
+        step_data.push((log_min, 0)); // Anchor line to the bottom axis
+
+        for (bin_idx, &count) in bins.iter().enumerate() {
+            let x_start = log_min + (bin_idx as f64) * bin_width;
+            let x_end = log_min + ((bin_idx + 1) as f64) * bin_width;
+
+            // Create the hard corner for the step effect
+            step_data.push((x_start, count));
+            step_data.push((x_end, count));
+        }
+
+        step_data.push((log_max, 0)); // Anchor line to the bottom axis
+
+        // Draw with a solid 3px border and a translucent, flat fill
+        chart
+            .draw_series(
+                AreaSeries::new(step_data.clone(), 0, color.mix(0.3).filled())
+                    .border_style(color.stroke_width(3)),
+            )?
+            .label(*method)
+            .legend(move |(x, y)| {
+                Rectangle::new([(x, y - 8), (x + 24, y + 8)], color.mix(0.6).filled())
+            });
+    }
+
+    // Configure Legend
+    chart
+        .configure_series_labels()
+        .position(SeriesLabelPosition::UpperRight)
+        .background_style(WHITE.mix(0.9).filled())
+        .border_style(BLACK.mix(0.2))
+        .label_font(label_font)
         .draw()?;
 
     root.present()?;

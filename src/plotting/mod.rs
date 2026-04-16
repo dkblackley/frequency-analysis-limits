@@ -1,8 +1,7 @@
-use crate::plotting::tables::running_time::do_table_plot;
 use crate::plotting::two_d::mse_by_all_reconstructions::plot_histograms_of_all_reconstructions;
-use crate::plotting::two_d::mse_vs_grid::plot_grid_by_mse;
+use crate::plotting::two_d::mse_vs_grid_size::plot_grid_by_mse;
 use crate::plotting::two_d::spatial_plot::run_spatial_plots;
-use crate::plotting::two_d::worst_case::do_convex_hull_plots;
+use crate::plotting::two_d::worst_case_convex_hull::do_convex_hull_plots;
 use serde::{Deserialize, Serialize};
 use std::error::Error;
 use std::fs;
@@ -100,12 +99,12 @@ pub fn do_plotting() {
 
     // Do spatial plots
     plot_grid_by_mse(&grid_sizes, &datasets, &methods, &distributions).unwrap();
-    do_table_plot(
-        "databases",
-        &grid_sizes.iter().map(|x| x.0).collect(),
-        &datasets,
-        &distributions,
-    );
+    // do_table_plot(
+    //     "databases",
+    //     &grid_sizes.iter().map(|x| x.0).collect(),
+    //     &datasets,
+    //     &distributions,
+    // );
 
     let dir = "databases/350x50";
     let name = "spitz";
@@ -114,7 +113,7 @@ pub fn do_plotting() {
     let datasets = vec!["spitz"];
     let grid = (350, 50);
     run_spatial_plots(&datasets, "databases/50x350", 350);
-    do_convex_hull_plots("spitz", "databases/350x50");
+    do_convex_hull_plots("spitz", "databases/50x350");
 
     // this takes a long time to run...
     plot_histograms_of_all_reconstructions();

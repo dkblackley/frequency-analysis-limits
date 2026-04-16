@@ -216,7 +216,7 @@ fn plot_db_side_by_side(
             .axis_style(RGBColor(100, 100, 100))
             .x_desc("Grid Size")
             .y_desc("Mean Squared Error")
-            .label_style(("sans-serif", 18).into_font())
+            .label_style(("Linux Biolinum", 18).into_font())
             .draw()?;
 
         // Stabilize legend rendering sequence by alphabetically sorting methods
@@ -248,7 +248,7 @@ fn plot_db_side_by_side(
             chart.draw_series(
                 continuous_data
                     .iter()
-                    .map(|(x, y)| Circle::new((*x, *y), 5, color.filled())),
+                    .map(|(x, y)| Circle::new((*x, *y), 8, color.filled())),
             )?;
         }
 

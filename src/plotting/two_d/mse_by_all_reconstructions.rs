@@ -12,38 +12,30 @@ use std::fmt::format;
 use std::fs;
 
 pub fn plot_histograms_of_all_reconstructions() {
-    let name = "spitz";
-    let path_to_root = format!("databases/350x50/{name}");
+    let name = "cali";
+    let grid = "50x50";
+    let domain = (50, 50);
+    let path_to_root = format!("databases/{grid}/{name}");
 
-    let shift_step = 1.0;
+    let shift_step = 5.0;
     let scale_step = 10.0;
     let rotate = 30.0;
 
-    let path = format!("{path_to_root}/even_less/{name}_prob100.0_uniform_350x50_even_less.json");
-    debug!("About to load data from {}", &path);
-    let content = fs::read_to_string(&path).unwrap();
-    let all_data: Vec<ReconstructionDataPoint> = serde_json::from_str(&content).unwrap();
-    let even_less_data = combined_search(
-        &all_data,
-        (350, 50),
-        shift_step,
-        rotate,
-        (350, 50),
-        scale_step,
-    );
+    let shift_step = 1.0;
+    let scale_step = 1.0;
+    let rotate = 15.0;
 
-    let path = format!("{path_to_root}/remin/{name}_prob100.0_uniform_350x50_classic.json");
+    let path = format!("{path_to_root}/even_less/{name}_prob100.0_uniform_{grid}_even_less.json");
     debug!("About to load data from {}", &path);
     let content = fs::read_to_string(&path).unwrap();
     let all_data: Vec<ReconstructionDataPoint> = serde_json::from_str(&content).unwrap();
-    let remin_data = combined_search(
-        &all_data,
-        (350, 50),
-        shift_step,
-        rotate,
-        (350, 50),
-        scale_step,
-    );
+    let even_less_data = combined_search(&all_data, domain, shift_step, rotate, domain, scale_step);
+
+    let path = format!("{path_to_root}/remin/{name}_prob100.0_uniform_{grid}_classic.json");
+    debug!("About to load data from {}", &path);
+    let content = fs::read_to_string(&path).unwrap();
+    let all_data: Vec<ReconstructionDataPoint> = serde_json::from_str(&content).unwrap();
+    let remin_data = combined_search(&all_data, domain, shift_step, rotate, domain, scale_step);
 
     let path = format!("{path_to_root}/limits/{name}_uniform_e0_d0.9_reconstruction.json");
     debug!("About to load data from {}", &path);
@@ -404,10 +396,10 @@ pub fn plot_normalized_ranked_line_with_circles(
         .configure_mesh()
         .bold_line_style(RGBColor(220, 220, 220))
         .axis_style(&text_color)
-        .x_desc("Normalized Reconstruction Rank (0 = Best, 1 = Worst)")
-        .y_desc("Mean Squared Error (Log Scale)")
+        .x_desc("Normalized Reconstruction Number")
+        .y_desc("Mean Squared Error (Logarithmic Scale)")
         .y_label_formatter(&|y| format_scientific(*y))
-        .label_style(("sans-serif", 20).into_font().color(&text_color))
+        .label_style(("Linux Biolinum", 20).into_font().color(&text_color))
         .draw()?;
 
     let palette = [
@@ -507,7 +499,7 @@ pub fn plot_normalized_ranked_line_with_circles(
         .position(SeriesLabelPosition::UpperLeft)
         .background_style(WHITE.mix(0.9).filled())
         .border_style(BLACK)
-        .label_font(("sans-serif", 18).into_font().color(&text_color))
+        .label_font(("Linux Biolinum", 18).into_font().color(&text_color))
         .draw()?;
 
     root.present()?;
@@ -582,7 +574,7 @@ pub fn plot_filled_step_mse(
         .x_desc("Normalized Reconstruction Rank (0 = Best, 1 = Worst)")
         .y_desc("Mean Squared Error (Log Scale)")
         .y_label_formatter(&|y| format_scientific(*y))
-        .label_style(("sans-serif", 20).into_font().color(&text_color))
+        .label_style(("Linux Biolinum", 20).into_font().color(&text_color))
         .draw()?;
 
     let palette = [
@@ -668,7 +660,7 @@ pub fn plot_filled_step_mse(
         .position(SeriesLabelPosition::UpperLeft)
         .background_style(WHITE.mix(0.9).filled())
         .border_style(BLACK)
-        .label_font(("sans-serif", 18).into_font().color(&text_color))
+        .label_font(("Linux Biolinum", 18).into_font().color(&text_color))
         .draw()?;
 
     root.present()?;
@@ -722,7 +714,7 @@ pub fn plot_line_step_mse(
         .x_desc("Normalized Reconstruction Rank (0 = Best, 1 = Worst)")
         .y_desc("Mean Squared Error (Log Scale)")
         .y_label_formatter(&|y| format_scientific(*y))
-        .label_style(("sans-serif", 20).into_font().color(&text_color))
+        .label_style(("Linux Biolinum", 20).into_font().color(&text_color))
         .draw()?;
 
     let palette = [
@@ -802,7 +794,7 @@ pub fn plot_line_step_mse(
         .position(SeriesLabelPosition::UpperLeft)
         .background_style(WHITE.mix(0.9).filled())
         .border_style(BLACK)
-        .label_font(("sans-serif", 18).into_font().color(&text_color))
+        .label_font(("Linux Biolinum", 18).into_font().color(&text_color))
         .draw()?;
 
     root.present()?;

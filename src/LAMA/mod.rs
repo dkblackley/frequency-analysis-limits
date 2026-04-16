@@ -1,12 +1,13 @@
-use crate::dataloader::datasets::TwoDMap;
 use crate::dataloader::tester::testDB;
+use crate::dataloader::three_d::ThreeDMap;
+use crate::dataloader::two_d::TwoDMap;
 use crate::dataloader::{flatten_nd, unflatten_nd, Searchable};
 use crate::plotting::{DbResult, ReconstructionDataPoint};
 use crate::LAMA::error::LAMAError;
 use crate::LAMA::selector::Selector;
 use crate::LAMA::solver::Solver;
 use crate::LAMA::translator::Translator;
-use crate::LAMA::utility::get_mbq;
+use crate::LAMA::utility::{check_isomorphism, get_mbq};
 use crate::{Frequency, Record, Value};
 use cp_sat::proto::CpSolverStatus;
 use log::{debug, error, info, warn};
@@ -39,7 +40,13 @@ pub fn lama_attack(
     if db_name == "grid" {
         loaded_db = Box::new(testDB::new(15, 15, 70))
     } else if db_name == "nh" {
-        todo!()
+        info!("Starting LAMA attack using {} dataset", db_name);
+        debug!("Loading data from {full_datapath}/{db_name}.json");
+
+        let loaded_locs =
+            ThreeDMap::load_array_locations_from_file(&format!("{full_datapath}/{db_name}.json"))
+                .unwrap();
+        loaded_db = Box::new(ThreeDMap::new_unscaled(loaded_locs, db_name.as_str()).unwrap());
     } else {
         info!("Starting LAMA attack using {} dataset", db_name);
         debug!("Loading data from {full_datapath}/{db_name}.json");
@@ -61,7 +68,6 @@ pub fn lama_attack(
 
     debug!("Using eps: {}, delta: {}", eps, delt);
 
-    let start = Instant::now();
     let (low_pair, high_pair) = loaded_db.get_dom_pair();
     let binding = loaded_db.get_universe();
     let largest_possible_val: i64 = flatten_nd(&high_pair, &high_pair, &low_pair);
@@ -125,6 +131,8 @@ pub fn lama_attack(
     };
 
     let universe = loaded_db.get_universe();
+
+    let start = Instant::now();
     translator.process_t1(&universe, &validate_candidate);
 
     for i in 2..(*t as usize + 1) {
@@ -171,7 +179,6 @@ pub fn lama_attack(
 
     for (key, val) in responses.clone() {
         first_resp.insert(key, val[0]); // just pretend first resp is the correct one.
-
         for i in 0..val.len() {
             if key == val[i] {
                 correct += 1;

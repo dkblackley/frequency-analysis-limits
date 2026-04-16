@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 use std::error::Error;
 use std::fs;
 
+mod metrics;
 pub mod post;
 pub mod two_d;
 

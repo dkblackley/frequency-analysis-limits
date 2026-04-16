@@ -112,15 +112,15 @@ fn end_to_end() {
 
     // Force rayon to one thread
     rayon::ThreadPoolBuilder::new()
-        .num_threads(1)
+        .num_threads(0)
         .build_global()
         .unwrap();
 
-    let rows = 8;
-    let cols = 8;
+    let rows_cols = 4;
+    let dim = 3;
 
-    info!("Loading test DB ({}x{})", rows, cols);
-    let loaded_db: Box<dyn Searchable + Sync> = Box::new(testDB::new(rows, cols, 65));
+    info!("Loading test DB ({}x{})", rows_cols, rows_cols);
+    let loaded_db: Box<dyn Searchable + Sync> = Box::new(testDB::new(dim, rows_cols, 65));
 
     let dist = "uniform";
     let eps = 0.0; // Perfect knowledge constraint
@@ -192,9 +192,12 @@ fn end_to_end() {
 
     // t=3 is usually good enough for every dist type, uniform mostly is good after t=2 but sometimes
     // gets better at t=3. t=4 is almost always actually overkill
-    // info!("Remember: Computing for DB size {} by {}...", rows, cols);
-    // info!("--> Processing Recursive Case (t=4) sequentially across chunk models...");
-    // translator.process_t_greater_than_1(4, &universe, &validate_candidate);
+    info!(
+        "Remember: Computing for DB size {} by {}...",
+        rows_cols, rows_cols
+    );
+    info!("--> Processing Recursive Case (t=4) sequentially across chunk models...");
+    translator.process_t_greater_than_1(4, &universe, &validate_candidate);
 
     info!("5. Building and executing the CP-SAT Solver for the final constraint graph...");
     let mut solver = Solver::new(translator.get_var_index_map());
@@ -245,7 +248,7 @@ fn end_to_end() {
         for (key, val) in responses.clone() {
             iso_map.insert(key, val[i]);
         }
-        match check_isomorphism(&iso_map, rows as i64, cols as i64) {
+        match check_isomorphism(&iso_map, rows_cols as i64, rows_cols as i64) {
             Some(transformation_name) => {
                 if transformation_name.contains("Perfect") {
                     found_truth = true;

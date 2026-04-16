@@ -12,6 +12,7 @@ use std::collections::HashMap;
 pub struct Solver {
     var_index_map: HashMap<IntVar, (i32, i64)>,
     pub solution_stat: CpSolverStatus,
+    pub num_sols: i32,
 }
 
 impl Solver {
@@ -19,6 +20,7 @@ impl Solver {
         Self {
             var_index_map,
             solution_stat: CpSolverStatus::Unknown,
+            num_sols: 0,
         }
     }
 
@@ -73,6 +75,7 @@ impl Solver {
         let all_solutions: &Vec<CpSolverSolution> = &response.additional_solutions;
         let total_solutions = all_solutions.len();
         info!("Found {} solutions", total_solutions);
+        self.num_sols = total_solutions as i32;
 
         self.solution_stat = status.into();
 

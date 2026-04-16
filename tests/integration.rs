@@ -116,11 +116,11 @@ fn end_to_end() {
         .build_global()
         .unwrap();
 
-    let rows_cols = 4;
+    let rows_cols = 8;
     let dim = 3;
 
     info!("Loading test DB ({}x{})", rows_cols, rows_cols);
-    let loaded_db: Box<dyn Searchable + Sync> = Box::new(testDB::new(dim, rows_cols, 65));
+    let loaded_db: Box<dyn Searchable + Sync> = Box::new(testDB::new(dim, rows_cols, 25));
 
     let dist = "uniform";
     let eps = 0.0; // Perfect knowledge constraint

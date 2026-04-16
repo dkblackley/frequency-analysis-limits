@@ -6,7 +6,7 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=128
-#SBATCH --mem=2900G
+#SBATCH --mem=900G
 #SBATCH --time=2-00:30:00
 
 cd "$SLURM_SUBMIT_DIR"
@@ -86,21 +86,21 @@ echo "Building project inside container..."
 $SG_RUN cargo rustc --bin frequency_analysis_limits --release -- -Clink-arg=-lprotobuf
 
 
-#NAMES=("spitz")
-#DISTS=("uniform")
-#DATA_DIRS=("$SLURM_SUBMIT_DIR/databases/350x50" "$SLURM_SUBMIT_DIR/databases/175x25" "$SLURM_SUBMIT_DIR/databases/25x175" "$SLURM_SUBMIT_DIR/databases/50x350" )
+NAMES=("spitz")
+DISTS=("uniform" "gaussian" "beta")
+DATA_DIRS=("$SLURM_SUBMIT_DIR/databases/350x50" "$SLURM_SUBMIT_DIR/databases/175x25" "$SLURM_SUBMIT_DIR/databases/25x175" "$SLURM_SUBMIT_DIR/databases/50x350" )
 
- NAMES=("shopparis" "highway" "busstop" "drink" "spitz" "cali")
- DISTS=("uniform" "gaussian" "beta")
- DATA_DIRS=(
-     "$SLURM_SUBMIT_DIR/databases/20x20"
-     "$SLURM_SUBMIT_DIR/databases/25x25"
-     "$SLURM_SUBMIT_DIR/databases/30x30"
-     "$SLURM_SUBMIT_DIR/databases/35x35"
-     "$SLURM_SUBMIT_DIR/databases/40x40"
-     "$SLURM_SUBMIT_DIR/databases/45x45"
-     "$SLURM_SUBMIT_DIR/databases/50x50"
- )
+# NAMES=("shopparis" "highway" "busstop" "drink" "spitz" "cali")
+# DISTS=("uniform" "gaussian" "beta")
+# DATA_DIRS=(
+#     "$SLURM_SUBMIT_DIR/databases/20x20"
+#     "$SLURM_SUBMIT_DIR/databases/25x25"
+#     "$SLURM_SUBMIT_DIR/databases/30x30"
+#     "$SLURM_SUBMIT_DIR/databases/35x35"
+#     "$SLURM_SUBMIT_DIR/databases/40x40"
+#     "$SLURM_SUBMIT_DIR/databases/45x45"
+#     "$SLURM_SUBMIT_DIR/databases/50x50"
+# )
 
 #NAMES=("nh")
 #DISTS=("uniform" "gaussian" "beta")

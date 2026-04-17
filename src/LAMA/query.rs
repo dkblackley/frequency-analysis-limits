@@ -152,27 +152,56 @@ impl<'a> QueryDistribution<'a> {
             //     true_prob / total_weight
             // }
             _ => {
-                // Every other dist: Sum Cartesian space of enclosing queries.
                 let (target_lower, target_upper) = mbq;
                 let mut true_prob: f64 = 0.0;
+                if target_lower.len() == 2 {
+                    // 1. Replaces `lower_combos.multi_cartesian_product()`
+                    // We explicitly iterate over Dimension 0 and Dimension 1 for the lower bounds.
+                    for l0 in lowest_rec[0]..=target_lower[0] {
+                        for l1 in lowest_rec[1]..=target_lower[1] {
+                            let c_lower = vec![l0, l1]; // Recreates the Vec that itertools yielded
 
-                let lower_combos = lowest_rec
-                    .iter()
-                    .zip(target_lower.iter())
-                    .map(|(&min_val, &t_val)| min_val..=t_val)
-                    .multi_cartesian_product();
+                            // 2. Replaces `upper_combos.multi_cartesian_product()`
+                            // We explicitly iterate over Dimension 0 and Dimension 1 for the upper bounds.
+                            for u0 in target_upper[0]..=largest_rec[0] {
+                                for u1 in target_upper[1]..=largest_rec[1] {
+                                    let c_upper = vec![u0, u1]; // Recreates the Vec that itertools yielded
 
-                let upper_combos = target_upper
-                    .iter()
-                    .zip(largest_rec.iter())
-                    .map(|(&t_val, &max_val)| t_val..=max_val)
-                    .multi_cartesian_product();
+                                    // 3. Replaces `lower_combos.cartesian_product(upper_combos)`
+                                    // This is the exact same HashMap lookup you originally wrote.
+                                    if let Some(&weight) =
+                                        dom_pair_to_known_prob.get(&(c_lower.clone(), c_upper))
+                                    {
+                                        true_prob += weight;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    // Every other dist: Sum Cartesian space of enclosing queries.
+                    let (target_lower, target_upper) = mbq;
+                    let mut true_prob: f64 = 0.0;
 
-                for (c_lower, c_upper) in lower_combos.cartesian_product(upper_combos) {
-                    if let Some(&weight) = dom_pair_to_known_prob.get(&(c_lower, c_upper)) {
-                        true_prob += weight;
+                    let lower_combos = lowest_rec
+                        .iter()
+                        .zip(target_lower.iter())
+                        .map(|(&min_val, &t_val)| min_val..=t_val)
+                        .multi_cartesian_product();
+
+                    let upper_combos = target_upper
+                        .iter()
+                        .zip(largest_rec.iter())
+                        .map(|(&t_val, &max_val)| t_val..=max_val)
+                        .multi_cartesian_product();
+
+                    for (c_lower, c_upper) in lower_combos.cartesian_product(upper_combos) {
+                        if let Some(&weight) = dom_pair_to_known_prob.get(&(c_lower, c_upper)) {
+                            true_prob += weight;
+                        }
                     }
                 }
+
                 true_prob / total_weight
             }
         }

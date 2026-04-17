@@ -13,13 +13,17 @@ use std::error::Error;
 use std::fmt::format;
 use std::fs;
 
-pub fn plot_histograms_of_all_reconstructions(name: &str, domain: (usize, usize), dist: &str) {
+pub fn plot_histograms_of_all_reconstructions(
+    name: &str,
+    domain: (usize, usize),
+    dist: &str,
+) -> Result<(), Box<dyn Error>> {
     let grid = format!("{}x{}", domain.0, domain.1);
     let path_to_root = format!("databases/{grid}/{name}");
 
-    let shift_step = 5.0;
-    let scale_step = 10.0;
-    let rotate = 30.0;
+    let shift_step = 2.0;
+    let scale_step = 2.0;
+    let rotate = 45.0;
 
     // let shift_step = 1.0;
     // let scale_step = 1.0;
@@ -27,22 +31,22 @@ pub fn plot_histograms_of_all_reconstructions(name: &str, domain: (usize, usize)
 
     let path = format!("{path_to_root}/even_less/{name}_prob100.0_{dist}_{grid}_even_less.json");
     debug!("About to load data from {}", &path);
-    let content = fs::read_to_string(&path).unwrap();
-    let all_data: Vec<ReconstructionDataPoint> = serde_json::from_str(&content).unwrap();
+    let content = fs::read_to_string(&path)?;
+    let all_data: Vec<ReconstructionDataPoint> = serde_json::from_str(&content)?;
     let even_less_best = procrustes_align(&all_data, true, true, true).1;
     let even_less_data = combined_search(&all_data, domain, shift_step, rotate, domain, scale_step);
 
     let path = format!("{path_to_root}/remin/{name}_prob100.0_{dist}_{grid}_classic.json");
     debug!("About to load data from {}", &path);
-    let content = fs::read_to_string(&path).unwrap();
-    let all_data: Vec<ReconstructionDataPoint> = serde_json::from_str(&content).unwrap();
+    let content = fs::read_to_string(&path)?;
+    let all_data: Vec<ReconstructionDataPoint> = serde_json::from_str(&content)?;
     let remin_best = procrustes_align(&all_data, true, true, true).1;
     let remin_data = combined_search(&all_data, domain, shift_step, rotate, domain, scale_step);
 
     let path = format!("{path_to_root}/limits/{name}_{dist}_e0_d0.9_reconstruction.json");
     debug!("About to load data from {}", &path);
-    let content = fs::read_to_string(&path).unwrap();
-    let all_data: Vec<Vec<ReconstructionDataPoint>> = serde_json::from_str(&content).unwrap();
+    let content = fs::read_to_string(&path)?;
+    let all_data: Vec<Vec<ReconstructionDataPoint>> = serde_json::from_str(&content)?;
 
     let mut limits_mse = Vec::new();
     let mut remin_mse = Vec::new();
@@ -100,8 +104,9 @@ pub fn plot_histograms_of_all_reconstructions(name: &str, domain: (usize, usize)
         format_db_name(name),
         format_dist_name(dist),
         &format!("figures/mse_histogram_{name}_{dist}.svg"),
-    )
-    .unwrap();
+    )?;
+
+    Ok(())
 }
 
 /// Uniformly samples a slice of f64 down to `num_samples` items.
@@ -341,7 +346,7 @@ pub fn plot_mse_frequency_histogram_split(
         )
         .build_cartesian_2d(0f32..1f32, 0f32..1f32)?;
 
-    let num_bins = 12;
+    let num_bins = 8;
 
     // Typography
     let label_font = (font_family, 24).into_font().color(&text_color);

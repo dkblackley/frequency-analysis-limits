@@ -94,14 +94,14 @@ pub fn do_plotting() {
         .collect();
 
     let grid_sizes: Vec<(u32, String)> = (20..=50)
-        .step_by(5)
+        .step_by(10)
         .map(|n| (n, format!("{}x{}", n, n)))
         .collect();
 
     for grid in &grid_sizes {
         for name in &datasets {
             let data = format!("databases/{}x{}", grid.0, grid.0);
-            let res = run_spatial_plots(name, &datasets, &*data, grid.0);
+            let res = run_spatial_plots(name, &*data, grid.0);
 
             match res {
                 Ok(_) => {}
@@ -111,6 +111,10 @@ pub fn do_plotting() {
                 }
             }
         }
+    }
+
+    for data in datasets.clone() {
+        run_spatial_plots(data, "databases/50x50", 50).expect("SPITZ DIRECT FAILED!");
     }
 
     plot_grid_by_mse(&grid_sizes, &datasets, &methods, &distributions).unwrap();
@@ -127,13 +131,25 @@ pub fn do_plotting() {
     // do JSUT 350x50 spitz stuff
     let datasets = vec!["spitz"];
     let grid = (350, 50);
-    run_spatial_plots("spitz", &datasets, "databases/350x50", 350).expect("SPITZ DIRECT FAILED!");
-    run_spatial_plots("spitz", &datasets, "databases/175x25", 175).expect("SPITZ DIRECT FAILED!");
-    do_convex_hull_plots("spitz", "databases/50x350");
+    run_spatial_plots("spitz", "databases/350x50", 350).expect("SPITZ DIRECT FAILED!");
+    // run_spatial_plots("spitz", &datasets, "databases/175x25", 175).expect("SPITZ DIRECT FAILED!");
+    // do_convex_hull_plots("spitz", "databases/50x350");
 
     for dist in distributions {
-        plot_histograms_of_all_reconstructions("spitz", (350, 50), dist);
-        plot_histograms_of_all_reconstructions("cali", (50, 50), dist);
+        let res = plot_histograms_of_all_reconstructions("spitz", (350, 50), dist);
+        match res {
+            Ok(_) => {}
+            Err(e) => {
+                warn!("{name} failed when loaded from {dir}:  {e}")
+            }
+        }
+        let res = plot_histograms_of_all_reconstructions("cali", (50, 50), dist);
+        match res {
+            Ok(_) => {}
+            Err(e) => {
+                warn!("{name} failed when loaded from {dir}:  {e}")
+            }
+        }
     }
 }
 

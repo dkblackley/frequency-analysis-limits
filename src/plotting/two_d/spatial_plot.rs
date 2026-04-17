@@ -4,12 +4,7 @@ use plotters::prelude::*;
 use std::error::Error;
 use std::fs;
 
-pub fn run_spatial_plots(
-    name: &str,
-    datasets: &Vec<&str>,
-    dir: &str,
-    grid: u32,
-) -> Result<(), Box<dyn Error>> {
+pub fn run_spatial_plots(name: &str, dir: &str, grid: u32) -> Result<(), Box<dyn Error>> {
     let path_to_root = format!("{}/{}", dir, name);
 
     let mut even_less =

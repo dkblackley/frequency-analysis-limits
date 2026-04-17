@@ -4,6 +4,7 @@ use crate::dataloader::two_d::TwoDMap;
 use crate::dataloader::{flatten_nd, unflatten_nd, Searchable};
 use crate::plotting::{DbResult, ReconstructionDataPoint};
 use crate::LAMA::error::LAMAError;
+use crate::LAMA::query::QueryDistribution;
 use crate::LAMA::selector::Selector;
 use crate::LAMA::solver::Solver;
 use crate::LAMA::translator::Translator;
@@ -18,7 +19,7 @@ use std::io::BufWriter;
 use std::time::Instant;
 
 mod error;
-mod query;
+pub mod query;
 pub mod selector;
 pub mod solver;
 pub mod translator;
@@ -91,7 +92,15 @@ pub fn lama_attack(
         let dom_pair = get_mbq(&true_point);
 
         // Use the native cumulative probability directly
-        query_dist_ref.get_cumulative_prob(&dom_pair)
+        //query_dist_ref.get_cumulative_prob(&dom_pair)
+        QueryDistribution::compute_cumulative_prob(
+            &dom_pair,
+            &query_dist_ref.dist,
+            &*query_dist_ref.lowest_rec,
+            &*query_dist_ref.largest_rec,
+            &query_dist_ref.dom_pair_to_known_prob,
+            query_dist_ref.total_weight,
+        )
     };
 
     // 2. Expected (true) probability of proposed plaintexts
@@ -103,7 +112,14 @@ pub fn lama_attack(
         let pt_mbq = get_mbq(&pt_records);
 
         // Use the native cumulative probability directly
-        query_dist_ref.get_cumulative_prob(&pt_mbq)
+        QueryDistribution::compute_cumulative_prob(
+            &pt_mbq,
+            &query_dist_ref.dist,
+            &*query_dist_ref.lowest_rec,
+            &*query_dist_ref.largest_rec,
+            &query_dist_ref.dom_pair_to_known_prob,
+            query_dist_ref.total_weight,
+        )
     };
 
     // if in the 'perfect' world only use things within 0.01\% of the true
@@ -120,6 +136,7 @@ pub fn lama_attack(
 
     let universe = loaded_db.get_universe();
 
+    info!("Starting LAMA!");
     let start = Instant::now();
     translator.process_t1(&universe, &validate_candidate);
 

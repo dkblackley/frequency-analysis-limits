@@ -44,7 +44,7 @@ pub struct ReconstructionDataPoint {
     #[serde(rename = "true")]
     pub true_points: Vec<f64>,
     #[serde(rename = "reconstructed")]
-    pub reconstructed_pointzs: Vec<f64>,
+    pub reconstructed_points: Vec<f64>,
     #[serde(rename = "unscaled_true")]
     pub unscaled_points: Option<Vec<f64>>,
 }
@@ -131,25 +131,32 @@ pub fn do_plotting() {
     let name = "spitz";
 
     // do JSUT 350x50 spitz stuff
-    let datasets = vec!["spitz"];
+    //let datasets = vec!["spitz"];
     let grid = (350, 50);
     run_spatial_plots("spitz", "databases/350x50", "uniform", 350).expect("SPITZ DIRECT FAILED!");
     // run_spatial_plots("spitz", &datasets, "databases/175x25", 175).expect("SPITZ DIRECT FAILED!");
     // do_convex_hull_plots("spitz", "databases/50x350");
 
     for dist in distributions {
-        let res = plot_histograms_of_all_reconstructions("spitz", (350, 50), dist);
-        match res {
-            Ok(_) => {}
-            Err(e) => {
-                warn!("{name} failed when loaded from {dir}:  {e}")
-            }
-        }
-        let res = plot_histograms_of_all_reconstructions("cali", (50, 50), dist);
-        match res {
-            Ok(_) => {}
-            Err(e) => {
-                warn!("{name} failed when loaded from {dir}:  {e}")
+        // The numbers for the domains below don't exactly match the original domain. This is
+        // because somethimes the best case/procrustes analysis sometimes actually falls outside the
+        // domain. This is a little arbitrary, but just give these methods some more room to get the
+        // truly best result.
+        // let res = plot_histograms_of_all_reconstructions("spitz", (350, 50), (400, 65), dist);
+        // match res {
+        //     Ok(_) => {}
+        //     Err(e) => {
+        //         warn!("{name} failed when loaded from {dir}:  {e}")
+        //     }
+        // }
+
+        for name in datasets.clone() {
+            let res = plot_histograms_of_all_reconstructions(name, (50, 50), (60, 60), dist);
+            match res {
+                Ok(_) => {}
+                Err(e) => {
+                    warn!("{name} failed when loaded from {dir}:  {e}")
+                }
             }
         }
     }

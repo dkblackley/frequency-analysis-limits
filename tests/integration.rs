@@ -4,6 +4,7 @@
 use cp_sat::proto::CpSolverStatus;
 use frequency_analysis_limits::dataloader::tester::testDB;
 use frequency_analysis_limits::dataloader::{flatten_nd, unflatten_nd, Searchable};
+use frequency_analysis_limits::LAMA::query::QueryDistribution;
 use frequency_analysis_limits::LAMA::solver::Solver;
 use frequency_analysis_limits::LAMA::utility::get_mbq;
 use frequency_analysis_limits::{DomPair, Probability, Value};
@@ -112,17 +113,17 @@ fn end_to_end() {
 
     // Force rayon to one thread
     rayon::ThreadPoolBuilder::new()
-        .num_threads(0)
+        .num_threads(1)
         .build_global()
         .unwrap();
 
-    let rows_cols = 6;
-    let dim = 3;
+    let rows_cols = 10;
+    let dim = 2;
 
     info!("Loading test DB ({}x{})", rows_cols, rows_cols);
-    let loaded_db: Box<dyn Searchable + Sync> = Box::new(testDB::new(dim, rows_cols, 25));
+    let loaded_db: Box<dyn Searchable + Sync> = Box::new(testDB::new(dim, rows_cols, 100));
 
-    let dist = "uniform";
+    let dist = "gaussian";
     let eps = 0.0; // Perfect knowledge constraint
     let delt = 0.0;
 
@@ -154,7 +155,15 @@ fn end_to_end() {
         let dom_pair = get_mbq(&true_plaintexts);
 
         // Use the native cumulative probability directly
-        query_dist_ref.get_cumulative_prob(&dom_pair)
+        // query_dist_ref.get_cumulative_prob(&dom_pair)
+        QueryDistribution::compute_cumulative_prob(
+            &dom_pair,
+            &query_dist_ref.dist,
+            &*query_dist_ref.lowest_rec,
+            &*query_dist_ref.largest_rec,
+            &query_dist_ref.dom_pair_to_known_prob,
+            query_dist_ref.total_weight,
+        )
     };
 
     // 2. Expected (true) probability of proposed plaintexts
@@ -166,7 +175,15 @@ fn end_to_end() {
         let pt_mbq = get_mbq(&pt_records);
 
         // Use the native cumulative probability directly
-        query_dist_ref.get_cumulative_prob(&pt_mbq)
+        //query_dist_ref.get_cumulative_prob(&pt_mbq)
+        QueryDistribution::compute_cumulative_prob(
+            &pt_mbq,
+            &query_dist_ref.dist,
+            &*query_dist_ref.lowest_rec,
+            &*query_dist_ref.largest_rec,
+            &query_dist_ref.dom_pair_to_known_prob,
+            query_dist_ref.total_weight,
+        )
     };
 
     // 3. Unified Validator

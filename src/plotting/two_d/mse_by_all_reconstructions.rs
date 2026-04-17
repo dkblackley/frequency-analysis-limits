@@ -16,32 +16,48 @@ use std::fs;
 pub fn plot_histograms_of_all_reconstructions(
     name: &str,
     domain: (usize, usize),
+    search_domain: (usize, usize),
     dist: &str,
 ) -> Result<(), Box<dyn Error>> {
     let grid = format!("{}x{}", domain.0, domain.1);
     let path_to_root = format!("databases/{grid}/{name}");
 
-    let shift_step = 5.0;
-    let scale_step = 5.0;
-    let rotate = 45.0;
+    // let shift_step = 5.0;
+    // let scale_step = 5.0;
+    // let rotate = 5.0;
 
-    // let shift_step = 1.0;
-    // let scale_step = 1.0;
-    // let rotate = 15.0;
+    let shift_step = 2.0;
+    let scale_step = 2.0;
+    let rotate = 15.0;
 
     let path = format!("{path_to_root}/even_less/{name}_prob100.0_{dist}_{grid}_even_less.json");
     debug!("About to load data from {}", &path);
     let content = fs::read_to_string(&path)?;
     let all_data: Vec<ReconstructionDataPoint> = serde_json::from_str(&content)?;
     let even_less_best = procrustes_align(&all_data, true, true, true).1;
-    let even_less_data = combined_search(&all_data, domain, shift_step, rotate, domain, scale_step);
+    let even_less_data = combined_search(
+        &all_data,
+        search_domain,
+        shift_step,
+        rotate,
+        search_domain,
+        scale_step,
+    );
 
     let path = format!("{path_to_root}/remin/{name}_prob100.0_{dist}_{grid}_classic.json");
     debug!("About to load data from {}", &path);
     let content = fs::read_to_string(&path)?;
     let all_data: Vec<ReconstructionDataPoint> = serde_json::from_str(&content)?;
     let remin_best = procrustes_align(&all_data, true, true, true).1;
-    let remin_data = combined_search(&all_data, domain, shift_step, rotate, domain, scale_step);
+
+    let remin_data = combined_search(
+        &all_data,
+        search_domain,
+        shift_step,
+        rotate,
+        search_domain,
+        scale_step,
+    );
 
     let path = format!("{path_to_root}/limits/{name}_{dist}_e0_d0.9_reconstruction.json");
     debug!("About to load data from {}", &path);
@@ -265,7 +281,7 @@ pub fn combined_search(
             let y_wiggle = sy / shift_domain.1 as f64;
 
             // if the amount we're trying to move along the x/y axis after a shift would throw us
-            // into an invalid spot, skip this one!
+            // into an invalid spot, skip this one.
             if dx > x_wiggle || dy > y_wiggle {
                 return None;
             }

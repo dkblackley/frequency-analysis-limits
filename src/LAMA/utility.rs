@@ -39,6 +39,7 @@ pub enum DistributionType {
     Uniform,
     Gaussian,
     Beta,
+    Flat,
 }
 
 impl FromStr for DistributionType {
@@ -60,6 +61,7 @@ impl std::fmt::Display for DistributionType {
             DistributionType::Uniform => write!(f, "uniform"),
             DistributionType::Gaussian => write!(f, "gaussian"),
             DistributionType::Beta => write!(f, "beta"),
+            DistributionType::Flat => write!(f, "flat"),
         }
     }
 }

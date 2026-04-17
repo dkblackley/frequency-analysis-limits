@@ -1,5 +1,5 @@
-use crate::dataloader::Searchable;
-use crate::LAMA::utility::DistributionType;
+use crate::dataloader::{flatten_nd, Searchable};
+use crate::LAMA::utility::{get_mbq, DistributionType};
 use crate::{DomPair, Probability, Value};
 use indicatif::{ParallelProgressIterator, ProgressBar, ProgressStyle};
 use itertools::Itertools;
@@ -14,14 +14,14 @@ pub struct QueryDistribution<'a> {
     encrypted_db: &'a Box<dyn Searchable + Sync>,
     pairs: Vec<DomPair>,
     weights: Vec<f64>,
-    dom_pair_to_known_prob: FxHashMap<DomPair, f64>,
+    pub dom_pair_to_known_prob: FxHashMap<DomPair, f64>,
     mbq_to_cumulative_prob: FxHashMap<DomPair, Probability>,
     pub probs_and_dom_pairs: Vec<(Probability, DomPair)>,
     pub total_weight: f64,
     sampler: WeightedIndex<f64>,
-    pub(crate) dist: DistributionType,
-    lowest_rec: Vec<Value>,
-    largest_rec: Vec<Value>,
+    pub dist: DistributionType,
+    pub lowest_rec: Vec<Value>,
+    pub largest_rec: Vec<Value>,
 }
 
 impl<'a> QueryDistribution<'a> {
@@ -36,6 +36,7 @@ impl<'a> QueryDistribution<'a> {
             DistributionType::Uniform => Self::new_uniform_internal(pairs.clone()),
             DistributionType::Gaussian => Self::new_gaussian(&pairs),
             DistributionType::Beta => Self::new_beta(&pairs),
+            DistributionType::Flat => Self::new_flat(&pairs, encrypted_db),
         };
 
         debug!("Making vec to probability mapping...");
@@ -47,39 +48,38 @@ impl<'a> QueryDistribution<'a> {
         info!("Computing true cumulative probabilities for every MBQ");
 
         // Compute the True CUMULATIVE probability for every possible MBQ
-        let computed_results: Vec<_> = pairs
-            .par_iter()
-            .progress() // Attaches the indicatif progress bar to Rayon
-            .map(|pair| {
-                let cum_prob = Self::compute_cumulative_prob(
-                    pair,
-                    &dist, // Note: `dist`, `lowest_rec`, etc. must implement `Sync`
-                    &lowest_rec,
-                    &largest_rec,
-                    &dom_pair_to_known_prob,
-                    //&sorted_known_probs,
-                    total_weight,
-                );
-
-                // let current = atom_count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                // if current % 1000 == 0 {
-                //     pb.set_position(current);
-                // }
-
-                // Return a tuple of references/clones needed for insertion
-                (pair, cum_prob)
-            })
-            .collect();
+        // let computed_results: Vec<_> = pairs
+        //     .par_iter()
+        //     .progress() // Attaches the indicatif progress bar to Rayon
+        //     .map(|pair| {
+        //         let cum_prob = Self::compute_cumulative_prob(
+        //             pair,
+        //             &dist, // Note: `dist`, `lowest_rec`, etc. must implement `Sync`
+        //             &lowest_rec,
+        //             &largest_rec,
+        //             &dom_pair_to_known_prob,
+        //             total_weight,
+        //         );
+        //
+        //         // let current = atom_count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        //         // if current % 1000 == 0 {
+        //         //     pb.set_position(current);
+        //         // }
+        //
+        //         // Return a tuple of references/clones needed for insertion
+        //         (pair, cum_prob)
+        //     })
+        //     .collect();
 
         debug!("Finished computing true cumulative probabilities");
         // 3. Sequential Insertion Phase
         // Iterating over the pre-computed results to insert is virtually instantaneous.
-        for (pair, cum_prob) in computed_results {
-            mbq_to_cumulative_prob.insert(pair.clone(), cum_prob);
-            probs_and_dom_pairs.push((cum_prob, pair.clone()));
-        }
+        // for (pair, cum_prob) in computed_results {
+        //     mbq_to_cumulative_prob.insert(pair.clone(), cum_prob);
+        //     probs_and_dom_pairs.push((cum_prob, pair.clone()));
+        // }
 
-        probs_and_dom_pairs.par_sort_unstable_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
+        // probs_and_dom_pairs.par_sort_unstable_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
 
         debug!("Done pre-computing probability dist");
         Box::new(Self {
@@ -107,7 +107,6 @@ impl<'a> QueryDistribution<'a> {
         //dom_pair_slice: &[(DomPair, f64)], // Now a sorted flat slice
         total_weight: f64,
     ) -> Probability {
-        // TODO: instead of hashmap, flatten/unflatten dompairs and do O(1) index based lookup!
         match dist {
             DistributionType::Uniform => {
                 // This is faster than a hash lookup for uniform (I think)
@@ -122,94 +121,43 @@ impl<'a> QueryDistribution<'a> {
                 let count = (dominated_vals * dominating_vals) as f64;
                 count / total_weight
             }
-            // _ => {
-            //     let (target_lower, target_upper) = mbq;
-            //     let mut true_prob: f64 = 0.0;
-            //
-            //     let lower_combos = lowest_rec
-            //         .iter()
-            //         .zip(target_lower.iter())
-            //         .map(|(&min_val, &t_val)| min_val..=t_val)
-            //         .multi_cartesian_product();
-            //
-            //     let upper_combos = target_upper
-            //         .iter()
-            //         .zip(largest_rec.iter())
-            //         .map(|(&t_val, &max_val)| t_val..=max_val)
-            //         .multi_cartesian_product();
-            //
-            //     for (c_lower, c_upper) in lower_combos.cartesian_product(upper_combos) {
-            //         let target_pair = (c_lower, c_upper);
-            //
-            //         // Binary search avoids hashing entirely and stays hot in the CPU cache.
-            //         // NOTE: dom_pair_slice MUST be sorted by DomPair before passing it here!
-            //         if let Ok(idx) =
-            //             dom_pair_slice.binary_search_by(|(pair, _)| pair.cmp(&target_pair))
-            //         {
-            //             true_prob += dom_pair_slice[idx].1;
-            //         }
-            //     }
-            //     true_prob / total_weight
-            // }
+
             _ => {
+                // Every other dist: Sum Cartesian space of enclosing queries.
                 let (target_lower, target_upper) = mbq;
-                let mut true_prob: f64 = 0.0;
-                if target_lower.len() == 2 {
-                    // 1. Replaces `lower_combos.multi_cartesian_product()`
-                    // We explicitly iterate over Dimension 0 and Dimension 1 for the lower bounds.
-                    for l0 in lowest_rec[0]..=target_lower[0] {
-                        for l1 in lowest_rec[1]..=target_lower[1] {
-                            let c_lower = vec![l0, l1]; // Recreates the Vec that itertools yielded
 
-                            // 2. Replaces `upper_combos.multi_cartesian_product()`
-                            // We explicitly iterate over Dimension 0 and Dimension 1 for the upper bounds.
-                            for u0 in target_upper[0]..=largest_rec[0] {
-                                for u1 in target_upper[1]..=largest_rec[1] {
-                                    let c_upper = vec![u0, u1]; // Recreates the Vec that itertools yielded
+                let lower_combos = lowest_rec
+                    .iter()
+                    .zip(target_lower.iter())
+                    .map(|(&min_val, &t_val)| min_val..=t_val)
+                    .multi_cartesian_product();
 
-                                    // 3. Replaces `lower_combos.cartesian_product(upper_combos)`
-                                    // This is the exact same HashMap lookup you originally wrote.
-                                    if let Some(&weight) =
-                                        dom_pair_to_known_prob.get(&(c_lower.clone(), c_upper))
-                                    {
-                                        true_prob += weight;
-                                    }
-                                }
-                            }
-                        }
-                    }
-                } else {
-                    // Every other dist: Sum Cartesian space of enclosing queries.
-                    let (target_lower, target_upper) = mbq;
-                    let mut true_prob: f64 = 0.0;
+                let upper_combos = target_upper
+                    .iter()
+                    .zip(largest_rec.iter())
+                    .map(|(&t_val, &max_val)| t_val..=max_val)
+                    .multi_cartesian_product();
 
-                    let lower_combos = lowest_rec
-                        .iter()
-                        .zip(target_lower.iter())
-                        .map(|(&min_val, &t_val)| min_val..=t_val)
-                        .multi_cartesian_product();
-
-                    let upper_combos = target_upper
-                        .iter()
-                        .zip(largest_rec.iter())
-                        .map(|(&t_val, &max_val)| t_val..=max_val)
-                        .multi_cartesian_product();
-
-                    for (c_lower, c_upper) in lower_combos.cartesian_product(upper_combos) {
-                        if let Some(&weight) = dom_pair_to_known_prob.get(&(c_lower, c_upper)) {
-                            true_prob += weight;
-                        }
-                    }
-                }
+                // Parallelize the evaluation of the cartesian product space
+                let true_prob: f64 = lower_combos
+                    .cartesian_product(upper_combos)
+                    .par_bridge() // <--- The magic parallel bit
+                    .map(|(c_lower, c_upper)| {
+                        // Look up the weight, default to 0.0 if not found, then return it to be summed
+                        *dom_pair_to_known_prob
+                            .get(&(c_lower, c_upper))
+                            .unwrap_or(&0.0)
+                    })
+                    .sum(); // Rayon handles the thread-safe accumulation here
 
                 true_prob / total_weight
             }
         }
     }
 
-    pub fn get_cumulative_prob(&self, p0: &DomPair) -> Probability {
-        *self.mbq_to_cumulative_prob.get(p0).unwrap_or(&0.0)
-    }
+    // pub fn get_cumulative_prob(&self, p0: &DomPair) -> Probability {
+    //     *self.mbq_to_cumulative_prob.get(p0).unwrap_or(&0.0)
+    // }
 
     pub fn get_candidate_pairs_by_probability(
         &self,
@@ -320,6 +268,92 @@ impl<'a> QueryDistribution<'a> {
         debug!("Finished storing and sorting weight pairs");
 
         (weight_pair, sampler, weights, total_weight)
+    }
+
+    pub fn new_flat(
+        pairs: &[DomPair],
+        encrypted_db: &'a Box<(dyn Searchable + Sync + 'static)>,
+    ) -> (Vec<(f64, DomPair)>, WeightedIndex<f64>, Vec<f64>, f64) {
+        // We start off with a 'uniform' dist as the base weights and use this to build our algorithm...
+
+        let mut final_weight_dom_pairs: Vec<(f64, DomPair)> = Vec::new();
+
+        debug!("Making internal QD for flatten");
+        let internal_qd = Self::new(Vec::from(pairs), encrypted_db, DistributionType::Uniform);
+        let mapping = internal_qd.dom_pair_to_known_prob;
+        let total_weight = internal_qd.total_weight;
+
+        // as per algorithm 2: Start at the largest possible query and work back
+        let (low_pair, high_pair) = encrypted_db.get_dom_pair();
+        let largest_possible_val: i64 = flatten_nd(&high_pair, &high_pair, &low_pair);
+
+        fn taxicab_distance(v1: &[i64], v2: &[i64]) -> u64 {
+            // Ensure both vectors represent points in the same dimensional space
+            assert_eq!(v1.len(), v2.len(), "Vectors must have the same length");
+
+            v1.iter().zip(v2.iter()).map(|(a, b)| a.abs_diff(*b)).sum()
+        }
+
+        for d in largest_possible_val..0 {
+            // find everything of this distance. Distance is defined as taxicab/L1
+            let mut candidates = Vec::new();
+            // re-use the dompairs as they're already all possible 2-tuples
+            for pair in pairs {
+                let taxicab = taxicab_distance(&pair.0, &pair.1);
+                if taxicab == d as u64 {
+                    candidates.push(pair.0.clone());
+                    candidates.push(pair.1.clone());
+                }
+
+                //TODO: choose better value for this
+                let mut winner = encrypted_db.get_dom_pair();
+                let mut max = -1.0;
+                //now that we have the candidates, which two have the highest prob together?
+                for (a, b) in candidates.iter().tuple_combinations() {
+                    let pair = get_mbq(&[a.clone(), b.clone()]);
+                    let cand_weight = mapping.get(&pair).unwrap();
+                    if cand_weight > &max {
+                        winner = pair;
+                        max = *cand_weight;
+                    }
+                }
+
+                let cumu_prob = Self::compute_cumulative_prob(
+                    &winner,
+                    &DistributionType::Uniform,
+                    &low_pair,
+                    &high_pair,
+                    &mapping,
+                    total_weight,
+                );
+
+                for (a, b) in candidates.iter().tuple_combinations() {
+                    let pair = get_mbq(&[a.clone(), b.clone()]);
+                    final_weight_dom_pairs.push((cumu_prob, pair))
+                }
+            }
+        }
+        todo!()
+
+        // debug!("Finished calculating weights");
+        //
+        // let total_weight: f64 = weights.par_iter().progress().sum();
+        // debug!("Finished calculating total weight");
+        //
+        // let sampler = WeightedIndex::new(&weights).expect("Failed to create WeightedIndex");
+        // debug!("Finished creating WeightedIndex sampler");
+        //
+        // let mut weight_pair: Vec<(f64, DomPair)> = weights
+        //     .par_iter()
+        //     .copied()
+        //     .zip(pairs.par_iter().cloned())
+        //     .progress()
+        //     .collect();
+        // debug!("Finished storing weight pairs");
+        // weight_pair.par_sort_unstable_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
+        // debug!("Finished storing and sorting weight pairs");
+        //
+        // (weight_pair, sampler, weights, total_weight)
     }
 
     fn make_vec_to_prob_map(pairs: Vec<DomPair>, weights: Vec<f64>) -> FxHashMap<DomPair, f64> {

@@ -203,6 +203,8 @@ impl Translator {
         pb.finish_with_message("Finished finding tuples for t=1");
 
         self.t_assignment_archive.insert(1, t1_cache);
+
+        debug!("Done with t1");
     }
 
     /// Given some possible (t-tuple) -> (Valid assignments for that tuple) returns the 'flat' map

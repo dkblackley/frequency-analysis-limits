@@ -122,38 +122,24 @@ fn plot_db_side_by_side(
         return Ok(());
     }
 
-    // Allocate 800px width per distribution subplot
     let total_width = 800 * num_dists as u32;
     let total_height = 600;
 
     let root = SVGBackend::new(output_path, (total_width, total_height)).into_drawing_area();
-
-    // Explicitly enforce transparency over the entire canvas block
     root.fill(&TRANSPARENT)?;
 
-    // Horizontally split our parent drawing area by the number of distributions
     let sub_areas = root.split_evenly((1, num_dists));
     let pretty_db = format_db_name(db);
-
-    // High-contrast, colorblind-friendly palette (Wong)
-    let palette = [
-        RGBColor(0, 114, 178),   // Blue
-        RGBColor(213, 94, 0),    // Vermilion
-        RGBColor(0, 158, 115),   // Bluish Green
-        RGBColor(204, 121, 167), // Reddish Purple
-        RGBColor(230, 159, 0),   // Orange
-        RGBColor(86, 180, 233),  // Sky Blue
-    ];
 
     for (i, &dist) in distributions.iter().enumerate() {
         let area = &sub_areas[i];
 
         let plot_data = match db_data.get(dist) {
             Some(data) if !data.is_empty() => data,
-            _ => continue, // Skip entirely if no lines populated this subplot
+            _ => continue,
         };
 
-        // Determine min/max boundaries manually to frame out the graph space
+        // Determine min/max boundaries manually
         let mut min_grid = f64::INFINITY;
         let mut max_grid = f64::NEG_INFINITY;
         let mut min_mse = f64::INFINITY;
@@ -178,47 +164,56 @@ fn plot_db_side_by_side(
         }
 
         if min_grid.is_infinite() || min_mse.is_infinite() {
-            continue; // No valid finite points to build the mesh
+            continue;
         }
 
-        // Prevent infinite tick-generation loops if min == max
         let mut x_pad = (max_grid - min_grid) * 0.1;
         if x_pad == 0.0 {
             x_pad = 1.0;
         }
 
-        let mut y_pad = (max_mse - min_mse) * 0.1;
-        if y_pad == 0.0 {
-            y_pad = 0.1;
-        }
+        x_pad = 0.0;
 
-        // Formatting the title: Capitalize the distribution strings nicely
+        // Ensure Y-max is at least 10.0 so the scale makes sense even with tiny numbers
+        let y_max = if max_mse <= 1.0 { 10.0 } else { max_mse };
+
         let mut chars = dist.chars();
         let pretty_dist = match chars.next() {
             None => String::new(),
             Some(f) => f.to_uppercase().collect::<String>() + chars.as_str(),
         };
 
-        // Minimalist Title Update
         let title = format!("{} {} Query Distribution", pretty_db, pretty_dist);
 
-        let mut chart = ChartBuilder::on(area)
-            .margin(40)
-            // Matched font family and weight to your previous graphs
+        // THE FIX: Carve out the top 70 pixels specifically for the title area
+        let (title_area, chart_area) = area.split_vertically(70);
+
+        // To perfectly center the title over the grid beneath it, we shrink this title drawing area
+        // to match the exact left/right boundaries of the chart grid below (110px left offset, 40px right offset).
+        let centered_title_area = title_area.margin(0, 0, 110, 40);
+
+        // Draw the title safely in its dedicated space
+        ChartBuilder::on(&centered_title_area)
             .caption(
                 title,
                 ("Linux Biolinum", 32, FontStyle::Bold)
                     .into_font()
                     .color(&BLACK),
             )
+            .build_cartesian_2d(0..1, 0..1)?;
+
+        let mut chart = ChartBuilder::on(&chart_area)
+            .margin_top(0) // Top spacing is naturally handled by the title_area above it
+            .margin_bottom(40)
+            .margin_left(40)
+            .margin_right(40)
             .x_label_area_size(60)
-            .y_label_area_size(70) // Accommodates wider 'k' / 'M' labels
+            .y_label_area_size(70)
             .build_cartesian_2d(
                 (min_grid - x_pad)..(max_grid + x_pad),
-                (min_mse - y_pad)..(max_mse + y_pad),
+                (1.0f64..y_max).log_scale(), // Implement Log scale starting at 1.0
             )?;
 
-        // Sleek configuration: lighter grid lines and distinct axis lines
         chart
             .configure_mesh()
             .bold_line_style(RGBColor(230, 230, 230))
@@ -226,26 +221,44 @@ fn plot_db_side_by_side(
             .axis_style(RGBColor(100, 100, 100))
             .x_desc("Grid Size")
             .y_desc("Mean Squared Error")
-            // Added formatting metrics to X and Y axes
+            .axis_desc_style(("Linux Biolinum", 20, FontStyle::Bold).into_font()) // Bold axis text
             .x_label_formatter(&|x| format_metric(*x))
-            .y_label_formatter(&|y| format_metric(*y))
-            // Matched font family to your previous graphs
-            .label_style(("Linux Biolinum", 18).into_font())
+            .y_label_formatter(&|y| {
+                if *y <= 1.001 {
+                    // Intercept the 1.0 tick and visually label it as "0"
+                    "0".to_string()
+                } else {
+                    format_metric(*y)
+                }
+            })
+            .label_style(("Linux Biolinum", 18, FontStyle::Bold).into_font()) // Bold axis tick numbers
             .draw()?;
 
-        // Stabilize legend rendering sequence by alphabetically sorting methods
-        let mut methods: Vec<_> = plot_data.keys().collect();
-        methods.sort();
+        // Grab the methods and explicitly map them to their formatted name and rank order
+        let mut mapped_methods: Vec<(&String, &str, usize, RGBColor)> = plot_data
+            .keys()
+            .map(|method| match method.as_str() {
+                "limits" => (method, "LAMa", 0, RGBColor(0, 114, 178)), // Blue
+                "even_less" => (method, "Even Less", 1, RGBColor(230, 159, 0)), // Orange/Yellow
+                "remin" => (method, "Remin", 2, RGBColor(0, 158, 115)), // Green
+                _ => (method, method.as_str(), 99, RGBColor(0, 0, 0)),  // Fallback
+            })
+            .collect();
 
-        for (color_idx, &method) in methods.iter().enumerate() {
-            let color = palette[color_idx % palette.len()];
+        // Sort by the rank we just assigned so LAMa renders first (top of legend)
+        mapped_methods.sort_by_key(|&(_, _, rank, _)| rank);
 
-            // Unbroken lines demand strict X-axis sorting
-            let mut sorted_data = plot_data[method].clone();
+        for (raw_method, pretty_name, _, color) in mapped_methods {
+            let mut sorted_data = plot_data[raw_method].clone();
             sorted_data.sort_by(|a, b| a.0.cmp(&b.0));
 
-            let continuous_data: Vec<_> =
-                sorted_data.iter().map(|(g, m)| (*g as f64, *m)).collect();
+            let continuous_data: Vec<_> = sorted_data
+                .iter()
+                .map(|(g, m)| {
+                    // Clamp values to a minimum of 1.0 so they cleanly sit on the "0" axis line
+                    (*g as f64, m.max(1.0))
+                })
+                .collect();
 
             // Draw line
             chart
@@ -253,7 +266,7 @@ fn plot_db_side_by_side(
                     continuous_data.clone(),
                     color.stroke_width(4),
                 ))?
-                .label(method.clone())
+                .label(pretty_name) // Use the nice label
                 .legend(move |(x, y)| {
                     PathElement::new(vec![(x, y), (x + 25, y)], color.stroke_width(4))
                 });
@@ -266,18 +279,18 @@ fn plot_db_side_by_side(
             )?;
         }
 
-        // Beautiful academic legend placement
         chart
             .configure_series_labels()
-            .position(SeriesLabelPosition::UpperRight)
+            // Change UpperRight to MiddleRight
+            .position(SeriesLabelPosition::MiddleRight)
+            // I've added the solid background back here, but you can leave it TRANSPARENT if you prefer!
             .background_style(RGBColor(255, 255, 255).mix(0.9))
             .border_style(RGBColor(200, 200, 200))
-            .label_font(("Linux Biolinum", 16)) // Matched font family here as well
+            .label_font(("Linux Biolinum", 16))
             .margin(10)
             .draw()?;
     }
 
-    // Flush and save the SVG
     root.present()?;
     Ok(())
 }

@@ -7,7 +7,7 @@ pub fn format_db_name(db: &str) -> &str {
     match db {
         "shopparis" => "Paris",
         "busstop" => "Shanghai",
-        "cali" => "Cali",
+        "cali" => "California",
         "drink" => "Amsterdam",
         "highway" => "Manhattan",
         "spitz" => "Spitz",

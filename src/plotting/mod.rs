@@ -44,7 +44,7 @@ pub struct ReconstructionDataPoint {
     #[serde(rename = "true")]
     pub true_points: Vec<f64>,
     #[serde(rename = "reconstructed")]
-    pub reconstructed_points: Vec<f64>,
+    pub reconstructed_pointzs: Vec<f64>,
     #[serde(rename = "unscaled_true")]
     pub unscaled_points: Option<Vec<f64>>,
 }
@@ -101,7 +101,7 @@ pub fn do_plotting() {
     for grid in &grid_sizes {
         for name in &datasets {
             let data = format!("databases/{}x{}", grid.0, grid.0);
-            let res = run_spatial_plots(name, &*data, grid.0);
+            let res = run_spatial_plots(name, &*data, "uniform", grid.0);
 
             match res {
                 Ok(_) => {}
@@ -114,7 +114,9 @@ pub fn do_plotting() {
     }
 
     for data in datasets.clone() {
-        run_spatial_plots(data, "databases/50x50", 50).expect("SPITZ DIRECT FAILED!");
+        for dist in distributions.clone() {
+            run_spatial_plots(data, "databases/50x50", dist, 50).expect("SPITZ DIRECT FAILED!");
+        }
     }
 
     plot_grid_by_mse(&grid_sizes, &datasets, &methods, &distributions).unwrap();
@@ -131,7 +133,7 @@ pub fn do_plotting() {
     // do JSUT 350x50 spitz stuff
     let datasets = vec!["spitz"];
     let grid = (350, 50);
-    run_spatial_plots("spitz", "databases/350x50", 350).expect("SPITZ DIRECT FAILED!");
+    run_spatial_plots("spitz", "databases/350x50", "uniform", 350).expect("SPITZ DIRECT FAILED!");
     // run_spatial_plots("spitz", &datasets, "databases/175x25", 175).expect("SPITZ DIRECT FAILED!");
     // do_convex_hull_plots("spitz", "databases/50x350");
 

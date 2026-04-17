@@ -21,8 +21,8 @@ pub fn plot_histograms_of_all_reconstructions(
     let grid = format!("{}x{}", domain.0, domain.1);
     let path_to_root = format!("databases/{grid}/{name}");
 
-    let shift_step = 2.0;
-    let scale_step = 2.0;
+    let shift_step = 5.0;
+    let scale_step = 5.0;
     let rotate = 45.0;
 
     // let shift_step = 1.0;
@@ -399,7 +399,9 @@ pub fn plot_mse_frequency_histogram_split(
             }
         }
 
-        if local_max_mse <= 0.0 {
+        let is_zero_mse = local_max_mse <= 0.0;
+
+        if is_zero_mse {
             local_max_mse = 1.0;
         } else {
             local_max_mse *= 1.05;
@@ -420,46 +422,59 @@ pub fn plot_mse_frequency_histogram_split(
         let local_max_freq = *bins.iter().max().unwrap_or(&0);
         let max_y = ((local_max_freq as f64 * 1.1).ceil() as usize).max(1);
 
+        // Dynamically scale the label area size to pull the title tighter on LAMa
+        let y_label_area = if *method == "LAMa" { 50 } else { 70 };
+
         // Render Chart
         let mut chart = ChartBuilder::on(panel)
-            .margin(40)
+            .margin_top(40)
+            .margin_bottom(40)
+            .margin_left(40)
+            // Centering fix: Expand the right margin to perfectly mirror the space taken up
+            // by the left Y-axis labels. This perfectly centers the plot grid without drawing an axis.
+            .margin_right(40 + y_label_area)
             .caption(*method, title_font.clone())
-            .x_label_area_size(55) // Kept the increased spacing from before
-            .y_label_area_size(70) // Increased to accommodate wider "k"/"M" labels if needed
+            .x_label_area_size(55)
+            .y_label_area_size(y_label_area)
             .build_cartesian_2d(min_mse..local_max_mse, 0..max_y)?;
 
         chart
             .configure_mesh()
             .disable_x_mesh()
-            .x_labels(8)
+            .x_labels(8) // Restored normal label count
             .y_desc("Number of Solutions")
             .x_desc("Mean Squared Error (MSE)")
-            .x_label_formatter(&|x| format_metric(*x)) // Apply custom formatting
-            .y_label_formatter(&|y| format_metric(*y as f64)) // Apply custom formatting
+            .x_label_formatter(&|x| {
+                // Specific IF statement for the 0-only scenario: forces all labels to be "0"
+                if is_zero_mse {
+                    "0".to_string()
+                } else {
+                    format_metric(*x)
+                }
+            })
+            .y_label_formatter(&|y| format_metric(*y as f64))
             .label_style(label_font.clone())
             .axis_desc_style(axis_font.clone())
             .light_line_style(WHITE.mix(0.0))
             .bold_line_style(BLACK.mix(0.1))
             .draw()?;
 
-        // Calculate a small gap width (e.g., 5% of the bin width on each side = 10% total gap)
+        // Calculate a small gap width
         let gap = bin_width * 0.05;
 
         for (bin_idx, &count) in bins.iter().enumerate() {
             if count == 0 {
-                continue; // Skip drawing empty bins
+                continue;
             }
 
             let x_start = min_mse + (bin_idx as f64) * bin_width;
             let x_end = min_mse + ((bin_idx + 1) as f64) * bin_width;
 
-            // Draw individual distinct rectangles with the calculated gap
             chart.draw_series(std::iter::once(Rectangle::new(
                 [(x_start + gap, 0), (x_end - gap, count)],
                 color.mix(0.5).filled(),
             )))?;
 
-            // Draw a slightly darker border around each rectangle for crispness
             chart.draw_series(std::iter::once(Rectangle::new(
                 [(x_start + gap, 0), (x_end - gap, count)],
                 color.stroke_width(2),

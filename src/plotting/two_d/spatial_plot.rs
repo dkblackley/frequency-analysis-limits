@@ -1,29 +1,36 @@
+use crate::plotting::two_d::format_db_name;
 use crate::plotting::{get_remin_even_less, ReconstructionDataPoint};
 use log::debug;
 use plotters::prelude::*;
+use std::collections::HashMap;
 use std::error::Error;
 use std::fs;
 
-pub fn run_spatial_plots(name: &str, dir: &str, grid: u32) -> Result<(), Box<dyn Error>> {
+pub fn run_spatial_plots(
+    name: &str,
+    dir: &str,
+    dist: &str,
+    grid: u32,
+) -> Result<(), Box<dyn Error>> {
     let path_to_root = format!("{}/{}", dir, name);
 
     let mut even_less =
-        format!("{path_to_root}/even_less/{name}_prob100.0_uniform_{grid}x{grid}_even_less.json");
+        format!("{path_to_root}/even_less/{name}_prob100.0_{dist}_{grid}x{grid}_even_less.json");
     let mut remin_path =
-        format!("{path_to_root}/remin/{name}_prob100.0_uniform_{grid}x{grid}_classic.json");
-    let mut limits = format!("{path_to_root}/limits/{name}_uniform_e0_d0.9_reconstruction.json");
+        format!("{path_to_root}/remin/{name}_prob100.0_{dist}_{grid}x{grid}_classic.json");
+    let mut limits = format!("{path_to_root}/limits/{name}_{dist}_e0_d0.9_reconstruction.json");
 
     if grid == 350 {
         even_less =
-            format!("{path_to_root}/even_less/{name}_prob100.0_uniform_350x50_even_less.json");
-        remin_path = format!("{path_to_root}/remin/{name}_prob100.0_uniform_350x50_classic.json");
-        limits = format!("{path_to_root}/limits/{name}_uniform_e0_d0.9_reconstruction.json");
+            format!("{path_to_root}/even_less/{name}_prob100.0_{dist}_350x50_even_less.json");
+        remin_path = format!("{path_to_root}/remin/{name}_prob100.0_{dist}_350x50_classic.json");
+        limits = format!("{path_to_root}/limits/{name}_{dist}_e0_d0.9_reconstruction.json");
     }
     if grid == 175 {
         even_less =
-            format!("{path_to_root}/even_less/{name}_prob100.0_uniform_175x25_even_less.json");
-        remin_path = format!("{path_to_root}/remin/{name}_prob100.0_uniform_175x25_classic.json");
-        limits = format!("{path_to_root}/limits/{name}_uniform_e0_d0.9_reconstruction.json");
+            format!("{path_to_root}/even_less/{name}_prob100.0_{dist}_175x25_even_less.json");
+        remin_path = format!("{path_to_root}/remin/{name}_prob100.0_{dist}_175x25_classic.json");
+        limits = format!("{path_to_root}/limits/{name}_{dist}_e0_d0.9_reconstruction.json");
     }
 
     debug!(
@@ -48,28 +55,20 @@ pub fn run_spatial_plots(name: &str, dir: &str, grid: u32) -> Result<(), Box<dyn
 
     let limits_data = (true_point, recon_point);
 
+    let mut data_map = HashMap::new();
+
+    data_map.insert("even_less".to_string(), even_less_data.1.clone());
+    data_map.insert("remin".to_string(), remin_data.1);
+    data_map.insert("limits".to_string(), even_less_data.0.clone());
+
     plot_spatial_reconstruction(
+        name,
+        dist,
         &*even_less_data.0,
-        &*even_less_data.1,
-        &format!("{path_to_root}/{name}_even_less.svg"),
+        &data_map,
+        &format!("{path_to_root}/{name}_{dist}_spatial_comparison.svg"),
         true,
-        0.5,
-        0.0,
-    )?;
-    plot_spatial_reconstruction(
-        &*remin_data.0,
-        &remin_data.1,
-        &format!("{path_to_root}/{name}_remin.svg"),
-        true,
-        0.5,
-        0.0,
-    )?;
-    plot_spatial_reconstruction(
-        &*limits_data.0,
-        &limits_data.1,
-        &format!("{path_to_root}/{name}_limits.svg"),
-        true,
-        0.5,
+        0.2,
         0.0,
     )?;
 
@@ -118,101 +117,164 @@ pub fn run_spatial_plots(name: &str, dir: &str, grid: u32) -> Result<(), Box<dyn
 }
 
 pub fn plot_spatial_reconstruction(
+    db: &str,
+    dist: &str,
     true_coords: &[Vec<f64>],
-    recon_coords: &[Vec<f64>],
+    method_coords: &HashMap<String, Vec<Vec<f64>>>,
     output_path: &str,
     show_true_points: bool,
     x_padder: f64,
     y_padder: f64,
 ) -> Result<(), Box<dyn Error>> {
+    // 3 plots side-by-side. Expanded width to 3600px to maintain the 1200x800 aspect ratio per plot.
+    let total_width = 3600;
+    let total_height = 800;
+
     // Switch to SVGBackend for lossless, scalable vector images
-    let root = SVGBackend::new(output_path, (1200, 800)).into_drawing_area();
+    let root = SVGBackend::new(output_path, (total_width, total_height)).into_drawing_area();
     root.fill(&TRANSPARENT)?;
 
-    if true_coords.is_empty() && recon_coords.is_empty() {
-        return Ok(());
-    }
-
+    // Calculate global bounds across ALL data sets to ensure identical axes across subplots
     let (mut min_x, mut max_x) = (f64::INFINITY, f64::NEG_INFINITY);
     let (mut min_y, mut max_y) = (f64::INFINITY, f64::NEG_INFINITY);
-    for x_y in true_coords.iter().chain(recon_coords.iter()) {
-        let (x, y) = (x_y[0], x_y[1]);
-        min_x = min_x.min(x);
-        max_x = max_x.max(x);
-        min_y = min_y.min(y);
-        max_y = max_y.max(y);
+    let mut x_pad = x_padder;
+    let mut y_pad = y_padder;
+
+    let mut update_bounds = |pts: &[Vec<f64>]| {
+        for x_y in pts {
+            if x_y.len() >= 2 {
+                let (x, y) = (x_y[0], x_y[1]);
+                min_x = min_x.min(x);
+                max_x = max_x.max(x);
+                min_y = min_y.min(y);
+                max_y = max_y.max(y);
+
+                x_pad = (max_x - min_x) * x_padder;
+                y_pad = (max_y - min_y) * y_padder;
+            }
+        }
+    };
+
+    update_bounds(true_coords);
+    for recon in method_coords.values() {
+        update_bounds(recon);
     }
 
-    let x_pad = (max_x - min_x) * x_padder;
-    let y_pad = (max_y - min_y) * y_padder;
+    if min_x.is_infinite() || min_y.is_infinite() {
+        return Ok(()); // Avoid crashing if vectors are entirely empty
+    }
 
-    let mut chart = ChartBuilder::on(&root)
-        .margin(30)
-        .x_label_area_size(80)
-        .y_label_area_size(90)
-        .build_cartesian_2d(
-            (min_x - x_pad)..(max_x + x_pad),
-            (min_y - y_pad)..(max_y + y_pad),
-        )?;
+    // Master title formatting
+    let mut chars = dist.chars();
+    let pretty_dist = match chars.next() {
+        None => String::new(),
+        Some(f) => f.to_uppercase().collect::<String>() + chars.as_str(),
+    };
+    let pretty_db = format_db_name(db);
+    let master_title = format!("{} {} Distribution", pretty_db, pretty_dist);
 
+    // Split vertically to reserve space for the master title
+    let (title_area, plot_area) = root.split_vertically(80);
+
+    // Calculate exact pixel width of the text to center it perfectly across all 3 graphs
+    let title_font = ("Linux Biolinum", 48, FontStyle::Bold).into_font();
+    let title_size = title_font
+        .layout_box(&master_title)
+        .unwrap_or(((0, 0), (0, 0)));
+    let text_width = title_size.1 .0 - title_size.0 .0;
+
+    title_area.draw_text(
+        &master_title,
+        &title_font.color(&BLACK),
+        ((total_width as i32 - text_width) / 2, 20),
+    )?;
+
+    // Split horizontally for our 3 methods
+    let sub_areas = plot_area.split_evenly((1, 3));
+
+    // High-contrast, colorblind-friendly Wong palette mappings
+    let methods_to_plot = vec![
+        ("limits", "LAMa", RGBColor(0, 114, 178)),         // Blue
+        ("even_less", "Even Less", RGBColor(230, 159, 0)), // Yellow/Orange
+        ("remin", "Remin", RGBColor(0, 158, 115)),         // Bluish Green
+    ];
+
+    // Neutral, transparent gray for ground truth so it doesn't clash with the 3 top colors
+    let gt_color = RGBColor(150, 150, 150).mix(0.5);
     let text_color = BLACK;
     let mesh_color = RGBColor(220, 220, 220);
 
-    chart
-        .configure_mesh()
-        .bold_line_style(mesh_color)
-        .axis_style(&text_color)
-        .label_style(("sans-serif", 20).into_font().color(&text_color))
-        .draw()?;
+    for (i, (method_key, method_name, recon_color)) in methods_to_plot.iter().enumerate() {
+        let area = &sub_areas[i];
 
-    // --- Color-Blind Friendly Okabe-Ito Palette ---
-    let sky_blue = RGBColor(86, 180, 233);
+        let mut chart = ChartBuilder::on(area)
+            .margin(30)
+            .caption(
+                *method_name,
+                ("Linux Biolinum", 32, FontStyle::Bold)
+                    .into_font()
+                    .color(&BLACK),
+            )
+            .x_label_area_size(80)
+            .y_label_area_size(90)
+            .build_cartesian_2d(
+                (min_x - x_pad)..(max_x + x_pad),
+                (min_y - y_pad)..(max_y + y_pad),
+            )?;
 
-    // 1. True Points Series
-    if show_true_points {
         chart
-            .draw_series(
-                true_coords
-                    .iter()
-                    .map(|x_y| Circle::new((x_y[0], x_y[1]), 8, sky_blue.mix(0.8).filled())),
-            )?
-            .label("Ground Truth")
-            .legend(move |(x, y)| Circle::new((x, y), 6, sky_blue.filled()));
+            .configure_mesh()
+            .bold_line_style(mesh_color)
+            .axis_style(&text_color)
+            .label_style(("Linux Biolinum", 20).into_font().color(&text_color))
+            .draw()?;
+
+        // 1. Draw Ground Truth FIRST (bottom layer)
+        if show_true_points {
+            chart
+                .draw_series(true_coords.iter().filter_map(|x_y| {
+                    if x_y.len() >= 2 {
+                        Some(Circle::new((x_y[0], x_y[1]), 8, gt_color.filled()))
+                    } else {
+                        None
+                    }
+                }))?
+                .label("Ground Truth")
+                .legend(move |(x, y)| Circle::new((x, y), 6, gt_color.filled()));
+        }
+
+        // 2. Draw Reconstruction SECOND (top layer)
+        if let Some(recon_points) = method_coords.get(*method_key) {
+            chart
+                .draw_series(recon_points.iter().filter_map(|x_y| {
+                    if x_y.len() >= 2 {
+                        Some(Circle::new((x_y[0], x_y[1]), 4, recon_color.filled()))
+                    } else {
+                        None
+                    }
+                }))?
+                .label("Reconstructed")
+                .legend(move |(x, y)| Circle::new((x, y), 4, recon_color.filled()));
+        }
+
+        // 3. Apply clean legend placement for each subplot
+        chart
+            .configure_series_labels()
+            .position(SeriesLabelPosition::UpperRight)
+            .background_style(WHITE.mix(0.9).filled())
+            .border_style(BLACK)
+            .label_font(("Linux Biolinum", 20).into_font().color(&text_color))
+            .margin(10)
+            .draw()?;
     }
 
-    // 2. Reconstructed Points Series with Light-Theme Gradient
-    chart
-        .draw_series(recon_coords.iter().map(|x_y| {
-            let (x, y) = (x_y[0], x_y[1]);
-            let ratio = if max_y > min_y {
-                (y - min_y) / (max_y - min_y)
-            } else {
-                0.5
-            };
-
-            // // Gradient: Sky Blue (86, 180, 233) to Vermilion (213, 94, 0)
-            // let r = (86.0 + (213.0 - 86.0) * ratio) as u8;
-            // let g = (180.0 + (94.0 - 180.0) * ratio) as u8;
-            // let b = (233.0 + (0.0 - 233.0) * ratio) as u8;
-            //
-            // let color = RGBColor(r, g, b);
-            // remove gradient
-            let color = RGBColor(213, 94, 0);
-            Circle::new((x, y), 4, color.mix(0.9).filled())
-        }))?
-        .label("Reconstructed")
-        .legend(move |(x, y)| Circle::new((x, y), 4, RGBColor(213, 94, 0).filled()));
-
-    // 3. The Legend
-    chart
-        .configure_series_labels()
-        .position(SeriesLabelPosition::UpperRight)
-        .background_style(WHITE.mix(0.9).filled())
-        .border_style(BLACK)
-        .label_font(("sans-serif", 20).into_font().color(&text_color))
-        .draw()?;
-
     root.present()?;
+
+    println!(
+        "Generated side-by-side spatial plot for {} -> saved to {}",
+        db, output_path
+    );
+
     Ok(())
 }
 

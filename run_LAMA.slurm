@@ -88,7 +88,7 @@ $SG_RUN cargo rustc --bin frequency_analysis_limits --release -- -Clink-arg=-lpr
 
 NAMES=("spitz")
 DISTS=("uniform" "gaussian" "beta")
-DATA_DIRS=("$SLURM_SUBMIT_DIR/databases/350x50" "$SLURM_SUBMIT_DIR/databases/175x25" "$SLURM_SUBMIT_DIR/databases/25x175" "$SLURM_SUBMIT_DIR/databases/50x350" )
+DATA_DIRS=("$SLURM_SUBMIT_DIR/databases/350x50" "$SLURM_SUBMIT_DIR/databases/175x25")
 
 # NAMES=("shopparis" "highway" "busstop" "drink" "spitz" "cali")
 # DISTS=("uniform" "gaussian" "beta")

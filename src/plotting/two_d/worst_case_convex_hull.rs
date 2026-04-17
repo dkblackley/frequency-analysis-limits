@@ -1,6 +1,7 @@
 use crate::plotting::{flip_coordinates, ReconstructionDataPoint};
 // Adjust to your crate's path
 use geo::{ConvexHull, MultiPoint, Point};
+use itertools::all;
 use log::{debug, error};
 use plotters::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -25,15 +26,15 @@ pub fn do_convex_hull_plots(db_name: &str, data_dir: &str) {
     let all_data: Vec<Vec<ReconstructionDataPoint>> =
         serde_json::from_str(&content).expect("Failed to parse JSON");
 
-    let mut flipped: Vec<Vec<ReconstructionDataPoint>> = all_data
-        .iter()
-        .map(|cluster| {
-            cluster
-                .iter()
-                .map(|point| flip_coordinates(point.clone()))
-                .collect()
-        })
-        .collect();
+    // let mut flipped: Vec<Vec<ReconstructionDataPoint>> = all_data
+    //     .iter()
+    //     .map(|cluster| {
+    //         cluster
+    //             .iter()
+    //             .map(|point| flip_coordinates(point.clone()))
+    //             .collect()
+    //     })
+    //     .collect();
 
     // let first = &flipped[0];
     // let mut truth = Vec::new();
@@ -51,7 +52,7 @@ pub fn do_convex_hull_plots(db_name: &str, data_dir: &str) {
     // flipped.push(truth);
 
     // Extract ALL points rather than just the worst-case connections
-    let full_data = extract_all_points(&flipped);
+    let full_data = extract_all_points(&all_data);
     let output_path = format!("figures/{}_comprehensive_hull.svg", db_name);
 
     if let Err(e) = plot_comprehensive_convex_hull(&full_data, &output_path, 0.1, 3.0) {

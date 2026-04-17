@@ -336,7 +336,7 @@ pub fn plot_mse_frequency_histogram_split(
 
     ChartBuilder::on(&title_area)
         .caption(
-            format!("{} Database ({} Distribution)", database_name, dist_name),
+            format!("{} {} Distribution", database_name, dist_name),
             super_title_font,
         )
         .build_cartesian_2d(0f32..1f32, 0f32..1f32)?;

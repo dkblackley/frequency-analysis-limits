@@ -1,4 +1,4 @@
-use crate::plotting::{flip_coordinates, get_remin_even_less, ReconstructionDataPoint};
+use crate::plotting::{get_remin_even_less, ReconstructionDataPoint};
 use log::debug;
 use plotters::prelude::*;
 use std::error::Error;
@@ -20,8 +20,14 @@ pub fn run_spatial_plots(
 
     if grid == 350 {
         even_less =
-            format!("{path_to_root}/even_less/{name}_prob100.0_uniform_50x350_even_less.json");
-        remin_path = format!("{path_to_root}/remin/{name}_prob100.0_uniform_50x350_classic.json");
+            format!("{path_to_root}/even_less/{name}_prob100.0_uniform_350x50_even_less.json");
+        remin_path = format!("{path_to_root}/remin/{name}_prob100.0_uniform_350x50_classic.json");
+        limits = format!("{path_to_root}/limits/{name}_uniform_e0_d0.9_reconstruction.json");
+    }
+    if grid == 175 {
+        even_less =
+            format!("{path_to_root}/even_less/{name}_prob100.0_uniform_175x25_even_less.json");
+        remin_path = format!("{path_to_root}/remin/{name}_prob100.0_uniform_175x25_classic.json");
         limits = format!("{path_to_root}/limits/{name}_uniform_e0_d0.9_reconstruction.json");
     }
 

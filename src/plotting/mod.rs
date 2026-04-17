@@ -127,11 +127,12 @@ pub fn do_plotting() {
     // do JSUT 350x50 spitz stuff
     let datasets = vec!["spitz"];
     let grid = (350, 50);
-    run_spatial_plots("spitz", &datasets, "databases/50x350", 350).expect("SPITZ DIRECT FAILED!");
+    run_spatial_plots("spitz", &datasets, "databases/350x50", 350).expect("SPITZ DIRECT FAILED!");
+    run_spatial_plots("spitz", &datasets, "databases/175x25", 175).expect("SPITZ DIRECT FAILED!");
     do_convex_hull_plots("spitz", "databases/50x350");
 
     for dist in distributions {
-        plot_histograms_of_all_reconstructions("spitz", (50, 350), dist);
+        plot_histograms_of_all_reconstructions("spitz", (350, 50), dist);
         plot_histograms_of_all_reconstructions("cali", (50, 50), dist);
     }
 }

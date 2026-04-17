@@ -94,6 +94,23 @@ pub fn plot_grid_by_mse(
     Ok(())
 }
 
+/// Helper function to format large numbers with 'k' or 'M' suffixes.
+fn format_metric(val: f64) -> String {
+    if val == 0.0 {
+        return "0".to_string();
+    }
+    let abs_val = val.abs();
+    if abs_val >= 1_000_000_000.0 {
+        format!("{:.1}B", val / 1_000_000_000.0).replace(".0B", "B")
+    } else if abs_val >= 1_000_000.0 {
+        format!("{:.1}M", val / 1_000_000.0).replace(".0M", "M")
+    } else if abs_val >= 1_000.0 {
+        format!("{:.1}k", val / 1_000.0).replace(".0k", "K")
+    } else {
+        format!("{:.0}", val) // Standard whole number for anything < 1000
+    }
+}
+
 fn plot_db_side_by_side(
     db: &str,
     db_data: &HashMap<&str, HashMap<String, Vec<(u32, f64)>>>,
@@ -182,16 +199,20 @@ fn plot_db_side_by_side(
             Some(f) => f.to_uppercase().collect::<String>() + chars.as_str(),
         };
 
-        let title = format!(
-            "{} MSE by grid size ({} Query Distribution)",
-            pretty_db, pretty_dist
-        );
+        // Minimalist Title Update
+        let title = format!("{} {} Query Distribution", pretty_db, pretty_dist);
 
         let mut chart = ChartBuilder::on(area)
             .margin(40)
-            .caption(title, ("sans-serif", 28).into_font().color(&BLACK))
+            // Matched font family and weight to your previous graphs
+            .caption(
+                title,
+                ("Linux Biolinum", 32, FontStyle::Bold)
+                    .into_font()
+                    .color(&BLACK),
+            )
             .x_label_area_size(60)
-            .y_label_area_size(70)
+            .y_label_area_size(70) // Accommodates wider 'k' / 'M' labels
             .build_cartesian_2d(
                 (min_grid - x_pad)..(max_grid + x_pad),
                 (min_mse - y_pad)..(max_mse + y_pad),
@@ -205,6 +226,10 @@ fn plot_db_side_by_side(
             .axis_style(RGBColor(100, 100, 100))
             .x_desc("Grid Size")
             .y_desc("Mean Squared Error")
+            // Added formatting metrics to X and Y axes
+            .x_label_formatter(&|x| format_metric(*x))
+            .y_label_formatter(&|y| format_metric(*y))
+            // Matched font family to your previous graphs
             .label_style(("Linux Biolinum", 18).into_font())
             .draw()?;
 
@@ -247,7 +272,7 @@ fn plot_db_side_by_side(
             .position(SeriesLabelPosition::UpperRight)
             .background_style(RGBColor(255, 255, 255).mix(0.9))
             .border_style(RGBColor(200, 200, 200))
-            .label_font(("sans-serif", 16))
+            .label_font(("Linux Biolinum", 16)) // Matched font family here as well
             .margin(10)
             .draw()?;
     }

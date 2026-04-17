@@ -70,25 +70,12 @@ pub fn lama_attack(
     debug!("Using eps: {}, delta: {}", eps, delt);
 
     let (low_pair, high_pair) = loaded_db.get_dom_pair();
-    let binding = loaded_db.get_universe();
+
     let largest_possible_val: i64 = flatten_nd(&high_pair, &high_pair, &low_pair);
 
     let selector = Selector::new(dist, &loaded_db, *eps, *delt);
 
     info!("Selector computing values");
-
-    let _obs_t1: HashMap<u64, Vec<Vec<i64>>>;
-
-    info!("Computing Observed frequencies -> 1 tuple");
-    if *eps == 0.0 {
-        //obs_t1 = selector.precompute_perfect_t_observed(1);
-    } else {
-        // empirical VC/calc required samples for this eps/delta
-        todo!();
-    }
-
-    info!("Computing True Probabilities -> 1 tuple");
-    let _query_dist_over_one = selector.build_theoretical_t_dict(1);
 
     let mut translator = Translator::new(largest_possible_val, loaded_db.get_universe());
 
@@ -194,6 +181,11 @@ pub fn lama_attack(
         &format!("{full_datapath}/limits"),
         &unique_name,
         &loaded_db,
+    );
+
+    info!(
+        "LAMa completely finished in {}",
+        end.duration_since(start).as_secs_f64()
     );
 
     let final_res = DbResult {

@@ -14,3 +14,13 @@ pub fn format_db_name(db: &str) -> &str {
         _ => db,
     }
 }
+
+pub fn format_dist_name(dist: &str) -> &str {
+    match dist {
+        "uniform" => "Uniform",
+        "gaussian" => "Gaussian",
+        "beta" => "Beta",
+        "flat" => "Flattened",
+        _ => dist,
+    }
+}

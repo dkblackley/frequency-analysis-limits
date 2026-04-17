@@ -2,6 +2,7 @@ use crate::plotting::two_d::mse_by_all_reconstructions::plot_histograms_of_all_r
 use crate::plotting::two_d::mse_vs_grid_size::plot_grid_by_mse;
 use crate::plotting::two_d::spatial_plot::run_spatial_plots;
 use crate::plotting::two_d::worst_case_convex_hull::do_convex_hull_plots;
+use log::warn;
 use serde::{Deserialize, Serialize};
 use std::error::Error;
 use std::fs;
@@ -81,7 +82,7 @@ fn load_limits_method(path: &str) -> Result<Vec<Vec<ReconstructionDataPoint>>, B
 
 pub fn do_plotting() {
     // Hardcoded vectors for easy modification
-    // let grid_sizes = vec![(25, "25x25"), (50, "50x50"), (75, "75x75")];
+    // let grid_sizes = vec![(20, "20x20"), (25, "25x25"), (50, "50x50")];
     // let grid_sizes = vec![(25, "25x25"), (50, "50x50")];
     let datasets = vec!["shopparis", "busstop", "cali", "drink", "highway", "spitz"];
     let methods = vec!["even_less", "remin", "limits"];
@@ -97,8 +98,20 @@ pub fn do_plotting() {
         .map(|n| (n, format!("{}x{}", n, n)))
         .collect();
 
-    // Do spatial plots
-    run_spatial_plots(&datasets, "databases/50x50", 50);
+    for grid in &grid_sizes {
+        for name in &datasets {
+            let data = format!("databases/{}x{}", grid.0, grid.0);
+            let res = run_spatial_plots(name, &datasets, &*data, grid.0);
+
+            match res {
+                Ok(_) => {}
+
+                Err(e) => {
+                    warn!("{name} failed when loaded from {data}:  {e}")
+                }
+            }
+        }
+    }
 
     plot_grid_by_mse(&grid_sizes, &datasets, &methods, &distributions).unwrap();
     // do_table_plot(
@@ -114,16 +127,21 @@ pub fn do_plotting() {
     // do JSUT 350x50 spitz stuff
     let datasets = vec!["spitz"];
     let grid = (350, 50);
-    run_spatial_plots(&datasets, "databases/50x350", 350);
+    run_spatial_plots("spitz", &datasets, "databases/50x350", 350).expect("SPITZ DIRECT FAILED!");
     do_convex_hull_plots("spitz", "databases/50x350");
 
-    // this takes a long time to run...
-    plot_histograms_of_all_reconstructions();
+    for dist in distributions {
+        plot_histograms_of_all_reconstructions("spitz", (50, 350), dist);
+        plot_histograms_of_all_reconstructions("cali", (50, 50), dist);
+    }
 }
 
-fn get_remin_even_less(recon_path: &str, procrustes: bool) -> (Vec<Vec<f64>>, Vec<Vec<f64>>) {
-    let content = fs::read_to_string(recon_path).unwrap();
-    let mut data: Vec<ReconstructionDataPoint> = serde_json::from_str(&content).unwrap();
+fn get_remin_even_less(
+    recon_path: &str,
+    procrustes: bool,
+) -> Result<(Vec<Vec<f64>>, Vec<Vec<f64>>), Box<dyn Error>> {
+    let content = fs::read_to_string(recon_path)?;
+    let mut data: Vec<ReconstructionDataPoint> = serde_json::from_str(&content)?;
 
     if procrustes {
         let aligned = post::procrustes_align(&*data, true, true, true);
@@ -138,5 +156,5 @@ fn get_remin_even_less(recon_path: &str, procrustes: bool) -> (Vec<Vec<f64>>, Ve
         recon_point.push(point.reconstructed_points);
     }
 
-    return (true_point, recon_point);
+    return Ok((true_point, recon_point));
 }

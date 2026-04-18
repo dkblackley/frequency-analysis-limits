@@ -4,6 +4,7 @@ use frequency_analysis_limits::plotting::post::{
 };
 use frequency_analysis_limits::plotting::{do_plotting, ReconstructionDataPoint};
 use frequency_analysis_limits::LAMA::lama_attack;
+use log::__private_api::Value;
 use log::{debug, info};
 use std::fs;
 use std::fs::File;
@@ -50,6 +51,9 @@ pub struct Args {
     #[arg(long, default_value = "5")]
     dim: usize,
 
+    #[arg(long, default_value = "0")]
+    padding: i64,
+
     #[arg(long, default_value = "uniform")]
     dist: String,
 
@@ -87,6 +91,7 @@ fn main() {
             &args.dist,
             &args.t,
             &args.dim,
+            &args.padding,
             &args.save,
             &args.eps,
             &args.delta,

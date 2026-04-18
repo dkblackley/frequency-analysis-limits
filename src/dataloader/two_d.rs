@@ -9,8 +9,8 @@ use std::io::BufReader;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Location {
-    longitude: f64,
-    latitude: f64,
+    pub longitude: f64, // this is X axis
+    pub latitude: f64,  // this is y-axis
 }
 
 #[derive(Debug)]
@@ -185,7 +185,12 @@ impl TwoDMap {
     /// Initializes a map from exact integer locations, preserving the offset to [0,0]
     /// and deduplicating, but applying no scaling factors.
     /// Flags the `scale` field as -1.0 for downstream decryption handlers.
-    pub fn new_unscaled(locations: Vec<Location>, name: &str) -> Result<Self, std::io::Error> {
+    pub fn new_unscaled(
+        locations: Vec<Location>,
+        name: &str,
+        x_pad: Value,
+        y_pad: Value,
+    ) -> Result<Self, std::io::Error> {
         info!("Loaded Unscaled DB {name}");
 
         // 1. Extract values directly without scaling
@@ -220,30 +225,37 @@ impl TwoDMap {
 
         let offset = vec![true_lower[0], true_lower[1]];
         let lower = [0, 0];
-        // Calculate shifted upper bounds relative to 0
-        let upper = [true_upper[0] - offset[0], true_upper[1] - offset[1]];
+
+        // 3. Calculate shifted upper bounds relative to 0 AND apply the padding
+        let upper = [
+            (true_upper[0] - offset[0]) + x_pad,
+            (true_upper[1] - offset[1]) + y_pad,
+        ];
 
         let mut encrypted_db = Vec::new();
         let mut unique_points = HashSet::new();
 
-        // 3. Shift the points to 0,0 and deduplicate using your flatten_nd logic
+        // 4. Shift the points to 0,0 and deduplicate using your flatten_nd logic
         for p in raw_points {
             let shifted_x = p[0] - offset[0];
             let shifted_y = p[1] - offset[1];
 
+            // Because 'upper' is now padded, the resulting flat_point is automatically adjusted
             let flat_point = flatten_nd(&[shifted_x, shifted_y], &upper, &lower);
             if unique_points.insert(flat_point) {
                 encrypted_db.push(flat_point);
             }
         }
 
-        // 4. Build the grid efficiently
+        // 5. Build the grid efficiently
         let dim_x = (upper[0] - lower[0]) as usize + 1;
         let dim_y = (upper[1] - lower[1]) as usize + 1;
 
+        // The grid is initialized entirely with empty pads (i64::MIN)
         let mut grid = Array2::from_elem((dim_x, dim_y), i64::MIN);
         for &flat_point in &encrypted_db {
             let grid_point = unflatten_nd(flat_point, &upper, &lower);
+            // Only actual valid points get populated, leaving the padded extensions empty
             grid[[grid_point[0] as usize, grid_point[1] as usize]] = flat_point;
         }
 

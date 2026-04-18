@@ -9,7 +9,8 @@ use cp_sat::proto::SatParameters;
 use cp_sat::proto::{ConstraintProto, CpModelProto, TableConstraintProto};
 use indicatif::{ParallelProgressIterator, ProgressBar, ProgressStyle};
 use itertools::Itertools;
-use log::{debug, warn};
+use log::{debug, info, warn};
+use nalgebra::inf;
 use rand::rngs::StdRng;
 use rand::seq::SliceRandom;
 use rand::SeedableRng;
@@ -32,6 +33,7 @@ pub struct Translator {
 
 impl Translator {
     pub fn new(largest_val: i64, mut encrypted_records: Vec<i64>) -> Self {
+        info!("Starting");
         let mut rng = StdRng::seed_from_u64(42);
 
         // If we don't shuffle the encrypted records, the first reconstruction found is always the
@@ -232,6 +234,83 @@ impl Translator {
         direct_map
     }
 
+    /// Pure brute-force n-choose-t evaluation.
+    /// Does not use previous round caches. Tests every possible plaintext combination.
+    pub fn process_t_brute_force<V>(
+        t: usize,
+        largest_val: i64,
+        encrypted_records: &[i64],
+        validate_candidate: V,
+    ) -> (CpModelProto, HashMap<IntVar, (i32, i64)>)
+    where
+        V: Fn(&[i64], &[i64]) -> bool + Sync + Send,
+    {
+        info!("Processing t={} directly", t);
+        let mut cp_model = CpModelBuilder::default();
+        let (var_index_map, enc_id_to_intvar) =
+            Self::set_all_vars(&mut cp_model, largest_val, Vec::from(encrypted_records));
+
+        let mut raw_model = cp_model.proto().clone();
+        // 1. Generate ALL n choose t combinations of the encrypted records
+        let enc_combinations: Vec<Vec<i64>> =
+            encrypted_records.iter().copied().combinations(t).collect();
+
+        let pb = ProgressBar::new(enc_combinations.len() as u64);
+        pb.set_style(
+            ProgressStyle::default_bar()
+                .template("{spinner:.green} [{elapsed_precise}] [{wide_bar:.cyan/blue}] {pos}/{len} ({eta})")
+                .unwrap()
+                .progress_chars("#>-"),
+        );
+
+        // 2. Brute-force evaluate all possible plaintexts for every tuple
+        // (Using par_iter because this search space is huge)
+        let t_table_constraints: Vec<(Vec<i64>, Vec<Vec<i64>>)> = enc_combinations
+            .into_par_iter()
+            .filter_map(|enc_tuple| {
+                let mut valid_plaintexts = Vec::new();
+
+                // Create a cartesian product of 0..=upper for 't' dimensions
+                let domains: Vec<_> = (0..t).map(|_| 0..=largest_val).collect();
+
+                for pt_tuple in domains.into_iter().multi_cartesian_product() {
+                    if validate_candidate(&enc_tuple, &pt_tuple) {
+                        valid_plaintexts.push(pt_tuple);
+                    }
+                }
+
+                pb.inc(1);
+
+                // 2. If the closure found valid matches, keep them
+                if valid_plaintexts.is_empty() {
+                    None
+                } else {
+                    Some((enc_tuple, valid_plaintexts))
+                }
+            })
+            .collect();
+
+        for (enc_t_tuple, valid_assignments) in &t_table_constraints {
+            let main_vars: Vec<_> = enc_t_tuple
+                .iter()
+                .map(|rec| *enc_id_to_intvar.get(rec).unwrap())
+                .collect();
+
+            Self::add_allowed_assignments(
+                &mut raw_model,
+                &main_vars,
+                &valid_assignments,
+                &var_index_map,
+            );
+        }
+
+        pb.finish_with_message(format!("Finished finding tuples for t={}", t));
+
+        debug!("Done with pure brute-force for t={}", t);
+
+        (raw_model, var_index_map)
+    }
+
     /// Helper for building allowed candidate tables in parallel and running ONE global CP-SAT solve.
     /// Returns an Option containing a tuple:
     /// 1. The ordered list of the unique global variables used in the model.
@@ -368,6 +447,7 @@ impl Translator {
         params.enumerate_all_solutions = Some(true);
         params.fill_additional_solutions_in_response = Some(true);
         params.solution_pool_size = Some(self.upper as i32);
+        params.keep_all_feasible_solutions_in_presolve = Some(true);
         // Since this is a global solve, the solution pool needs to be reasonably bounded or omitted.
         // We'll leave it to the defaults or handle it purely through the 'enumerate_all_solutions' flag.
 

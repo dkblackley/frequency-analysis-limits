@@ -31,6 +31,7 @@ pub fn lama_attack(
     dist: &String,
     t: &u64,
     dim: &usize,
+    padding: &Value,
     _save: &bool,
     eps: &f64,
     delt: &f64,
@@ -56,7 +57,9 @@ pub fn lama_attack(
             TwoDMap::load_array_locations_from_file(&format!("{full_datapath}/{db_name}.json"))
                 .unwrap();
 
-        loaded_db = Box::new(TwoDMap::new_unscaled(loaded_locs, db_name.as_str()).unwrap());
+        loaded_db = Box::new(
+            TwoDMap::new_unscaled(loaded_locs, db_name.as_str(), *padding, *padding).unwrap(),
+        );
     }
 
     debug!(

@@ -26,9 +26,9 @@ pub fn plot_histograms_of_all_reconstructions(
     // let scale_step = 5.0;
     // let rotate = 5.0;
 
-    let shift_step = 2.0;
-    let scale_step = 2.0;
-    let rotate = 15.0;
+    let shift_step = 1.0;
+    let scale_step = 1.0;
+    let rotate = 10.0;
 
     let path = format!("{path_to_root}/even_less/{name}_prob100.0_{dist}_{grid}_even_less.json");
     debug!("About to load data from {}", &path);

@@ -315,6 +315,81 @@ pub fn procrustes_align(
     (aligned_data, total_mse / n as f64)
 }
 
+pub fn scale_to_absolute_range(
+    data: &[ReconstructionDataPoint],
+    target_range: (f64, f64),
+) -> Vec<ReconstructionDataPoint> {
+    if data.is_empty() {
+        return Vec::new();
+    }
+
+    let (target_min, target_max) = target_range;
+    let target_spread = target_max - target_min;
+
+    // 1. Find the min and max bounds for X and Y in the reconstructed data
+    let mut min_x = f64::INFINITY;
+    let mut max_x = f64::NEG_INFINITY;
+    let mut min_y = f64::INFINITY;
+    let mut max_y = f64::NEG_INFINITY;
+
+    for p in data {
+        if p.reconstructed_points.len() >= 2 {
+            let x = p.reconstructed_points[0];
+            let y = p.reconstructed_points[1];
+
+            if x < min_x {
+                min_x = x;
+            }
+            if x > max_x {
+                max_x = x;
+            }
+            if y < min_y {
+                min_y = y;
+            }
+            if y > max_y {
+                max_y = y;
+            }
+        }
+    }
+
+    let range_x = max_x - min_x;
+    let range_y = max_y - min_y;
+
+    // 2. Map the points strictly into the [target_min, target_max] box
+    let mut scaled_data = Vec::with_capacity(data.len());
+
+    for p in data {
+        let mut new_p = p.clone(); // Clone the entire struct to preserve other fields
+
+        if new_p.reconstructed_points.len() >= 2 {
+            let x = new_p.reconstructed_points[0];
+            let y = new_p.reconstructed_points[1];
+
+            // Scale X
+            let scaled_x = if range_x > 0.0 {
+                target_min + ((x - min_x) * target_spread) / range_x
+            } else {
+                // If there's no variance, center the point in the target range
+                target_min + (target_spread / 2.0)
+            };
+
+            // Scale Y
+            let scaled_y = if range_y > 0.0 {
+                target_min + ((y - min_y) * target_spread) / range_y
+            } else {
+                target_min + (target_spread / 2.0)
+            };
+
+            new_p.reconstructed_points[0] = scaled_x;
+            new_p.reconstructed_points[1] = scaled_y;
+        }
+
+        scaled_data.push(new_p);
+    }
+
+    scaled_data
+}
+
 pub fn export_to_geojson(data: Vec<Vec<f64>>, output_path: &str) -> Result<(), Box<dyn Error>> {
     let mut features = Vec::new();
 
@@ -449,7 +524,6 @@ pub fn process_and_map_points(
     Ok(processed_results)
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -506,6 +580,60 @@ mod tests {
                 "Y mismatch: true {}, aligned {}",
                 p.true_points[1],
                 p.reconstructed_points[1]
+            );
+        }
+    }
+    #[test]
+    fn test_scale_to_absolute_range() {
+        // 1. Create mock data with values wildly outside the 0.0 - 50.0 range
+        let mock_data = vec![
+            ReconstructionDataPoint {
+                true_points: vec![],
+                reconstructed_points: vec![-999.0, 5000.0],
+                unscaled_points: None,
+            },
+            ReconstructionDataPoint {
+                true_points: vec![],
+                reconstructed_points: vec![1234.5, -42.0],
+                unscaled_points: None,
+            },
+            ReconstructionDataPoint {
+                true_points: vec![],
+                reconstructed_points: vec![0.0, 0.0],
+                unscaled_points: None,
+            },
+        ];
+
+        let target_min = 0.0;
+        let target_max = 50.0;
+        let target_range = (target_min, target_max);
+
+        // 2. Scale the data
+        let scaled_data = scale_to_absolute_range(&mock_data, target_range);
+
+        // 3. Verify the output
+        // We use a tiny epsilon to account for f64 floating-point inaccuracies
+        let epsilon = 1e-10;
+
+        for (i, p) in scaled_data.iter().enumerate() {
+            let x = p.reconstructed_points[0];
+            let y = p.reconstructed_points[1];
+
+            // Print the points to the console when running `cargo test -- --nocapture`
+            println!("Point {}: X = {}, Y = {}", i, x, y);
+
+            assert!(
+                x >= target_min - epsilon && x <= target_max + epsilon,
+                "Point {} X value ({}) is out of bounds!",
+                i,
+                x
+            );
+
+            assert!(
+                y >= target_min - epsilon && y <= target_max + epsilon,
+                "Point {} Y value ({}) is out of bounds!",
+                i,
+                y
             );
         }
     }

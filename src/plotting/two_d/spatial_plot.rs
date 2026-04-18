@@ -59,6 +59,7 @@ pub fn run_spatial_plots(
 
     data_map.insert("even_less".to_string(), even_less_data.1.clone());
     data_map.insert("remin".to_string(), remin_data.1);
+    // TODO: Sample an item from limits and use procrustes?
     data_map.insert("limits".to_string(), even_less_data.0.clone());
 
     plot_spatial_reconstruction(
@@ -68,7 +69,7 @@ pub fn run_spatial_plots(
         &data_map,
         &format!("{path_to_root}/{name}_{dist}_spatial_comparison.svg"),
         true,
-        0.2,
+        0.0,
         0.0,
     )?;
 

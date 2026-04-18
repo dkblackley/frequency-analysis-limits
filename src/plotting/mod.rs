@@ -1,8 +1,9 @@
+use crate::plotting::post::{calculate_mse, scale_to_absolute_range};
 use crate::plotting::two_d::mse_by_all_reconstructions::plot_histograms_of_all_reconstructions;
 use crate::plotting::two_d::mse_vs_grid_size::plot_grid_by_mse;
 use crate::plotting::two_d::spatial_plot::run_spatial_plots;
 use crate::plotting::two_d::worst_case_convex_hull::do_convex_hull_plots;
-use log::warn;
+use log::{info, warn};
 use serde::{Deserialize, Serialize};
 use std::error::Error;
 use std::fs;
@@ -84,7 +85,8 @@ pub fn do_plotting() {
     // Hardcoded vectors for easy modification
     // let grid_sizes = vec![(20, "20x20"), (25, "25x25"), (50, "50x50")];
     // let grid_sizes = vec![(25, "25x25"), (50, "50x50")];
-    let datasets = vec!["shopparis", "busstop", "cali", "drink", "highway", "spitz"];
+    // let datasets = vec!["shopparis", "busstop", "cali", "drink", "highway", "spitz"];
+    let datasets = vec!["shopparis"];
     let methods = vec!["even_less", "remin", "limits"];
     let distributions = vec!["uniform", "gaussian", "beta"];
 
@@ -93,10 +95,11 @@ pub fn do_plotting() {
         .map(|n| format!("databases/{}x{}", n, n))
         .collect();
 
-    let grid_sizes: Vec<(u32, String)> = (20..=50)
+    let mut grid_sizes: Vec<(u32, String)> = (20..=50)
         .step_by(10)
         .map(|n| (n, format!("{}x{}", n, n)))
         .collect();
+    grid_sizes = vec![(50, "50x50".parse().unwrap())];
 
     for grid in &grid_sizes {
         for name in &datasets {
@@ -171,7 +174,13 @@ fn get_remin_even_less(
 
     if procrustes {
         let aligned = post::procrustes_align(&*data, true, true, true);
-        data = aligned.0;
+        let procruste = aligned.0;
+        info!("MSE After procrustes: {}", aligned.1);
+
+        data = scale_to_absolute_range(&*procruste, (0.0, 50.0));
+        let new_mse = calculate_mse(&data);
+        info!("MSE After forced scaling: {}", new_mse);
+        // data = procruste;
     }
 
     let mut true_point = Vec::new();

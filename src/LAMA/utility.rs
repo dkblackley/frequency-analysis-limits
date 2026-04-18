@@ -50,6 +50,7 @@ impl FromStr for DistributionType {
             "uniform" => Ok(DistributionType::Uniform),
             "gaussian" => Ok(DistributionType::Gaussian),
             "beta" => Ok(DistributionType::Beta),
+            "flat" => Ok(DistributionType::Flat),
             _ => Err(()),
         }
     }

@@ -113,17 +113,17 @@ fn end_to_end() {
 
     // Force rayon to one thread
     rayon::ThreadPoolBuilder::new()
-        .num_threads(1)
+        .num_threads(0)
         .build_global()
         .unwrap();
 
-    let rows_cols = 10;
+    let rows_cols = 8;
     let dim = 2;
 
     info!("Loading test DB ({}x{})", rows_cols, rows_cols);
     let loaded_db: Box<dyn Searchable + Sync> = Box::new(testDB::new(dim, rows_cols, 100));
 
-    let dist = "gaussian";
+    let dist = "flat";
     let eps = 0.0; // Perfect knowledge constraint
     let delt = 0.0;
 

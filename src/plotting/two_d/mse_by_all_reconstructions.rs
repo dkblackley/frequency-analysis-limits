@@ -2,15 +2,13 @@ use crate::plotting::post::{calculate_mse, procrustes_align};
 use crate::plotting::two_d::{format_db_name, format_dist_name};
 use crate::plotting::ReconstructionDataPoint;
 use indicatif::ParallelProgressIterator;
-use itertools::{iproduct, max};
+use itertools::iproduct;
 use log::debug;
 use plotters::prelude::*;
 use plotters::style::FontStyle;
 use rayon::prelude::*;
-use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::error::Error;
-use std::fmt::format;
 use std::fs;
 
 pub fn plot_histograms_of_all_reconstructions(

@@ -24,7 +24,7 @@ fn quick_convert(file_path: &str, out_path: &str) {
 }
 
 pub fn export_to_geo_and_align(
-    dir: &str,
+    _dir: &str,
     remin_path: &str,
     less_path: &str,
     unique_name: &str,

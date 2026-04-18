@@ -1,18 +1,16 @@
-use crate::dataloader::{flatten_nd, unflatten_nd, Searchable};
+use crate::dataloader::{unflatten_nd, Searchable};
 use crate::LAMA::utility::{get_mbq, DistributionType};
 // Adjust imports as necessary for DomPair
 use crate::{Coord, DomPair, Probability, Record, Value};
-use indicatif::{ParallelProgressIterator, ProgressBar, ProgressStyle};
-use itertools::{all, Itertools};
+use indicatif::ParallelProgressIterator;
+use itertools::Itertools;
 use log::{debug, error, info};
 use plotters::prelude::*;
 use rand::distributions::WeightedIndex;
 use rayon::prelude::*;
 use rustc_hash::FxHashMap;
 use statrs::distribution::{Beta, Continuous, Normal};
-use std::arch::x86_64::_load_mask16;
 use std::collections::{HashMap, HashSet};
-use std::sync::atomic::AtomicU64;
 
 pub struct QueryDistribution<'a> {
     encrypted_db: &'a Box<dyn Searchable + Sync>,
@@ -44,8 +42,8 @@ impl<'a> QueryDistribution<'a> {
                 DistributionType::Flat => Self::new_flat(&pairs, encrypted_db),
             };
 
-        let mut mbq_to_cumulative_prob = FxHashMap::default();
-        let mut probs_and_dom_pairs = Vec::with_capacity(pairs.len());
+        let mbq_to_cumulative_prob = FxHashMap::default();
+        let probs_and_dom_pairs = Vec::with_capacity(pairs.len());
 
         info!("Computing true cumulative probabilities for every MBQ");
 
@@ -165,7 +163,7 @@ impl<'a> QueryDistribution<'a> {
         largest_rec: &[Value],
         dom_pair_to_known_prob: &FxHashMap<DomPair, f64>,
         //dom_pair_slice: &[(DomPair, f64)], // Now a sorted flat slice
-        total_weight: f64,
+        _total_weight: f64,
     ) -> f64 {
         match dist {
             DistributionType::Uniform => {
@@ -373,7 +371,7 @@ impl<'a> QueryDistribution<'a> {
 
     pub fn new_flat(
         pairs: &[DomPair],
-        encrypted_db: &'a Box<(dyn Searchable + Sync + 'static)>,
+        encrypted_db: &'a Box<dyn Searchable + Sync + 'static >,
     ) -> (
         Vec<(f64, DomPair)>,
         WeightedIndex<f64>,
@@ -383,7 +381,7 @@ impl<'a> QueryDistribution<'a> {
     ) {
         debug!("Making internal QD for flatten");
         let old_qd = Self::new(Vec::from(pairs), encrypted_db, DistributionType::Uniform);
-        let mapping_old = old_qd.dom_pair_to_known_prob.clone();
+        let _mapping_old = old_qd.dom_pair_to_known_prob.clone();
         let mut mapping = old_qd.dom_pair_to_known_prob;
         let total_old = old_qd.total_weight;
         let mut total_weight = total_old;
@@ -481,7 +479,7 @@ impl<'a> QueryDistribution<'a> {
                 let old_weight = mapping.get(&mbq).unwrap();
                 debug_res.insert(d, (mbq.clone(), mapping.clone()));
                 mapping.insert(mbq.clone(), *old_weight + (smx - st));
-                total_weight += (smx - st);
+                total_weight += smx - st ;
             }
         }
 

@@ -8,7 +8,7 @@ use crate::LAMA::query::QueryDistribution;
 use crate::LAMA::selector::Selector;
 use crate::LAMA::solver::Solver;
 use crate::LAMA::translator::Translator;
-use crate::LAMA::utility::{check_isomorphism, get_mbq};
+use crate::LAMA::utility::get_mbq;
 use crate::{Frequency, Record, Value};
 use cp_sat::proto::CpSolverStatus;
 use log::{debug, error, info, warn};

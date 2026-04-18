@@ -1,14 +1,8 @@
 use clap::Parser;
-use frequency_analysis_limits::plotting::post::{
-    export_to_geo_and_align, export_to_geojson, process_and_map_points, procrustes_align,
-};
-use frequency_analysis_limits::plotting::{do_plotting, ReconstructionDataPoint};
+use frequency_analysis_limits::plotting::post::export_to_geo_and_align;
+use frequency_analysis_limits::plotting::do_plotting;
 use frequency_analysis_limits::LAMA::lama_attack;
-use log::__private_api::Value;
 use log::{debug, info};
-use std::fs;
-use std::fs::File;
-use std::io::{BufReader, Write};
 
 // Helps rayon when calling malloc
 #[global_allocator]

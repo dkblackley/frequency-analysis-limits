@@ -1,23 +1,18 @@
 use crate::Value;
-use crate::LAMA::utility::binomial_coefficient;
 use cp_sat::builder::{CpModelBuilder, IntVar};
 use cp_sat::proto::constraint_proto::Constraint;
 use cp_sat::proto::CpSolverStatus;
-use cp_sat::proto::IntegerVariableProto;
 use cp_sat::proto::LinearExpressionProto;
 use cp_sat::proto::SatParameters;
 use cp_sat::proto::{ConstraintProto, CpModelProto, TableConstraintProto};
-use indicatif::{ParallelProgressIterator, ProgressBar, ProgressStyle};
+use indicatif::{ProgressBar, ProgressStyle};
 use itertools::Itertools;
 use log::{debug, info, warn};
-use nalgebra::inf;
 use rand::rngs::StdRng;
 use rand::seq::SliceRandom;
 use rand::SeedableRng;
 use rayon::prelude::*;
-use rustc_hash::FxHashMap;
 use std::collections::{HashMap, HashSet};
-use std::sync::atomic::{AtomicUsize, Ordering};
 
 /// Translator: One Formula from All Matching Pairs.
 pub struct Translator {
@@ -512,7 +507,7 @@ impl Translator {
                 .collect();
 
             // 2. Project every global solution down to just this tuple's variables.
-            let mut surviving_assignments: Vec<Vec<i64>> = all_global_solutions
+            let surviving_assignments: Vec<Vec<i64>> = all_global_solutions
                 .iter()
                 .map(|global_sol| solver_indices.iter().map(|&idx| global_sol[idx]).collect())
                 .collect();

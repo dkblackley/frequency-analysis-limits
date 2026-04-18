@@ -2,7 +2,6 @@ use crate::plotting::post::{calculate_mse, scale_to_absolute_range};
 use crate::plotting::two_d::mse_by_all_reconstructions::plot_histograms_of_all_reconstructions;
 use crate::plotting::two_d::mse_vs_grid_size::plot_grid_by_mse;
 use crate::plotting::two_d::spatial_plot::run_spatial_plots;
-use crate::plotting::two_d::worst_case_convex_hull::do_convex_hull_plots;
 use log::{info, warn};
 use serde::{Deserialize, Serialize};
 use std::error::Error;
@@ -90,7 +89,7 @@ pub fn do_plotting() {
     let methods = vec!["even_less", "remin", "limits"];
     let distributions = vec!["uniform", "gaussian", "beta"];
 
-    let databases: Vec<String> = (20..=50)
+    let _databases: Vec<String> = (20..=50)
         .step_by(5)
         .map(|n| format!("databases/{}x{}", n, n))
         .collect();
@@ -131,11 +130,11 @@ pub fn do_plotting() {
     // );
 
     let dir = "databases/350x50";
-    let name = "spitz";
+    let _name = "spitz";
 
     // do JSUT 350x50 spitz stuff
     //let datasets = vec!["spitz"];
-    let grid = (350, 50);
+    let _grid = (350, 50);
     run_spatial_plots("spitz", "databases/350x50", "uniform", 350).expect("SPITZ DIRECT FAILED!");
     // run_spatial_plots("spitz", &datasets, "databases/175x25", 175).expect("SPITZ DIRECT FAILED!");
     // do_convex_hull_plots("spitz", "databases/50x350");

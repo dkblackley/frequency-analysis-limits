@@ -53,7 +53,7 @@ pub fn run_spatial_plots(
         recon_point.push(point.reconstructed_points);
     }
 
-    let limits_data = (true_point, recon_point);
+    let _limits_data = (true_point, recon_point);
 
     let mut data_map = HashMap::new();
 

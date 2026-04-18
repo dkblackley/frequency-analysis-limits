@@ -3,7 +3,7 @@ use cp_sat::ffi;
 use cp_sat::proto::CpSolverStatus;
 use cp_sat::proto::{CpModelProto, CpSolverSolution, SatParameters};
 use indicatif::{ProgressBar, ProgressStyle};
-use log::{debug, error, info, warn};
+use log::{debug, error, info};
 use std::collections::HashMap;
 
 /// Solver Reconstruction as Constraint-Satisfaction.

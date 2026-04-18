@@ -8,20 +8,11 @@ use frequency_analysis_limits::dataloader::{flatten_nd, unflatten_nd, Searchable
 use frequency_analysis_limits::LAMA::query::QueryDistribution;
 use frequency_analysis_limits::LAMA::solver::Solver;
 use frequency_analysis_limits::LAMA::utility::get_mbq;
-use frequency_analysis_limits::{DomPair, Probability, Value};
+use frequency_analysis_limits::Value;
 use frequency_analysis_limits::{Frequency, Record};
-use log::{debug, error, info, warn};
-use num_rational::Ratio;
-use rand::rngs::StdRng;
-use rand::seq::SliceRandom;
-use rand::SeedableRng;
-use serde_json::to_string;
-use sha2::{Digest, Sha256};
-use std::collections::hash_map::Entry;
+use log::{error, info};
+use sha2::Digest;
 use std::collections::HashMap;
-use std::hash::{DefaultHasher, Hash, Hasher};
-use std::io::BufReader;
-use tempfile::NamedTempFile;
 
 /// Maps points to unique IDs, bounds is the largest possible val
 pub fn bounded_hyperrectangle_id(coords: &[u64], bounds: &[u64]) -> u64 {
@@ -430,7 +421,7 @@ fn end_to_end() {
         || (dist == "gaussian" && responses[&0].len() < 1)
     {
         // minimum number of expected reconstructions
-        let freq_to_t_tuple: HashMap<(Value, Frequency), Vec<Vec<Value>>> =
+        let _freq_to_t_tuple: HashMap<(Value, Frequency), Vec<Vec<Value>>> =
             selector.get_freq_val_t_tup_dict(2).unwrap();
 
         error!("FATAL: Solver failed to reconstruct full universe!!");

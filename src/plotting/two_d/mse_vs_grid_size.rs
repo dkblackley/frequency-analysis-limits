@@ -196,7 +196,7 @@ fn plot_db_side_by_side(
         ChartBuilder::on(&centered_title_area)
             .caption(
                 title,
-                ("Linux Biolinum", 58, FontStyle::Bold)
+                ("Linux Biolinum", 64, FontStyle::Bold)
                     .into_font()
                     .color(&BLACK),
             )
@@ -221,7 +221,7 @@ fn plot_db_side_by_side(
             .axis_style(RGBColor(100, 100, 100))
             .x_desc("Grid Size")
             .y_desc("Mean Squared Error")
-            .axis_desc_style(("Linux Biolinum", 72, FontStyle::Bold).into_font()) // Bold axis text
+            .axis_desc_style(("Linux Biolinum", 60, FontStyle::Bold).into_font()) // Bold axis text
             .x_label_formatter(&|x| format_metric(*x))
             .y_label_formatter(&|y| {
                 if *y <= 1.001 {
@@ -231,7 +231,7 @@ fn plot_db_side_by_side(
                     format_metric(*y)
                 }
             })
-            .label_style(("Linux Biolinum", 62).into_font()) // Bold axis tick numbers
+            .label_style(("Linux Biolinum", 54).into_font()) // Bold axis tick numbers
             .draw()?;
 
         // Grab the methods and explicitly map them to their formatted name and rank order
@@ -286,7 +286,7 @@ fn plot_db_side_by_side(
             // I've added the solid background back here, but you can leave it TRANSPARENT if you prefer!
             .background_style(RGBColor(255, 255, 255).mix(0.9))
             .border_style(RGBColor(200, 200, 200))
-            .label_font(("Linux Biolinum", 38, FontStyle::Bold).into_font())
+            .label_font(("Linux Biolinum", 40, FontStyle::Bold).into_font())
             .margin(10)
             .draw()?;
     }

@@ -80,10 +80,17 @@ pub fn lama_attack(
     debug!("Using eps: {}, delta: {}", eps, delt);
 
     let (low_pair, high_pair) = loaded_db.get_dom_pair();
-
     let largest_possible_val: i64 = flatten_nd(&high_pair, &high_pair, &low_pair);
-
     let selector = Selector::new(dist, &loaded_db, *eps, *delt);
+
+    debug!(
+        "Working with padding: {}, low_pair: {:?}, high_pair: {:?}",
+        padding, low_pair, high_pair
+    );
+    debug!(
+        "Largest possible value is {largest_possible_val}, working with {} dompairs",
+        selector.query_distribution.dom_pair_to_known_prob.len()
+    );
 
     info!("Selector computing values");
 
@@ -102,14 +109,16 @@ pub fn lama_attack(
 
         // Use the native cumulative probability directly
         //query_dist_ref.get_cumulative_prob(&dom_pair)
-        QueryDistribution::compute_cumulative_prob(
-            &dom_pair,
-            &query_dist_ref.dist,
-            &*query_dist_ref.lowest_rec,
-            &*query_dist_ref.largest_rec,
-            &query_dist_ref.dom_pair_to_known_prob,
-            query_dist_ref.total_weight,
-        )
+        // QueryDistribution::compute_cumulative_prob(
+        //     &dom_pair,
+        //     &query_dist_ref.dist,
+        //     &*query_dist_ref.lowest_rec,
+        //     &*query_dist_ref.largest_rec,
+        //     &query_dist_ref.dom_pair_to_known_prob,
+        //     query_dist_ref.total_weight,
+        // )
+
+        query_dist_ref.cumulative_prob_lookup(&dom_pair)
     };
 
     // 2. Expected (true) probability of proposed plaintexts
@@ -121,14 +130,16 @@ pub fn lama_attack(
         let pt_mbq = get_mbq(&pt_records);
 
         // Use the native cumulative probability directly
-        QueryDistribution::compute_cumulative_prob(
-            &pt_mbq,
-            &query_dist_ref.dist,
-            &*query_dist_ref.lowest_rec,
-            &*query_dist_ref.largest_rec,
-            &query_dist_ref.dom_pair_to_known_prob,
-            query_dist_ref.total_weight,
-        )
+        // QueryDistribution::compute_cumulative_prob(
+        //     &pt_mbq,
+        //     &query_dist_ref.dist,
+        //     &*query_dist_ref.lowest_rec,
+        //     &*query_dist_ref.largest_rec,
+        //     &query_dist_ref.dom_pair_to_known_prob,
+        //     query_dist_ref.total_weight,
+        // )
+
+        query_dist_ref.cumulative_prob_lookup(&pt_mbq)
     };
 
     // if in the 'perfect' world only use things within 0.01\% of the true

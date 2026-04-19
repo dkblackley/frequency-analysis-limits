@@ -383,11 +383,11 @@ pub fn plot_mse_frequency_histogram_split(
     let num_bins = 8;
 
     // Typography
-    let label_font = (font_family, 60).into_font().color(&text_color);
-    let axis_font = (font_family, 60, FontStyle::Bold)
+    let label_font = (font_family, 66).into_font().color(&text_color);
+    let axis_font = (font_family, 56, FontStyle::Bold)
         .into_font()
         .color(&text_color);
-    let title_font = (font_family, 66, FontStyle::Bold)
+    let title_font = (font_family, 72, FontStyle::Bold)
         .into_font()
         .color(&text_color);
 
@@ -457,7 +457,7 @@ pub fn plot_mse_frequency_histogram_split(
         let max_y = ((local_max_freq as f64 * 1.1).ceil() as usize).max(1);
 
         // Expanded label area to fix Y-axis overlap
-        let y_label_area = if *method == "LAMa" { 80 } else { 130 };
+        let y_label_area = if *method == "LAMa" { 90 } else { 140 };
 
         // Render Chart
         let mut chart = ChartBuilder::on(panel)
@@ -466,7 +466,7 @@ pub fn plot_mse_frequency_histogram_split(
             .margin_left(50)
             .margin_right(50)
             .caption(*method, title_font.clone())
-            .x_label_area_size(100)
+            .x_label_area_size(110)
             .y_label_area_size(y_label_area)
             // THE FIX: Fake the X-axis domain to be perfectly 0.0 to 8.0
             // Plotters will effortlessly align ticks to exactly 0, 1, 2, etc.
@@ -476,6 +476,7 @@ pub fn plot_mse_frequency_histogram_split(
             .configure_mesh()
             .disable_x_mesh()
             .x_labels(num_bins)
+            .y_labels(6)
             .y_desc("Number of Solutions")
             .x_desc("Mean Squared Error (MSE)")
             .x_label_formatter(&|x| {

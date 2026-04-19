@@ -42,42 +42,42 @@ impl<'a> QueryDistribution<'a> {
                 DistributionType::Flat => Self::new_flat(&pairs, encrypted_db),
             };
 
-        let mbq_to_cumulative_prob = FxHashMap::default();
-        let probs_and_dom_pairs = Vec::with_capacity(pairs.len());
+        let mut mbq_to_cumulative_prob = FxHashMap::default();
+        let mut probs_and_dom_pairs = Vec::with_capacity(pairs.len());
 
         info!("Computing true cumulative probabilities for every MBQ");
 
         // Compute the True CUMULATIVE probability for every possible MBQ
-        // let computed_results: Vec<_> = pairs
-        //     .par_iter()
-        //     .progress() // Attaches the indicatif progress bar to Rayon
-        //     .map(|pair| {
-        //         let cum_prob = Self::compute_cumulative_prob(
-        //             pair,
-        //             &dist, // Note: `dist`, `lowest_rec`, etc. must implement `Sync`
-        //             &lowest_rec,
-        //             &largest_rec,
-        //             &dom_pair_to_known_prob,
-        //             total_weight,
-        //         );
-        //
-        //         // let current = atom_count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        //         // if current % 1000 == 0 {
-        //         //     pb.set_position(current);
-        //         // }
-        //
-        //         // Return a tuple of references/clones needed for insertion
-        //         (pair, cum_prob)
-        //     })
-        //     .collect();
+        let computed_results: Vec<_> = pairs
+            .par_iter()
+            .progress() // Attaches the indicatif progress bar to Rayon
+            .map(|pair| {
+                let cum_prob = Self::compute_cumulative_prob(
+                    pair,
+                    &dist, // Note: `dist`, `lowest_rec`, etc. must implement `Sync`
+                    &lowest_rec,
+                    &largest_rec,
+                    &dom_pair_to_known_weight,
+                    total_weight,
+                );
+
+                // let current = atom_count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                // if current % 1000 == 0 {
+                //     pb.set_position(current);
+                // }
+
+                // Return a tuple of references/clones needed for insertion
+                (pair, cum_prob)
+            })
+            .collect();
 
         debug!("Finished computing true cumulative probabilities");
         // 3. Sequential Insertion Phase
         // Iterating over the pre-computed results to insert is virtually instantaneous.
-        // for (pair, cum_prob) in computed_results {
-        //     mbq_to_cumulative_prob.insert(pair.clone(), cum_prob);
-        //     probs_and_dom_pairs.push((cum_prob, pair.clone()));
-        // }
+        for (pair, cum_prob) in computed_results {
+            mbq_to_cumulative_prob.insert(pair.clone(), cum_prob);
+            probs_and_dom_pairs.push((cum_prob, pair.clone()));
+        }
 
         // probs_and_dom_pairs.par_sort_unstable_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
 
@@ -153,6 +153,10 @@ impl<'a> QueryDistribution<'a> {
                 true_prob / total_weight
             }
         }
+    }
+
+    pub fn cumulative_prob_lookup(&self, query: &DomPair) -> Probability {
+        self.mbq_to_cumulative_prob.get(query).unwrap().clone()
     }
 
     /// Only used for the 'flattened' dist. Returns the direct weight, not the prob.

@@ -150,7 +150,13 @@ impl Translator {
                 .progress_chars("#>-"),
         );
 
+        info!(
+            "Starting t=1, processing {} records",
+            encrypted_records.len()
+        );
+
         for &enc_id in encrypted_records {
+            pb.inc(1);
             let enc_tuple = vec![enc_id];
             let mut valid_plaintexts = Vec::new();
 
@@ -193,8 +199,6 @@ impl Translator {
                     enc_id
                 );
             }
-
-            pb.inc(1);
         }
 
         pb.finish_with_message("Finished finding tuples for t=1");

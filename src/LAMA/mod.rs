@@ -58,7 +58,13 @@ pub fn lama_attack(
                 .unwrap();
 
         loaded_db = Box::new(
-            TwoDMap::new_unscaled(loaded_locs, db_name.as_str(), *padding, *padding).unwrap(),
+            TwoDMap::new_unscaled(
+                loaded_locs,
+                db_name.as_str(),
+                (*padding, *padding),
+                (*padding, *padding),
+            )
+            .unwrap(),
         );
     }
 

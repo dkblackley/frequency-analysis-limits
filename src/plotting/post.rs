@@ -185,9 +185,9 @@ pub fn calculate_mse(data: &[ReconstructionDataPoint]) -> f64 {
 /// using Singular Value Decomposition (SVD).
 pub fn procrustes_align(
     data: &[ReconstructionDataPoint],
-    scale: bool,
-    rotate: bool,
-    shift: bool,
+    _: bool,
+    _: bool,
+    _: bool,
 ) -> (Vec<ReconstructionDataPoint>, f64) {
     let n = data.len();
     if n == 0 {
@@ -208,9 +208,10 @@ pub fn procrustes_align(
         }
     }
 
+    let n_f64 = n as f64;
     for i in 0..d {
-        mean_true[i] /= n as f64;
-        mean_recon[i] /= n as f64;
+        mean_true[i] /= n_f64;
+        mean_recon[i] /= n_f64;
     }
 
     // 2. Center points into dynamically sized matrices
@@ -233,44 +234,36 @@ pub fn procrustes_align(
     let mut s_factor = 1.0;
 
     if var_recon > 1e-12 {
-        if rotate {
-            // Cross-covariance matrix H = Y^T * X
-            let h = centered_recon.transpose() * &centered_true;
+        // Cross-covariance matrix H = Y^T * X
+        let h = centered_recon.transpose() * &centered_true;
 
-            // SVD of H
-            let svd = h.svd(true, true);
-            let u = svd.u.unwrap();
-            let v_t = svd.v_t.unwrap();
+        // SVD of H
+        let svd = h.svd(true, true);
+        let u = svd.u.unwrap();
+        let v_t = svd.v_t.unwrap();
 
-            // Optimal rotation R = U * V^T
-            let mut r_temp = &u * &v_t;
-            let mut d_sign = 1.0;
+        // Optimal rotation R = U * V^T
+        let mut r_temp = &u * &v_t;
+        let mut d_sign = 1.0;
 
-            // Prevent reflection by enforcing a positive determinant
-            if r_temp.determinant() < 0.0 {
-                d_sign = -1.0;
-                let mut modified_u = u.clone();
-                for i in 0..d {
-                    modified_u[(i, d - 1)] *= -1.0;
-                }
-                r_temp = modified_u * v_t;
+        // Prevent reflection by enforcing a positive determinant
+        if r_temp.determinant() < 0.0 {
+            d_sign = -1.0;
+            let mut modified_u = u.clone();
+            for i in 0..d {
+                modified_u[(i, d - 1)] *= -1.0;
             }
-            r_mat = r_temp;
-
-            // Optimal scale accounting for rotation
-            if scale {
-                let mut trace_sigma = 0.0;
-                for i in 0..d {
-                    let sign = if i == d - 1 { d_sign } else { 1.0 };
-                    trace_sigma += svd.singular_values[i] * sign;
-                }
-                s_factor = trace_sigma / var_recon;
-            }
-        } else if scale {
-            // Scale only (trace(Y^T * X) / variance)
-            let h = centered_recon.transpose() * &centered_true;
-            s_factor = h.trace() / var_recon;
+            r_temp = modified_u * v_t;
         }
+        r_mat = r_temp;
+
+        // Optimal scale accounting for rotation
+        let mut trace_sigma = 0.0;
+        for i in 0..d {
+            let sign = if i == d - 1 { d_sign } else { 1.0 };
+            trace_sigma += svd.singular_values[i] * sign;
+        }
+        s_factor = trace_sigma / var_recon;
     }
 
     // 4. Apply transformations and calculate MSE
@@ -287,14 +280,10 @@ pub fn procrustes_align(
         let mut diff_sq_sum = 0.0;
 
         for col in 0..d {
-            let tx = centered_true[(row, col)];
-            let scaled_rotated_r = transformed_y[(0, col)];
-
-            let (ft, fr) = if shift {
-                (p.true_points[col], scaled_rotated_r + mean_true[col])
-            } else {
-                (tx, scaled_rotated_r)
-            };
+            // Because we always shift, `ft` maps back to the original point,
+            // and `fr` adds the true mean back to the scaled/rotated point.
+            let ft = p.true_points[col];
+            let fr = transformed_y[(0, col)] + mean_true[col];
 
             final_true[col] = ft;
             final_recon[col] = fr;
@@ -312,7 +301,7 @@ pub fn procrustes_align(
         });
     }
 
-    (aligned_data, total_mse / n as f64)
+    (aligned_data, total_mse / n_f64)
 }
 
 pub fn scale_to_absolute_range(

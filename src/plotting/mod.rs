@@ -1,4 +1,5 @@
 use crate::plotting::post::{calculate_mse, scale_to_absolute_range};
+use crate::plotting::two_d::debug_mse::plot_mse_frequency_histogram_split;
 use crate::plotting::two_d::mse_by_all_reconstructions::plot_histograms_of_all_reconstructions;
 use crate::plotting::two_d::mse_vs_grid_size::plot_grid_by_mse;
 use crate::plotting::two_d::spatial_plot::run_spatial_plots;
@@ -85,7 +86,7 @@ pub fn do_plotting() {
     // let grid_sizes = vec![(20, "20x20"), (25, "25x25"), (50, "50x50")];
     // let grid_sizes = vec![(25, "25x25"), (50, "50x50")];
     // let datasets = vec!["shopparis", "busstop", "cali", "drink", "highway", "spitz"];
-    let datasets = vec!["shopparis"];
+    let datasets = vec!["shopparis", "drink"];
     let methods = vec!["even_less", "remin", "limits"];
     let distributions = vec!["uniform", "gaussian", "beta"];
 
@@ -176,10 +177,16 @@ fn get_remin_even_less(
         let procruste = aligned.0;
         info!("MSE After procrustes: {}", aligned.1);
 
-        data = scale_to_absolute_range(&*procruste, (0.0, 50.0));
-        let new_mse = calculate_mse(&data);
-        info!("MSE After forced scaling: {}", new_mse);
-        // data = procruste;
+        // data = scale_to_absolute_range(&*procruste, (0.0, 50.0));
+        // let new_mse = calculate_mse(&data);
+        // info!("MSE After forced scaling: {}", new_mse);
+        // plot_mse_frequency_histogram_split(
+        //     procruste.clone(),
+        //     data.clone(),
+        //     "Even Less - Uniform Distribution on Amsterdam Dataset",
+        //     "figures/debug.svg",
+        // );
+        data = procruste;
     }
 
     let mut true_point = Vec::new();

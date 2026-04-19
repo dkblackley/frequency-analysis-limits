@@ -5,14 +5,15 @@ use cp_sat::proto::CpSolverStatus;
 use frequency_analysis_limits::dataloader::tester::testDB;
 use frequency_analysis_limits::dataloader::two_d::{Location, TwoDMap};
 use frequency_analysis_limits::dataloader::{flatten_nd, unflatten_nd, Searchable};
+use frequency_analysis_limits::Value;
 use frequency_analysis_limits::LAMA::query::QueryDistribution;
 use frequency_analysis_limits::LAMA::solver::Solver;
 use frequency_analysis_limits::LAMA::utility::get_mbq;
-use frequency_analysis_limits::Value;
 use frequency_analysis_limits::{Frequency, Record};
-use log::{error, info};
+use log::{debug, error, info};
 use sha2::Digest;
 use std::collections::HashMap;
+use std::fmt::format;
 
 /// Maps points to unique IDs, bounds is the largest possible val
 pub fn bounded_hyperrectangle_id(coords: &[u64], bounds: &[u64]) -> u64 {
@@ -111,7 +112,7 @@ fn end_flat() {
 
     let point_1 = Location {
         longitude: 0.0,
-        latitude: 1.0,
+        latitude: 0.0,
     };
 
     let point_2 = Location {
@@ -119,14 +120,15 @@ fn end_flat() {
         latitude: 0.0,
     };
 
-    let loaded_db: Box<dyn Searchable + Sync> =
-        Box::new(TwoDMap::new_unscaled(vec![point_1, point_2], "flat_test", 2, 2).unwrap());
+    let loaded_db: Box<dyn Searchable + Sync> = Box::new(
+        TwoDMap::new_unscaled(vec![point_1, point_2], "flat_test", (0, 2), (0, 3)).unwrap(),
+    );
 
     let all_recs = loaded_db.get_universe();
 
     let mut found_first = true;
     let mut found_second = true;
-    let wanted_flat_1 = flatten_nd(&[0, 1], &[3, 3], &[0, 0]);
+    let wanted_flat_1 = flatten_nd(&[0, 0], &[3, 3], &[0, 0]);
     let wanted_flat_2 = flatten_nd(&[1, 0], &[3, 3], &[0, 0]);
 
     for rec in all_recs.clone() {
@@ -149,7 +151,7 @@ fn end_flat() {
     let selector = Selector::new(dist, &loaded_db, eps, delt);
 
     let (low_pair, high_pair) = loaded_db.get_dom_pair();
-    assert_eq!(high_pair, vec![4, 4]);
+    assert_eq!(high_pair, vec![3, 3]);
     let universe = loaded_db.get_universe();
     let largest_enc_val: i64 = flatten_nd(&high_pair, &high_pair, &low_pair);
 
@@ -218,33 +220,52 @@ fn end_flat() {
         (obs_prob - exp_prob).abs() <= active_eps
     };
 
-    // info!("Bruteforcing t=2");
-    // let (mut model, index_map) = Translator::process_t_brute_force(
-    //     2,
-    //     largest_enc_val * 2,
-    //     &*universe.clone(),
-    //     &validate_candidate,
-    // );
-    // let mut solver = Solver::new(index_map);
-    // let responses = solver.solve(&mut model, false);
+    info!("Bruteforcing t=2");
+    let (mut model, index_map) = Translator::process_t_brute_force(
+        2,
+        largest_enc_val,
+        &*universe.clone(),
+        &validate_candidate,
+    );
+    let mut solver = Solver::new(index_map);
+    let responses = solver.solve(&mut model, false);
+    let mut universes = Vec::new();
+    let true_values: Vec<&i64> = responses.keys().collect();
+    let number_solutions = solver.num_sols;
+
+    for i in 0..number_solutions {
+        let mut universe = Vec::new();
+        for true_val in true_values.clone() {
+            let unflat_key = unflatten_nd(*true_val, high_pair_ref, low_pair_ref);
+            let unflat_val =
+                unflatten_nd(responses[true_val][i as usize], high_pair_ref, low_pair_ref);
+            universe.push(format!(
+                "True: {:?}, Reconstructed: {:?}",
+                unflat_key, unflat_val
+            ));
+        }
+        universes.push(universe);
+    }
+
+    info!("Possible reconstructions: {:?}", universes);
+    let mut temp_map = HashMap::new();
+    let mut temp_universe: Vec<i64> = (0..largest_enc_val).collect();
+
+    for (key, vals) in responses {
+        let difference: Vec<_> = temp_universe
+            .clone()
+            .into_iter()
+            .filter(|item| !vals.contains(item))
+            .collect();
+        temp_map.insert(key, difference);
+    }
+    debug!("Impossible values: {:?}", temp_map);
 
     info!("--> Processing Base Case (t=1)");
     translator.process_t1(&universe, &validate_candidate);
 
     info!("--> Processing Recursive Case (t=2) sequentially across chunk models...");
     translator.process_t_greater_than_1(2, &universe, &validate_candidate);
-
-    info!("--> Processing Recursive Case (t=3) sequentially across chunk models...");
-    translator.process_t_greater_than_1(3, &universe, &validate_candidate);
-
-    // t=3 is usually good enough for every dist type, uniform mostly is good after t=2 but sometimes
-    // gets better at t=3. t=4 is almost always actually overkill
-    // info!(
-    //     "Remember: Computing for DB size {} by {}...",
-    //     rows_cols, rows_cols
-    // );
-    // info!("--> Processing Recursive Case (t=4) sequentially across chunk models...");
-    // translator.process_t_greater_than_1(4, &universe, &validate_candidate);
 
     info!("5. Building and executing the CP-SAT Solver for the final constraint graph...");
     let mut solver = Solver::new(translator.get_var_index_map());
@@ -262,7 +283,10 @@ fn end_flat() {
         panic!("Solver did not return a full assignment.");
     }
 
-    let total_responses = responses[&0].len();
+    let total_responses = solver.num_sols;
+    // Remember, we cannot get rid of/hide the distances. Hence, after t=1 and t=2 the solver is
+    // able to narrow down to the 4 items of equal distance.
+    assert_eq!(total_responses, 4);
     let mut found_truth = false;
 
     for i in 0..total_responses {
@@ -276,7 +300,7 @@ fn end_flat() {
                 }
             }
 
-            iso_map.insert(key, val[i]);
+            iso_map.insert(key, val[i as usize]);
         }
         if true_count == 2 {
             found_truth = true;
@@ -300,11 +324,11 @@ fn end_to_end() {
         .build_global()
         .unwrap();
 
-    let rows_cols = 4;
+    let rows_cols = 10;
     let dim = 2;
 
     info!("Loading test DB ({}x{})", rows_cols, rows_cols);
-    let loaded_db: Box<dyn Searchable + Sync> = Box::new(testDB::new(dim, rows_cols, 25));
+    let loaded_db: Box<dyn Searchable + Sync> = Box::new(testDB::new(dim, rows_cols, 35));
 
     let dist = "flat";
     let eps = 0.0; // Perfect knowledge constraint

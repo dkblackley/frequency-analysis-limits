@@ -188,8 +188,8 @@ impl TwoDMap {
     pub fn new_unscaled(
         locations: Vec<Location>,
         name: &str,
-        x_pad: Value,
-        y_pad: Value,
+        x_pad: (Value, Value),
+        y_pad: (Value, Value),
     ) -> Result<Self, std::io::Error> {
         info!("Loaded Unscaled DB {name}");
 
@@ -223,31 +223,36 @@ impl TwoDMap {
             true_upper = [0, 0];
         }
 
-        let offset = vec![true_lower[0], true_lower[1]];
+        // 3. Subtract the first tuple values (.0) from the offset.
+        // This shifts the real "0,0" point forward in the grid, leaving empty indices
+        // from 0 up to x_pad.0 / y_pad.0
+        let offset = vec![true_lower[0] - x_pad.0, true_lower[1] - y_pad.0];
         let lower = [0, 0];
 
-        // 3. Calculate shifted upper bounds relative to 0 AND apply the padding
+        // 4. Calculate shifted upper bounds relative to 0 AND apply the second tuple values (.1).
+        // `offset` already accounts for the lower padding, so we just add the upper padding
+        // to extend the far edges of the grid.
         let upper = [
-            (true_upper[0] - offset[0]) + x_pad,
-            (true_upper[1] - offset[1]) + y_pad,
+            (true_upper[0] - offset[0]) + x_pad.1,
+            (true_upper[1] - offset[1]) + y_pad.1,
         ];
 
         let mut encrypted_db = Vec::new();
         let mut unique_points = HashSet::new();
 
-        // 4. Shift the points to 0,0 and deduplicate using your flatten_nd logic
+        // 5. Shift the points and deduplicate
         for p in raw_points {
             let shifted_x = p[0] - offset[0];
             let shifted_y = p[1] - offset[1];
 
-            // Because 'upper' is now padded, the resulting flat_point is automatically adjusted
+            // The resulting flat_point sits comfortably inside the new asymmetrically padded bounds
             let flat_point = flatten_nd(&[shifted_x, shifted_y], &upper, &lower);
             if unique_points.insert(flat_point) {
                 encrypted_db.push(flat_point);
             }
         }
 
-        // 5. Build the grid efficiently
+        // 6. Build the grid efficiently
         let dim_x = (upper[0] - lower[0]) as usize + 1;
         let dim_y = (upper[1] - lower[1]) as usize + 1;
 
@@ -255,7 +260,6 @@ impl TwoDMap {
         let mut grid = Array2::from_elem((dim_x, dim_y), i64::MIN);
         for &flat_point in &encrypted_db {
             let grid_point = unflatten_nd(flat_point, &upper, &lower);
-            // Only actual valid points get populated, leaving the padded extensions empty
             grid[[grid_point[0] as usize, grid_point[1] as usize]] = flat_point;
         }
 

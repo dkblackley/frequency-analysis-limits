@@ -371,7 +371,7 @@ impl<'a> QueryDistribution<'a> {
 
     pub fn new_flat(
         pairs: &[DomPair],
-        encrypted_db: &'a Box<dyn Searchable + Sync + 'static >,
+        encrypted_db: &'a Box<dyn Searchable + Sync + 'static>,
     ) -> (
         Vec<(f64, DomPair)>,
         WeightedIndex<f64>,
@@ -381,10 +381,8 @@ impl<'a> QueryDistribution<'a> {
     ) {
         debug!("Making internal QD for flatten");
         let old_qd = Self::new(Vec::from(pairs), encrypted_db, DistributionType::Uniform);
-        let _mapping_old = old_qd.dom_pair_to_known_prob.clone();
         let mut mapping = old_qd.dom_pair_to_known_prob;
-        let total_old = old_qd.total_weight;
-        let mut total_weight = total_old;
+        let mut total_weight = old_qd.total_weight;
 
         // as per algorithm 2: Start at the largest possible query and work back. THis updates
         // the old QD as we go and works over every pair, so time might be n^2
@@ -447,26 +445,6 @@ impl<'a> QueryDistribution<'a> {
                 total_weight,
             );
 
-            // for (rec_1, rec_2) in equi_dist_pairs.iter() {
-            //     let mbq = get_mbq(&[
-            //         unflatten_nd(*rec_1, &high_pair, &low_pair),
-            //         unflatten_nd(*rec_2, &high_pair, &low_pair),
-            //     ]);
-            //
-            //     let st = Self::compute_cumulative_weight(
-            //         &mbq,
-            //         &DistributionType::Uniform,
-            //         &low_pair,
-            //         &high_pair,
-            //         &mapping_old,
-            //         total_weight,
-            //     );
-            //     let old_weight = mapping.get(&mbq).unwrap();
-            //     debug_res.insert(d, (mbq.clone(), mapping.clone()));
-            //     mapping.insert(mbq, *old_weight + (smx - st));
-            //     //total_weight += (smx - st);
-            // }
-
             for mbq in unique_queries.iter() {
                 let st = Self::compute_cumulative_weight(
                     &mbq,
@@ -479,7 +457,7 @@ impl<'a> QueryDistribution<'a> {
                 let old_weight = mapping.get(&mbq).unwrap();
                 debug_res.insert(d, (mbq.clone(), mapping.clone()));
                 mapping.insert(mbq.clone(), *old_weight + (smx - st));
-                total_weight += smx - st ;
+                total_weight += smx - st;
             }
         }
 

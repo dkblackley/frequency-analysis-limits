@@ -2,7 +2,7 @@ use crate::dataloader::{unflatten_nd, Searchable};
 use crate::LAMA::utility::{get_mbq, DistributionType};
 // Adjust imports as necessary for DomPair
 use crate::{Coord, DomPair, Probability, Record, Value};
-use indicatif::ParallelProgressIterator;
+use indicatif::{ParallelProgressIterator, ProgressBar};
 use itertools::Itertools;
 use log::{debug, error, info};
 use plotters::prelude::*;
@@ -398,46 +398,70 @@ impl<'a> QueryDistribution<'a> {
             v1.iter().zip(v2.iter()).map(|(a, b)| a.abs_diff(*b)).sum()
         }
 
-        let mut debug_res = HashMap::new();
-        let mut debug_query_set = HashSet::new();
+        debug!("About to start big loop...");
+
+        let pb = ProgressBar::new(largest_l1 as u64 + 1);
 
         for d in (0..=largest_l1).rev() {
-            // find everything of this distance. Distance is defined as taxicab/L1
-            let mut equi_dist_pairs: Vec<(Value, Value)> = Vec::new();
-            let mut unique_queries = HashSet::new();
-            let mut max_weight = -1.0;
-            let mut tmx = encrypted_db.get_dom_pair();
+            let initial_tmx = encrypted_db.get_dom_pair();
 
-            for outer in &all_recs {
-                for inner in &all_recs {
-                    let unflat_out = unflatten_nd(*outer, &high_pair, &low_pair);
-                    let unflat_in = unflatten_nd(*inner, &high_pair, &low_pair);
+            // 2. Parallelize the outer `all_recs` loop using a Map-Reduce approach
+            let (mut equi_dist_pairs, unique_queries, max_weight, tmx) = all_recs
+                .par_iter()
+                .map(|outer| {
+                    // Local state for this specific thread
+                    let mut local_equi = Vec::new();
+                    let mut local_unique = HashSet::new();
+                    let mut local_max_w = -1.0;
+                    let mut local_tmx = initial_tmx.clone();
 
-                    let taxicab = taxicab_distance(&unflat_out, &unflat_in);
+                    for inner in &all_recs {
+                        let unflat_out = unflatten_nd(*outer, &high_pair, &low_pair);
+                        let unflat_in = unflatten_nd(*inner, &high_pair, &low_pair);
 
-                    if taxicab == d {
-                        let query = get_mbq(&[unflat_out.clone(), unflat_in.clone()]);
-                        debug_query_set.insert(query.clone());
-                        // This might need to get updated dynamically?
-                        // let cand_weight = mapping.get(&query).unwrap();
-                        let cand_prob = &Self::compute_cumulative_prob(
-                            &query,
-                            &DistributionType::Flat,
-                            &low_pair,
-                            &high_pair,
-                            &mapping,
-                            total_weight,
-                        );
+                        let taxicab = taxicab_distance(&unflat_out, &unflat_in);
 
-                        if *cand_prob > max_weight {
-                            max_weight = *cand_prob;
-                            tmx = query.clone();
+                        if taxicab == d {
+                            let query = get_mbq(&[unflat_out.clone(), unflat_in.clone()]);
+
+                            let cand_prob = Self::compute_cumulative_prob(
+                                &query,
+                                &DistributionType::Flat,
+                                &low_pair,
+                                &high_pair,
+                                &mapping,
+                                total_weight,
+                            );
+
+                            // Dereference cand_prob if your function returns a reference
+                            let cand_prob_val = cand_prob;
+
+                            if cand_prob_val > local_max_w {
+                                local_max_w = cand_prob_val;
+                                local_tmx = query.clone();
+                            }
+
+                            local_equi.push((*outer, *inner));
+                            local_unique.insert(query);
                         }
-                        equi_dist_pairs.push((*outer, *inner));
-                        unique_queries.insert(query);
                     }
-                }
-            }
+                    // Yield the thread's local state
+                    (local_equi, local_unique, local_max_w, local_tmx)
+                })
+                .reduce(
+                    // The identity (fallback) value if the iterator is empty
+                    || (Vec::new(), HashSet::new(), -1.0, initial_tmx.clone()),
+                    // The reduction step: merging the local states together
+                    |mut a, mut b| {
+                        a.0.append(&mut b.0); // Fast Vec merge
+                        a.1.extend(b.1.into_iter()); // HashSet merge
+                        if b.2 > a.2 {
+                            a.2 = b.2;
+                            a.3 = b.3;
+                        }
+                        a
+                    },
+                );
 
             // As per line 3 - the sum of weights covering tmx
             let smx = Self::compute_cumulative_weight(
@@ -459,7 +483,6 @@ impl<'a> QueryDistribution<'a> {
                     total_weight,
                 );
                 let old_weight = mapping.get(&mbq).unwrap();
-                debug_res.insert(d, (mbq.clone(), mapping.clone()));
                 mapping.insert(mbq.clone(), *old_weight + (smx - st));
                 total_weight += smx - st;
             }
@@ -474,87 +497,7 @@ impl<'a> QueryDistribution<'a> {
         let final_total_weight: f64 = mapping.values().sum();
         const EPSILON: f64 = 1e-9; // Tolerance for floating point comparison
 
-        let mut matches = HashMap::new();
-
-        for d in (0..=largest_l1).rev() {
-            let mut expected_weight: Option<f64> = None;
-            let mut reference_pair: Option<(Value, Value)> = None;
-
-            for outer in &all_recs {
-                for inner in &all_recs {
-                    let unflat_out = unflatten_nd(*outer, &high_pair, &low_pair);
-                    let unflat_in = unflatten_nd(*inner, &high_pair, &low_pair);
-
-                    if taxicab_distance(&unflat_out, &unflat_in) == d {
-                        *matches.entry(d).or_insert(0) += 1;
-                        let mbq = get_mbq(&[unflat_out.clone(), unflat_in.clone()]);
-
-                        // Important: Use the FINAL `mapping` and `final_total_weight` here
-                        let current_cumu_weight = Self::compute_cumulative_weight(
-                            &mbq,
-                            &DistributionType::Flat,
-                            &low_pair,
-                            &high_pair,
-                            &mapping,
-                            final_total_weight,
-                        );
-
-                        match expected_weight {
-                            None => {
-                                // Set the baseline for this distance 'd'
-                                expected_weight = Some(current_cumu_weight);
-                                reference_pair = Some((*outer, *inner));
-                            }
-                            Some(expected) => {
-                                // Compare current pair against the baseline
-                                if (expected - current_cumu_weight).abs() > EPSILON {
-                                    error!("================ FLATNESS ASSERTION FAILED ================");
-                                    error!("Distance group (d): {}", d);
-                                    error!("Total distribution weight: {}", final_total_weight);
-                                    error!("--- Reference Pair ---");
-                                    error!("Values: {:?}", reference_pair.unwrap());
-                                    error!(
-                                        "Un-flattened: {:?}, {:?}",
-                                        unflatten_nd(
-                                            reference_pair.unwrap().0,
-                                            &high_pair,
-                                            &low_pair
-                                        ),
-                                        unflatten_nd(
-                                            reference_pair.unwrap().1,
-                                            &high_pair,
-                                            &low_pair
-                                        )
-                                    );
-                                    error!("Cumulative Weight: {}", expected);
-                                    error!("Cumulative Prob:   {}", expected / final_total_weight);
-                                    error!("--- Failing Pair ---");
-                                    error!("Values: ({:?}, {:?})", *outer, *inner);
-                                    error!(
-                                        "Un-flattened: {:?}, {:?}",
-                                        unflatten_nd(*outer, &high_pair, &low_pair),
-                                        unflatten_nd(*inner, &high_pair, &low_pair)
-                                    );
-                                    error!("MBQ: {:?}", mbq);
-                                    error!("Cumulative Weight: {}", current_cumu_weight);
-                                    error!(
-                                        "Cumulative Prob:   {}",
-                                        current_cumu_weight / final_total_weight
-                                    );
-                                    error!(
-                                        "Difference: {}",
-                                        (expected - current_cumu_weight).abs()
-                                    );
-                                    error!("===========================================================");
-                                    panic!("Equidistant pairs do not have the same probability! Algorithm failed at d={}", d);
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        debug!("total matches: {:?}", matches);
+        debug!("Flat distribution made");
         let final_weight_dom_pairs: Vec<(f64, DomPair)> =
             mapping.clone().into_iter().map(|(d, w)| (w, d)).collect();
         let sampler_res = WeightedIndex::new(&weights);

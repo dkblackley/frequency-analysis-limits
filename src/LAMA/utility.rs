@@ -1,5 +1,6 @@
 use crate::{Coord, DomPair, Record};
 use itertools::Itertools;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::str::FromStr;
 
@@ -35,6 +36,7 @@ pub fn get_all_dominating_values(v: &[Coord], largest_rec: &[Coord]) -> Vec<Reco
 }
 
 // Define an Enum to avoid string comparisons in the hot loop
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub enum DistributionType {
     Uniform,
     Gaussian,

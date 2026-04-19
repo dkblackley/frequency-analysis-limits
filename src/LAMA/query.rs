@@ -1,16 +1,16 @@
-use crate::dataloader::{unflatten_nd, Searchable};
+use crate::dataloader::{flatten_dompair, unflatten_nd, Searchable};
 use crate::LAMA::utility::{get_mbq, DistributionType};
 // Adjust imports as necessary for DomPair
 use crate::{Coord, DomPair, Probability, Record, Value};
 use indicatif::{ParallelProgressIterator, ProgressBar};
 use itertools::Itertools;
-use log::{debug, error, info};
+use log::{debug, error, info, warn};
 use plotters::prelude::*;
 use rand::distributions::WeightedIndex;
 use rayon::prelude::*;
 use rustc_hash::FxHashMap;
 use statrs::distribution::{Beta, Continuous, Normal};
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 pub struct QueryDistribution<'a> {
     encrypted_db: &'a Box<dyn Searchable + Sync>,
@@ -33,6 +33,7 @@ impl<'a> QueryDistribution<'a> {
         dist: DistributionType,
     ) -> Box<Self> {
         let (lowest_rec, largest_rec) = encrypted_db.get_dom_pair();
+
         info!("Beginning to set up {dist} distribution");
         let (_probs_and_dom_pairs_raw, sampler, weights, total_weight, dom_pair_to_known_weight) =
             match dist {
@@ -141,7 +142,7 @@ impl<'a> QueryDistribution<'a> {
                 // Parallelize the evaluation of the cartesian product space
                 let true_prob: f64 = lower_combos
                     .cartesian_product(upper_combos)
-                    .par_bridge() // <--- The magic parallel bit
+                    //.par_bridge() //
                     .map(|(c_lower, c_upper)| {
                         // Look up the weight, default to 0.0 if not found, then return it to be summed
                         *dom_pair_to_known_prob
@@ -165,7 +166,8 @@ impl<'a> QueryDistribution<'a> {
         dist: &DistributionType,
         lowest_rec: &[Value],
         largest_rec: &[Value],
-        dom_pair_to_known_prob: &FxHashMap<DomPair, f64>,
+        dense_probs: &[f64],
+        // dom_pair_to_known_prob: &FxHashMap<DomPair, f64>,
         //dom_pair_slice: &[(DomPair, f64)], // Now a sorted flat slice
         _total_weight: f64,
     ) -> f64 {
@@ -185,7 +187,6 @@ impl<'a> QueryDistribution<'a> {
             }
 
             _ => {
-                // Every other dist: Sum Cartesian space of enclosing queries.
                 let (target_lower, target_upper) = mbq;
 
                 let lower_combos = lowest_rec
@@ -203,14 +204,14 @@ impl<'a> QueryDistribution<'a> {
                 // Parallelize the evaluation of the cartesian product space
                 let true_prob: f64 = lower_combos
                     .cartesian_product(upper_combos)
-                    .par_bridge() // <--- The magic parallel bit
                     .map(|(c_lower, c_upper)| {
-                        // Look up the weight, default to 0.0 if not found, then return it to be summed
-                        *dom_pair_to_known_prob
-                            .get(&(c_lower, c_upper))
-                            .unwrap_or(&0.0)
+                        // Flatten the generated coordinate on the fly
+                        let idx = flatten_dompair(&(c_lower, c_upper), largest_rec, lowest_rec);
+
+                        // O(1) array lookup! No hashing overhead.
+                        dense_probs[idx]
                     })
-                    .sum(); // Rayon handles the thread-safe accumulation here
+                    .sum();
 
                 true_prob
             }
@@ -258,6 +259,7 @@ impl<'a> QueryDistribution<'a> {
 
         let probs_and_pairs: Vec<_> = pairs
             .into_par_iter()
+            .progress()
             .zip(weights.par_iter())
             // Destructure the reference here with &w
             .map(|(p, &w)| (w, p))
@@ -388,6 +390,22 @@ impl<'a> QueryDistribution<'a> {
         let mut mapping = old_qd.dom_pair_to_known_prob;
         let mut total_weight = old_qd.total_weight;
 
+        let (lowest_rec, largest_rec) = encrypted_db.get_dom_pair();
+
+        // Find the maximum possible index to size our vector
+        let max_pair = (largest_rec.clone(), largest_rec.clone());
+        let max_index = flatten_dompair(&max_pair, &largest_rec, &lowest_rec);
+
+        debug!("Making vec of size: {}", max_index + 1);
+        // Allocate the dense array filled with 0.0
+        let mut dense_probs = vec![0.0f64; max_index + 1];
+        debug!("Done with massive vec!");
+        // Populate it with the known weights
+        for (pair, &prob) in mapping.iter() {
+            let idx = flatten_dompair(pair, &largest_rec, &lowest_rec);
+            dense_probs[idx] = prob;
+        }
+
         // as per algorithm 2: Start at the largest possible query and work back. THis updates
         // the old QD as we go and works over every pair, so time might be n^2
         let (low_pair, high_pair) = encrypted_db.get_dom_pair();
@@ -399,62 +417,71 @@ impl<'a> QueryDistribution<'a> {
         }
 
         debug!("About to start big loop...");
+        // make a 'dummy hashmap'. Index is just the distance 'd' and we get: the two records,
+        // as a tuple, and the mbq that covers them.
+        let mut distance_groups: Vec<Vec<((Value, Value), DomPair)>> =
+            vec![Vec::new(); largest_l1 as usize + 1];
+
+        for outer in &all_recs {
+            let unflat_out = unflatten_nd(*outer, &high_pair, &low_pair);
+            for inner in &all_recs {
+                let unflat_in = unflatten_nd(*inner, &high_pair, &low_pair);
+                let taxicab = taxicab_distance(&unflat_out, &unflat_in);
+                let query = get_mbq(&[unflat_out.clone(), unflat_in.clone()]);
+
+                // Push directly into the vector at index `taxicab`
+                distance_groups[taxicab as usize].push(((*outer, *inner), query));
+            }
+        }
 
         let pb = ProgressBar::new(largest_l1 as u64 + 1);
 
         for d in (0..=largest_l1).rev() {
             let initial_tmx = encrypted_db.get_dom_pair();
 
-            // 2. Parallelize the outer `all_recs` loop using a Map-Reduce approach
-            let (mut equi_dist_pairs, unique_queries, max_weight, tmx) = all_recs
-                .par_iter()
-                .map(|outer| {
-                    // Local state for this specific thread
-                    let mut local_equi = Vec::new();
-                    let mut local_unique = HashSet::new();
-                    let mut local_max_w = -1.0;
-                    let mut local_tmx = initial_tmx.clone();
-
-                    for inner in &all_recs {
-                        let unflat_out = unflatten_nd(*outer, &high_pair, &low_pair);
-                        let unflat_in = unflatten_nd(*inner, &high_pair, &low_pair);
-
-                        let taxicab = taxicab_distance(&unflat_out, &unflat_in);
-
-                        if taxicab == d {
-                            let query = get_mbq(&[unflat_out.clone(), unflat_in.clone()]);
-
-                            let cand_prob = Self::compute_cumulative_prob(
-                                &query,
-                                &DistributionType::Flat,
-                                &low_pair,
-                                &high_pair,
-                                &mapping,
-                                total_weight,
-                            );
-
-                            // Dereference cand_prob if your function returns a reference
-                            let cand_prob_val = cand_prob;
-
-                            if cand_prob_val > local_max_w {
-                                local_max_w = cand_prob_val;
-                                local_tmx = query.clone();
-                            }
-
-                            local_equi.push((*outer, *inner));
-                            local_unique.insert(query);
-                        }
+            // If there are no pairs with this distance, just skip to the next 'd'
+            let pairs_for_d: &Vec<((Value, Value), DomPair)> = {
+                match distance_groups.get(d as usize) {
+                    Some(pairs) => pairs,
+                    None => {
+                        warn!(
+                            "Skipped all items of l1 distance {d}, Are you using a sparse dataset?"
+                        );
+                        pb.inc(1);
+                        continue;
                     }
-                    // Yield the thread's local state
-                    (local_equi, local_unique, local_max_w, local_tmx)
+                }
+            };
+
+            let (equi_dist_pairs, unique_queries, max_weight, tmx) = pairs_for_d
+                .par_iter()
+                .map(|(original_pair, query)| {
+                    let cand_prob_val = Self::compute_cumulative_prob(
+                        query,
+                        &DistributionType::Flat,
+                        &low_pair,
+                        &high_pair,
+                        &mapping,
+                        total_weight,
+                    );
+
+                    // Wrap the single query in a HashSet so it matches the reduce type!
+                    let mut unique_set = HashSet::new();
+                    unique_set.insert(query.clone());
+
+                    // Return: (Vec, HashSet, f64, DomPair)
+                    (
+                        vec![*original_pair],
+                        unique_set,
+                        cand_prob_val,
+                        query.clone(),
+                    )
                 })
                 .reduce(
-                    // The identity (fallback) value if the iterator is empty
                     || (Vec::new(), HashSet::new(), -1.0, initial_tmx.clone()),
-                    // The reduction step: merging the local states together
                     |mut a, mut b| {
-                        a.0.append(&mut b.0); // Fast Vec merge
-                        a.1.extend(b.1.into_iter()); // HashSet merge
+                        a.0.extend(b.0);
+                        a.1.extend(b.1.into_iter()); // Combine the HashSets properly
                         if b.2 > a.2 {
                             a.2 = b.2;
                             a.3 = b.3;
@@ -469,7 +496,8 @@ impl<'a> QueryDistribution<'a> {
                 &DistributionType::Flat,
                 &low_pair,
                 &high_pair,
-                &mapping,
+                &dense_probs,
+                //&mapping,
                 total_weight,
             );
 
@@ -479,11 +507,15 @@ impl<'a> QueryDistribution<'a> {
                     &DistributionType::Flat,
                     &low_pair,
                     &high_pair,
-                    &mapping,
+                    //&mapping,
+                    &dense_probs,
                     total_weight,
                 );
                 let old_weight = mapping.get(&mbq).unwrap();
-                mapping.insert(mbq.clone(), *old_weight + (smx - st));
+                let res = old_weight.clone() + (smx - st);
+                mapping.insert(mbq.clone(), res);
+                let idx = flatten_dompair(&mbq, &largest_rec, &lowest_rec);
+                dense_probs[idx] = res;
                 total_weight += smx - st;
             }
             pb.inc(1);

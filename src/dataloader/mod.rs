@@ -1,4 +1,4 @@
-use crate::{Record, Value};
+use crate::{DomPair, Record, Value};
 
 mod error;
 pub mod two_d;
@@ -63,6 +63,32 @@ pub fn unflatten_nd(mut index: Value, upper: &[Value], lower: &[Value]) -> Recor
     }
 
     point
+}
+
+/// A crazy trick to 'flatte' a dompair to a unique value. Use sparingly. first does the regualr
+/// flatten adn then parses the flat pairs as 2d points and flattens gain.
+pub fn flatten_dompair(pair: &DomPair, grid_upper: &[Value], grid_lower: &[Value]) -> usize {
+    let (p_lower, p_upper) = pair;
+    let mut index: usize = 0;
+    let mut multiplier: usize = 1;
+
+    // 1. Flatten the 'upper' bound half
+    for i in (0..p_upper.len()).rev() {
+        let point_scaled = (p_upper[i] - grid_lower[i]) as usize;
+        index += point_scaled * multiplier;
+        let dimension_size = (grid_upper[i] - grid_lower[i] + 1) as usize;
+        multiplier *= dimension_size;
+    }
+
+    // 2. Continue the exact same math for the 'lower' bound half
+    for i in (0..p_lower.len()).rev() {
+        let point_scaled = (p_lower[i] - grid_lower[i]) as usize;
+        index += point_scaled * multiplier;
+        let dimension_size = (grid_upper[i] - grid_lower[i] + 1) as usize;
+        multiplier *= dimension_size;
+    }
+
+    index
 }
 
 fn get_bounding_box<T, const D: usize>(

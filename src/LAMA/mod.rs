@@ -89,7 +89,10 @@ pub fn lama_attack(
     );
     debug!(
         "Largest possible value is {largest_possible_val}, working with {} dompairs",
-        selector.query_distribution.dom_pair_to_known_prob.len()
+        selector
+            .query_distribution
+            .dom_pair_to_known_raw_weight
+            .len()
     );
 
     info!("Selector computing values");

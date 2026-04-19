@@ -44,11 +44,9 @@ impl testDB {
     fn generate_encoded_grid(dim: usize, size_per_dim_orig: usize, density_pct: u8) -> ArrayD<i64> {
         let mut rng = StdRng::seed_from_u64(42);
 
-        // add padding to the outside of the test grid to allow flatten to work.
-        let mut size_per_dim = size_per_dim_orig - 2;
+        let size_per_dim = size_per_dim_orig;
         let lower = vec![2; dim];
-        let upper = vec![(size_per_dim - 1) as i64; dim];
-        size_per_dim = size_per_dim_orig;
+        let upper = vec![(size_per_dim - 3) as i64; dim];
 
         // Create a shape array where each dimension is 'size_per_dim' long
         let shape = vec![size_per_dim; dim];
@@ -60,7 +58,12 @@ impl testDB {
             if roll <= density_pct {
                 // Extract the N-dimensional coordinate from idx
                 let point: Vec<i64> = idx.slice().iter().map(|&v| v as i64).collect();
-                flatten_nd(&point, &upper, &lower)
+                let res = flatten_nd(&point, &upper, &lower);
+                if res < 0 {
+                    i64::MIN
+                } else {
+                    res
+                }
             } else {
                 i64::MIN
             }

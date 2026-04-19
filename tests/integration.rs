@@ -308,11 +308,11 @@ fn end_to_end() {
         .build_global()
         .unwrap();
 
-    let rows_cols = 10;
+    let rows_cols = 15;
     let dim = 2;
 
     info!("Loading test DB ({}x{})", rows_cols, rows_cols);
-    let loaded_db: Box<dyn Searchable + Sync> = Box::new(testDB::new(dim, rows_cols, 35));
+    let loaded_db: Box<dyn Searchable + Sync> = Box::new(testDB::new(dim, rows_cols, 80));
 
     let dist = "flat";
     let eps = 0.0; // Perfect knowledge constraint
@@ -325,8 +325,10 @@ fn end_to_end() {
     let largest_enc_val: i64 = flatten_nd(&high_pair, &high_pair, &low_pair);
 
     info!(
-        "3. Initializing Translator with universe size: {}",
-        universe.len()
+        "3. Initializing Translator with universe size: {} and low/high pair {:?}, {:?}",
+        universe.len(),
+        low_pair,
+        high_pair
     );
     let mut translator = Translator::new(largest_enc_val, universe.clone());
 

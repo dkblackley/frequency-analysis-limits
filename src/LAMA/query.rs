@@ -16,9 +16,9 @@ pub struct QueryDistribution<'a> {
     encrypted_db: &'a Box<dyn Searchable + Sync>,
     pairs: Vec<DomPair>,
     weights: Vec<f64>,
-    pub dom_pair_to_known_prob: FxHashMap<DomPair, f64>,
+    pub dom_pair_to_known_raw_weight: FxHashMap<DomPair, f64>,
     mbq_to_cumulative_prob: FxHashMap<DomPair, Probability>,
-    pub probs_and_dom_pairs: Vec<(Probability, DomPair)>,
+    pub cumulative_probs_and_dom_pairs: Vec<(Probability, DomPair)>,
     pub total_weight: f64,
     sampler: WeightedIndex<f64>,
     pub dist: DistributionType,
@@ -43,43 +43,23 @@ impl<'a> QueryDistribution<'a> {
                 DistributionType::Flat => Self::new_flat(&pairs, encrypted_db),
             };
 
-        let mut mbq_to_cumulative_prob = FxHashMap::default();
-        let mut probs_and_dom_pairs = Vec::with_capacity(pairs.len());
-
         info!("Computing true cumulative probabilities for every MBQ");
 
-        // Compute the True CUMULATIVE probability for every possible MBQ
-        let computed_results: Vec<_> = pairs
-            .par_iter()
-            .progress() // Attaches the indicatif progress bar to Rayon
-            .map(|pair| {
-                let cum_prob = Self::compute_cumulative_prob(
-                    pair,
-                    &dist, // Note: `dist`, `lowest_rec`, etc. must implement `Sync`
-                    &lowest_rec,
-                    &largest_rec,
-                    &dom_pair_to_known_weight,
-                    total_weight,
-                );
-
-                // let current = atom_count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                // if current % 1000 == 0 {
-                //     pb.set_position(current);
-                // }
-
-                // Return a tuple of references/clones needed for insertion
-                (pair, cum_prob)
-            })
-            .collect();
+        let mbq_to_cumulative_prob = Self::precompute_cumulative_res(
+            &pairs,
+            &dom_pair_to_known_weight,
+            &lowest_rec,
+            &largest_rec,
+            total_weight,
+            false,
+        );
 
         debug!("Finished computing true cumulative probabilities");
-        // 3. Sequential Insertion Phase
-        // Iterating over the pre-computed results to insert is virtually instantaneous.
-        for (pair, cum_prob) in computed_results {
-            mbq_to_cumulative_prob.insert(pair.clone(), cum_prob);
-            probs_and_dom_pairs.push((cum_prob, pair.clone()));
+        // Sequential Insertion Phase
+        let mut cumulative_probs_and_dom_pairs = Vec::with_capacity(pairs.len());
+        for (pair, &cum_prob) in &mbq_to_cumulative_prob {
+            cumulative_probs_and_dom_pairs.push((cum_prob, pair.clone()));
         }
-
         // probs_and_dom_pairs.par_sort_unstable_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
 
         debug!("Done pre-computing probability dist");
@@ -87,15 +67,96 @@ impl<'a> QueryDistribution<'a> {
             encrypted_db,
             pairs,
             weights,
-            dom_pair_to_known_prob: dom_pair_to_known_weight,
+            dom_pair_to_known_raw_weight: dom_pair_to_known_weight,
             mbq_to_cumulative_prob,
-            probs_and_dom_pairs,
+            cumulative_probs_and_dom_pairs,
             total_weight,
             sampler,
             dist,
             lowest_rec,
             largest_rec,
         })
+    }
+
+    /// Dynamically precomputes the cumulative probabilities for all possible DomPairs
+    /// using an N-dimensional prefix sum approach.
+    /// Dynamically precomputes the cumulative probabilities for all possible DomPairs
+    /// using an N-dimensional prefix sum approach.
+    fn precompute_cumulative_res(
+        pairs: &[DomPair],
+        dom_pair_to_known_weight: &FxHashMap<DomPair, f64>,
+        lowest_rec: &[Value],
+        largest_rec: &[Value],
+        total_weight: f64,
+        return_weights: bool,
+    ) -> FxHashMap<DomPair, Probability> {
+        // Start with the raw weights
+        let mut dp = dom_pair_to_known_weight.clone();
+        if pairs.is_empty() {
+            return dp;
+        }
+
+        let dims = lowest_rec.len();
+
+        // 1. Sweep over LOWER bounds
+        // Accumulate probabilities from smaller lower bounds to larger lower bounds (l <= L)
+        for dim in 0..dims {
+            let mut sorted_pairs = pairs.to_vec();
+            // Sort ascending by the lower bound in this specific dimension
+            sorted_pairs.par_sort_unstable_by_key(|p| p.0[dim]);
+
+            for pair in sorted_pairs {
+                if pair.0[dim] > lowest_rec[dim] {
+                    // Look at the pair that is exactly 1 step "smaller" in this dimension's lower bound
+                    let mut prev_pair = pair.clone();
+                    prev_pair.0[dim] -= 1;
+
+                    // If that previous pair exists in our map, add its accumulated weight to the current pair
+                    if let Some(&prev_val) = dp.get(&prev_pair) {
+                        let current_val = *dp.get(&pair).unwrap_or(&0.0);
+                        dp.insert(pair, current_val + prev_val);
+                    }
+                }
+            }
+        }
+
+        // 2. Sweep over UPPER bounds
+        // Accumulate probabilities from larger upper bounds to smaller upper bounds (u >= U)
+        for dim in 0..dims {
+            let mut sorted_pairs = pairs.to_vec();
+            // Sort descending by the upper bound in this specific dimension
+            sorted_pairs.par_sort_unstable_by(|a, b| b.1[dim].cmp(&a.1[dim]));
+
+            for pair in sorted_pairs {
+                if pair.1[dim] < largest_rec[dim] {
+                    // Look at the pair that is exactly 1 step "larger" in this dimension's upper bound
+                    let mut next_pair = pair.clone();
+                    next_pair.1[dim] += 1;
+
+                    // If that next pair exists in our map, add its accumulated weight to the current pair
+                    if let Some(&next_val) = dp.get(&next_pair) {
+                        let current_val = *dp.get(&pair).unwrap_or(&0.0);
+                        dp.insert(pair, current_val + next_val);
+                    }
+                }
+            }
+        }
+
+        let mut final_probs = FxHashMap::default();
+
+        if return_weights {
+            // Return raw cumulative weights (NO division)
+            for (pair, cumulative_weight) in dp {
+                final_probs.insert(pair, cumulative_weight);
+            }
+        } else {
+            // Return true cumulative probabilities [0.0 - 1.0]
+            for (pair, cumulative_weight) in dp {
+                final_probs.insert(pair, cumulative_weight / total_weight);
+            }
+        }
+
+        final_probs
     }
 
     /// The core math logic! Returns the sum of probabilities of all queries that ENCLOSE the target MBQ.
@@ -160,64 +221,6 @@ impl<'a> QueryDistribution<'a> {
         self.mbq_to_cumulative_prob.get(query).unwrap().clone()
     }
 
-    /// Only used for the 'flattened' dist. Returns the direct weight, not the prob.
-    fn compute_cumulative_weight(
-        mbq: &DomPair,
-        dist: &DistributionType,
-        lowest_rec: &[Value],
-        largest_rec: &[Value],
-        dense_probs: &[f64],
-        // dom_pair_to_known_prob: &FxHashMap<DomPair, f64>,
-        //dom_pair_slice: &[(DomPair, f64)], // Now a sorted flat slice
-        _total_weight: f64,
-    ) -> f64 {
-        match dist {
-            DistributionType::Uniform => {
-                // This is faster than a hash lookup for uniform (I think)
-                let mut dominated_vals: u64 = 1;
-                for (&l_val, &min_val) in mbq.0.iter().zip(lowest_rec.iter()) {
-                    dominated_vals *= (l_val - min_val + 1) as u64;
-                }
-                let mut dominating_vals: u64 = 1;
-                for (&u_val, &max_val) in mbq.1.iter().zip(largest_rec.iter()) {
-                    dominating_vals *= (max_val - u_val + 1) as u64;
-                }
-                let count = (dominated_vals * dominating_vals) as f64;
-                count
-            }
-
-            _ => {
-                let (target_lower, target_upper) = mbq;
-
-                let lower_combos = lowest_rec
-                    .iter()
-                    .zip(target_lower.iter())
-                    .map(|(&min_val, &t_val)| min_val..=t_val)
-                    .multi_cartesian_product();
-
-                let upper_combos = target_upper
-                    .iter()
-                    .zip(largest_rec.iter())
-                    .map(|(&t_val, &max_val)| t_val..=max_val)
-                    .multi_cartesian_product();
-
-                // Parallelize the evaluation of the cartesian product space
-                let true_prob: f64 = lower_combos
-                    .cartesian_product(upper_combos)
-                    .map(|(c_lower, c_upper)| {
-                        // Flatten the generated coordinate on the fly
-                        let idx = flatten_dompair(&(c_lower, c_upper), largest_rec, lowest_rec);
-
-                        // O(1) array lookup! No hashing overhead.
-                        dense_probs[idx]
-                    })
-                    .sum();
-
-                true_prob
-            }
-        }
-    }
-
     // pub fn get_cumulative_prob(&self, p0: &DomPair) -> Probability {
     //     *self.mbq_to_cumulative_prob.get(p0).unwrap_or(&0.0)
     // }
@@ -231,13 +234,13 @@ impl<'a> QueryDistribution<'a> {
         let upper_bound = observed_prob + epsilon;
 
         let start_idx = self
-            .probs_and_dom_pairs
+            .cumulative_probs_and_dom_pairs
             .partition_point(|x| x.0 < lower_bound);
         let end_idx = self
-            .probs_and_dom_pairs
+            .cumulative_probs_and_dom_pairs
             .partition_point(|x| x.0 <= upper_bound);
 
-        self.probs_and_dom_pairs[start_idx..end_idx]
+        self.cumulative_probs_and_dom_pairs[start_idx..end_idx]
             .iter()
             .map(|(_, pair)| pair.clone())
             .collect()
@@ -387,24 +390,8 @@ impl<'a> QueryDistribution<'a> {
     ) {
         debug!("Making internal QD for flatten");
         let old_qd = Self::new(Vec::from(pairs), encrypted_db, DistributionType::Uniform);
-        let mut mapping = old_qd.dom_pair_to_known_prob;
+        let mut mapping = old_qd.dom_pair_to_known_raw_weight;
         let mut total_weight = old_qd.total_weight;
-
-        let (lowest_rec, largest_rec) = encrypted_db.get_dom_pair();
-
-        // Find the maximum possible index to size our vector
-        let max_pair = (largest_rec.clone(), largest_rec.clone());
-        let max_index = flatten_dompair(&max_pair, &largest_rec, &lowest_rec);
-
-        debug!("Making vec of size: {}", max_index + 1);
-        // Allocate the dense array filled with 0.0
-        let mut dense_probs = vec![0.0f64; max_index + 1];
-        debug!("Done with massive vec!");
-        // Populate it with the known weights
-        for (pair, &prob) in mapping.iter() {
-            let idx = flatten_dompair(pair, &largest_rec, &lowest_rec);
-            dense_probs[idx] = prob;
-        }
 
         // as per algorithm 2: Start at the largest possible query and work back. THis updates
         // the old QD as we go and works over every pair, so time might be n^2
@@ -434,9 +421,18 @@ impl<'a> QueryDistribution<'a> {
             }
         }
 
-        let pb = ProgressBar::new(largest_l1 as u64 + 1);
+        let pb = ProgressBar::new(largest_l1 + 1);
 
         for d in (0..=largest_l1).rev() {
+            let cumul_weight_mapping = Self::precompute_cumulative_res(
+                &pairs,
+                &mapping,
+                &low_pair,
+                &high_pair,
+                total_weight,
+                true,
+            );
+
             let initial_tmx = encrypted_db.get_dom_pair();
 
             // If there are no pairs with this distance, just skip to the next 'd'
@@ -456,14 +452,7 @@ impl<'a> QueryDistribution<'a> {
             let (equi_dist_pairs, unique_queries, max_weight, tmx) = pairs_for_d
                 .par_iter()
                 .map(|(original_pair, query)| {
-                    let cand_prob_val = Self::compute_cumulative_prob(
-                        query,
-                        &DistributionType::Flat,
-                        &low_pair,
-                        &high_pair,
-                        &mapping,
-                        total_weight,
-                    );
+                    let cand_prob_val = cumul_weight_mapping.get(query).unwrap() / total_weight;
 
                     // Wrap the single query in a HashSet so it matches the reduce type!
                     let mut unique_set = HashSet::new();
@@ -491,31 +480,12 @@ impl<'a> QueryDistribution<'a> {
                 );
 
             // As per line 3 - the sum of weights covering tmx
-            let smx = Self::compute_cumulative_weight(
-                &tmx,
-                &DistributionType::Flat,
-                &low_pair,
-                &high_pair,
-                &dense_probs,
-                //&mapping,
-                total_weight,
-            );
+            let smx = cumul_weight_mapping.get(&tmx).unwrap();
 
             for mbq in unique_queries.iter() {
-                let st = Self::compute_cumulative_weight(
-                    &mbq,
-                    &DistributionType::Flat,
-                    &low_pair,
-                    &high_pair,
-                    //&mapping,
-                    &dense_probs,
-                    total_weight,
-                );
+                let st = cumul_weight_mapping.get(mbq).unwrap();
                 let old_weight = mapping.get(&mbq).unwrap();
-                let res = old_weight.clone() + (smx - st);
-                mapping.insert(mbq.clone(), res);
-                let idx = flatten_dompair(&mbq, &largest_rec, &lowest_rec);
-                dense_probs[idx] = res;
+                mapping.insert(mbq.clone(), old_weight.clone() + (smx - st));
                 total_weight += smx - st;
             }
             pb.inc(1);

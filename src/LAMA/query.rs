@@ -486,7 +486,10 @@ impl<'a> QueryDistribution<'a> {
                 mapping.insert(mbq.clone(), *old_weight + (smx - st));
                 total_weight += smx - st;
             }
+            pb.inc(1);
         }
+
+        pb.finish_with_message("Done");
 
         debug!("Finished calculating weights");
 

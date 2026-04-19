@@ -22,11 +22,11 @@ pub fn plot_histograms_of_all_reconstructions(
 
     // let shift_step = 5.0;
     // let scale_step = 5.0;
-    // let rotate = 5.0;
+    // let rotate = 45.0;
 
     let shift_step = 1.0;
     let scale_step = 1.0;
-    let rotate = 10.0;
+    let rotate = 45.0;
 
     let path = format!("{path_to_root}/even_less/{name}_prob100.0_{dist}_{grid}_even_less.json");
     debug!("About to load data from {}", &path);
@@ -314,21 +314,41 @@ fn format_metric(val: f64) -> String {
     if val == 0.0 {
         return "0".to_string();
     }
+
     let abs_val = val.abs();
+
     if abs_val >= 1_000_000_000.0 {
-        format!("{:.1}B", val / 1_000_000_000.0).replace(".0B", "B")
+        let scaled = val / 1_000_000_000.0;
+        if scaled.abs() < 10.0 {
+            format!("{:.1}B", scaled).replace(".0B", "B")
+        } else {
+            format!("{:.0}B", scaled)
+        }
     } else if abs_val >= 1_000_000.0 {
-        format!("{:.1}M", val / 1_000_000.0).replace(".0M", "M")
+        let scaled = val / 1_000_000.0;
+        if scaled.abs() < 10.0 {
+            format!("{:.1}M", scaled).replace(".0M", "M")
+        } else {
+            format!("{:.0}M", scaled)
+        }
     } else if abs_val >= 1_000.0 {
-        format!("{:.1}k", val / 1_000.0).replace(".0k", "K")
+        let scaled = val / 1_000.0;
+        if scaled.abs() < 10.0 {
+            format!("{:.1}K", scaled).replace(".0K", "K")
+        } else {
+            format!("{:.0}K", scaled)
+        }
+    } else if abs_val >= 100.0 {
+        // Round to the nearest 100
+        format!("{:.0}", (val / 100.0).round() * 100.0)
+    } else if abs_val >= 10.0 {
+        // Round to the nearest 10
+        format!("{:.0}", (val / 10.0).round() * 10.0)
     } else {
-        format!("{:.0}", val) // Standard whole number for anything < 1000
+        // Round to the nearest whole number for anything under 10
+        format!("{:.0}", val.round())
     }
 }
-
-/// Generates a Histogram split into individual side-by-side plots.
-/// - Features separate bars with clean gaps.
-/// - Formats large axis numbers with metric suffixes (k, M).
 pub fn plot_mse_frequency_histogram_split(
     mse_data: &HashMap<String, (Vec<f64>, f64)>,
     database_name: &str,
@@ -337,7 +357,7 @@ pub fn plot_mse_frequency_histogram_split(
 ) -> Result<(), Box<dyn Error>> {
     let num_plots = mse_data.len().max(1);
 
-    let root = SVGBackend::new(output_path, (600 * num_plots as u32, 600)).into_drawing_area();
+    let root = SVGBackend::new(output_path, (700 * num_plots as u32, 600)).into_drawing_area();
     root.fill(&WHITE)?;
 
     if mse_data.is_empty() {
@@ -349,13 +369,13 @@ pub fn plot_mse_frequency_histogram_split(
 
     let text_color = BLACK;
     let font_family = "Linux Biolinum";
-    let super_title_font = (font_family, 40, FontStyle::Bold)
+    let super_title_font = (font_family, 44, FontStyle::Bold)
         .into_font()
         .color(&text_color);
 
     ChartBuilder::on(&title_area)
         .caption(
-            format!("{} {} Distribution", database_name, dist_name),
+            format!("{} - {} Distribution", database_name, dist_name),
             super_title_font,
         )
         .build_cartesian_2d(0f32..1f32, 0f32..1f32)?;
@@ -363,11 +383,11 @@ pub fn plot_mse_frequency_histogram_split(
     let num_bins = 8;
 
     // Typography
-    let label_font = (font_family, 24).into_font().color(&text_color);
-    let axis_font = (font_family, 26, FontStyle::Bold)
+    let label_font = (font_family, 28).into_font().color(&text_color);
+    let axis_font = (font_family, 30, FontStyle::Bold)
         .into_font()
         .color(&text_color);
-    let title_font = (font_family, 32, FontStyle::Bold)
+    let title_font = (font_family, 36, FontStyle::Bold)
         .into_font()
         .color(&text_color);
 
@@ -436,34 +456,35 @@ pub fn plot_mse_frequency_histogram_split(
         let local_max_freq = *bins.iter().max().unwrap_or(&0);
         let max_y = ((local_max_freq as f64 * 1.1).ceil() as usize).max(1);
 
-        // Dynamically scale the label area size to pull the title tighter on LAMa
-        let y_label_area = if *method == "LAMa" { 50 } else { 70 };
+        // Expanded label area to fix Y-axis overlap
+        let y_label_area = if *method == "LAMa" { 60 } else { 80 };
 
         // Render Chart
         let mut chart = ChartBuilder::on(panel)
             .margin_top(40)
             .margin_bottom(40)
-            .margin_left(40)
-            // Centering fix: Expand the right margin to perfectly mirror the space taken up
-            // by the left Y-axis labels. This perfectly centers the plot grid without drawing an axis.
-            .margin_right(40 + y_label_area)
+            .margin_left(20)
+            .margin_right(20)
             .caption(*method, title_font.clone())
             .x_label_area_size(55)
             .y_label_area_size(y_label_area)
-            .build_cartesian_2d(min_mse..local_max_mse, 0..max_y)?;
+            // THE FIX: Fake the X-axis domain to be perfectly 0.0 to 8.0
+            // Plotters will effortlessly align ticks to exactly 0, 1, 2, etc.
+            .build_cartesian_2d(0.0f64..(num_bins as f64), 0..max_y)?;
 
         chart
             .configure_mesh()
             .disable_x_mesh()
-            .x_labels(8) // Restored normal label count
+            .x_labels(num_bins * 2)
             .y_desc("Number of Solutions")
             .x_desc("Mean Squared Error (MSE)")
             .x_label_formatter(&|x| {
-                // Specific IF statement for the 0-only scenario: forces all labels to be "0"
+                // THE FIX: Reverse the 0.0-8.0 normalization to display the true MSE scale
+                let real_x = min_mse + (*x * bin_width);
                 if is_zero_mse {
                     "0".to_string()
                 } else {
-                    format_metric(*x)
+                    format_metric(real_x)
                 }
             })
             .y_label_formatter(&|y| format_metric(*y as f64))
@@ -473,16 +494,17 @@ pub fn plot_mse_frequency_histogram_split(
             .bold_line_style(BLACK.mix(0.1))
             .draw()?;
 
-        // Calculate a small gap width
-        let gap = bin_width * 0.05;
+        // Calculate gap based on our normalized bin width of 1.0
+        let gap = 0.05;
 
         for (bin_idx, &count) in bins.iter().enumerate() {
             if count == 0 {
                 continue;
             }
 
-            let x_start = min_mse + (bin_idx as f64) * bin_width;
-            let x_end = min_mse + ((bin_idx + 1) as f64) * bin_width;
+            // The bars naturally span from integer to integer (e.g. 0.0 to 1.0)
+            let x_start = bin_idx as f64;
+            let x_end = (bin_idx + 1) as f64;
 
             chart.draw_series(std::iter::once(Rectangle::new(
                 [(x_start + gap, 0), (x_end - gap, count)],

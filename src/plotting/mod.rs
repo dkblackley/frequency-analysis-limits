@@ -86,7 +86,7 @@ pub fn do_plotting() {
     // let grid_sizes = vec![(20, "20x20"), (25, "25x25"), (50, "50x50")];
     // let grid_sizes = vec![(25, "25x25"), (50, "50x50")];
     // let datasets = vec!["shopparis", "busstop", "cali", "drink", "highway", "spitz"];
-    let datasets = vec!["shopparis", "drink"];
+    let datasets = vec!["highway", "spitz"];
     let methods = vec!["even_less", "remin", "limits"];
     let distributions = vec!["uniform", "gaussian", "beta"];
 
@@ -99,7 +99,7 @@ pub fn do_plotting() {
         .step_by(10)
         .map(|n| (n, format!("{}x{}", n, n)))
         .collect();
-    grid_sizes = vec![(50, "50x50".parse().unwrap())];
+    //grid_sizes = vec![(50, "50x50".parse().unwrap())];
 
     for grid in &grid_sizes {
         for name in &datasets {

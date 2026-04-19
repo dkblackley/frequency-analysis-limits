@@ -101,14 +101,15 @@ impl<'a> Selector<'a> {
                     let dom_pair = get_mbq(&decoded_points);
 
                     // Get TRUE CUMULATIVE PROBABILITY!
-                    let prob = QueryDistribution::compute_cumulative_prob(
-                        &dom_pair,
-                        &self.query_distribution.dist,
-                        &self.lowest_rec,
-                        &self.largest_rec,
-                        &self.query_distribution.dom_pair_to_known_prob,
-                        self.query_distribution.total_weight,
-                    );
+                    // let prob = QueryDistribution::compute_cumulative_prob(
+                    //     &dom_pair,
+                    //     &self.query_distribution.dist,
+                    //     &self.lowest_rec,
+                    //     &self.largest_rec,
+                    //     &self.query_distribution.dom_pair_to_known_prob,
+                    //     self.query_distribution.total_weight,
+                    // );
+                    let prob = self.query_distribution.cumulative_prob_lookup(&dom_pair);
 
                     if prob > 0.0 {
                         // Cast f64 to u64 for HashMap storage
@@ -168,15 +169,17 @@ impl<'a> Selector<'a> {
                 HashMap::new,
                 |mut local_map: HashMap<u64, Vec<Vec<i64>>>, val_tuple| {
                     let bounding_pair = get_mbq(&val_tuple);
-                    // let prob = self.query_distribution.get_cumulative_prob(&bounding_pair);
-                    let prob = QueryDistribution::compute_cumulative_prob(
-                        &bounding_pair,
-                        &self.query_distribution.dist,
-                        &self.lowest_rec,
-                        &self.largest_rec,
-                        &self.query_distribution.dom_pair_to_known_prob,
-                        self.query_distribution.total_weight,
-                    );
+                    let prob = self
+                        .query_distribution
+                        .cumulative_prob_lookup(&bounding_pair);
+                    // let prob = QueryDistribution::compute_cumulative_prob(
+                    //     &bounding_pair,
+                    //     &self.query_distribution.dist,
+                    //     &self.lowest_rec,
+                    //     &self.largest_rec,
+                    //     &self.query_distribution.dom_pair_to_known_prob,
+                    //     self.query_distribution.total_weight,
+                    // );
 
                     let flattened_tuple: Vec<i64> = val_tuple
                         .iter()
@@ -305,15 +308,17 @@ impl<'a> Selector<'a> {
                     let bounding_pair = get_mbq(&val_tuple);
 
                     // NEW: Use the cumulative probability natively
-                    //let prob = self.query_distribution.get_cumulative_prob(&bounding_pair);
-                    let prob = QueryDistribution::compute_cumulative_prob(
-                        &bounding_pair,
-                        &self.query_distribution.dist,
-                        &self.lowest_rec,
-                        &self.largest_rec,
-                        &self.query_distribution.dom_pair_to_known_prob,
-                        self.query_distribution.total_weight,
-                    );
+                    let prob = self
+                        .query_distribution
+                        .cumulative_prob_lookup(&bounding_pair);
+                    // let prob = QueryDistribution::compute_cumulative_prob(
+                    //     &bounding_pair,
+                    //     &self.query_distribution.dist,
+                    //     &self.lowest_rec,
+                    //     &self.largest_rec,
+                    //     &self.query_distribution.dom_pair_to_known_prob,
+                    //     self.query_distribution.total_weight,
+                    // );
                     let flattened_tuple: Vec<Value> = val_tuple
                         .iter()
                         .map(|record| flatten_nd(record, &*largest_rec, &*lowest_rec))

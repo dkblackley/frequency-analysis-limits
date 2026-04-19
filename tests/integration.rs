@@ -177,15 +177,7 @@ fn end_flat() {
         let dom_pair = get_mbq(&true_plaintexts);
 
         // Use the native cumulative probability directly
-        // query_dist_ref.get_cumulative_prob(&dom_pair)
-        QueryDistribution::compute_cumulative_prob(
-            &dom_pair,
-            &query_dist_ref.dist,
-            &*query_dist_ref.lowest_rec,
-            &*query_dist_ref.largest_rec,
-            &query_dist_ref.dom_pair_to_known_prob,
-            query_dist_ref.total_weight,
-        )
+        query_dist_ref.cumulative_prob_lookup(&dom_pair)
     };
 
     // 2. Expected (true) probability of proposed plaintexts
@@ -197,15 +189,7 @@ fn end_flat() {
         let pt_mbq = get_mbq(&pt_records);
 
         // Use the native cumulative probability directly
-        //query_dist_ref.get_cumulative_prob(&pt_mbq)
-        QueryDistribution::compute_cumulative_prob(
-            &pt_mbq,
-            &query_dist_ref.dist,
-            &*query_dist_ref.lowest_rec,
-            &*query_dist_ref.largest_rec,
-            &query_dist_ref.dom_pair_to_known_prob,
-            query_dist_ref.total_weight,
-        )
+        query_dist_ref.cumulative_prob_lookup(&pt_mbq)
     };
 
     // 3. Unified Validator
@@ -362,15 +346,7 @@ fn end_to_end() {
         let dom_pair = get_mbq(&true_plaintexts);
 
         // Use the native cumulative probability directly
-        // query_dist_ref.get_cumulative_prob(&dom_pair)
-        QueryDistribution::compute_cumulative_prob(
-            &dom_pair,
-            &query_dist_ref.dist,
-            &*query_dist_ref.lowest_rec,
-            &*query_dist_ref.largest_rec,
-            &query_dist_ref.dom_pair_to_known_prob,
-            query_dist_ref.total_weight,
-        )
+        query_dist_ref.cumulative_prob_lookup(&dom_pair)
     };
 
     // 2. Expected (true) probability of proposed plaintexts
@@ -382,15 +358,7 @@ fn end_to_end() {
         let pt_mbq = get_mbq(&pt_records);
 
         // Use the native cumulative probability directly
-        //query_dist_ref.get_cumulative_prob(&pt_mbq)
-        QueryDistribution::compute_cumulative_prob(
-            &pt_mbq,
-            &query_dist_ref.dist,
-            &*query_dist_ref.lowest_rec,
-            &*query_dist_ref.largest_rec,
-            &query_dist_ref.dom_pair_to_known_prob,
-            query_dist_ref.total_weight,
-        )
+        query_dist_ref.cumulative_prob_lookup(&pt_mbq)
     };
 
     // 3. Unified Validator

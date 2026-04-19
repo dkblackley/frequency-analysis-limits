@@ -98,7 +98,7 @@ impl<'a> QueryDistribution<'a> {
     }
 
     /// The core math logic! Returns the sum of probabilities of all queries that ENCLOSE the target MBQ.
-    pub fn compute_cumulative_prob(
+    fn compute_cumulative_prob(
         mbq: &DomPair,
         dist: &DistributionType,
         lowest_rec: &[Value],

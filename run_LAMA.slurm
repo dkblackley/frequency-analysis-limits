@@ -85,6 +85,7 @@ $SG_RUN cargo clean
 echo "Building project inside container..."
 $SG_RUN cargo rustc --bin frequency_analysis_limits --release -- -Clink-arg=-lprotobuf
 
+padding=5
 
 #NAMES=("spitz")
 #DISTS=("uniform" "gaussian" "beta" "flat")
@@ -137,7 +138,8 @@ for data_dir in "${DATA_DIRS[@]}"; do
                 --dir-path "$data_dir" \
                 --name "$name" \
                 --t "$t_val" \
-                --dist "$dist"
+                --dist "$dist" \
+                --padding "$padding"
 
             # Check if the initial run failed
             if [ $? -ne 0 ]; then
@@ -149,7 +151,7 @@ for data_dir in "${DATA_DIRS[@]}"; do
                         --name "$name" \
                         --t 3 \
                         --dist "$dist" \
-                        --padding 5
+                        --padding "$padding"
 
                 # Check if the retry also failed
                 if [ $? -ne 0 ]; then

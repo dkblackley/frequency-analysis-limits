@@ -153,7 +153,7 @@ pub fn plot_spatial_reconstruction(
 
     let (title_area, plot_area) = root.split_vertically(80);
 
-    let title_font = ("Linux Biolinum", 64, FontStyle::Bold).into_font();
+    let title_font = ("Linux Biolinum", 78, FontStyle::Bold).into_font();
     let title_size = title_font
         .layout_box(&master_title)
         .unwrap_or(((0, 0), (0, 0)));
@@ -182,7 +182,7 @@ pub fn plot_spatial_reconstruction(
             .margin_right(30)
             .caption(
                 *method_name,
-                ("Linux Biolinum", 56, FontStyle::Bold)
+                ("Linux Biolinum", 68, FontStyle::Bold)
                     .into_font()
                     .color(&BLACK),
             )
@@ -225,7 +225,11 @@ pub fn plot_spatial_reconstruction(
             .position(SeriesLabelPosition::UpperRight)
             .background_style(WHITE.mix(0.9).filled())
             .border_style(BLACK)
-            .label_font(("Linux Biolinum", 32).into_font().color(&text_color))
+            .label_font(
+                ("Linux Biolinum", 46, FontStyle::Bold)
+                    .into_font()
+                    .color(&text_color),
+            )
             .margin(10)
             .draw()?;
     }

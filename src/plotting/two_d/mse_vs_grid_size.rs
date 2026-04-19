@@ -122,7 +122,7 @@ fn plot_db_side_by_side(
         return Ok(());
     }
 
-    let total_width = 700 * num_dists as u32;
+    let total_width = 900 * num_dists as u32;
     let total_height = 600;
 
     let root = SVGBackend::new(output_path, (total_width, total_height)).into_drawing_area();
@@ -183,10 +183,10 @@ fn plot_db_side_by_side(
             Some(f) => f.to_uppercase().collect::<String>() + chars.as_str(),
         };
 
-        let title = format!("{} - {} Query Distribution", pretty_db, pretty_dist);
+        let title = format!("{} - {} Distribution", pretty_db, pretty_dist);
 
         // THE FIX: Carve out the top 70 pixels specifically for the title area
-        let (title_area, chart_area) = area.split_vertically(70);
+        let (title_area, chart_area) = area.split_vertically(90);
 
         // To perfectly center the title over the grid beneath it, we shrink this title drawing area
         // to match the exact left/right boundaries of the chart grid below (110px left offset, 40px right offset).
@@ -196,19 +196,19 @@ fn plot_db_side_by_side(
         ChartBuilder::on(&centered_title_area)
             .caption(
                 title,
-                ("Linux Biolinum", 38, FontStyle::Bold)
+                ("Linux Biolinum", 58, FontStyle::Bold)
                     .into_font()
                     .color(&BLACK),
             )
             .build_cartesian_2d(0..1, 0..1)?;
 
         let mut chart = ChartBuilder::on(&chart_area)
-            .margin_top(0) // Top spacing is naturally handled by the title_area above it
-            .margin_bottom(40)
-            .margin_left(20)
-            .margin_right(20)
-            .x_label_area_size(60)
-            .y_label_area_size(70)
+            .margin_top(10) // Top spacing is naturally handled by the title_area above it
+            .margin_bottom(0)
+            .margin_left(50)
+            .margin_right(50)
+            .x_label_area_size(120)
+            .y_label_area_size(140)
             .build_cartesian_2d(
                 (min_grid - x_pad)..(max_grid + x_pad),
                 (1.0f64..y_max).log_scale(), // Implement Log scale starting at 1.0
@@ -220,8 +220,8 @@ fn plot_db_side_by_side(
             .light_line_style(TRANSPARENT)
             .axis_style(RGBColor(100, 100, 100))
             .x_desc("Grid Size")
-            .y_desc("Mean Squared Error (MSE)")
-            .axis_desc_style(("Linux Biolinum", 32, FontStyle::Bold).into_font()) // Bold axis text
+            .y_desc("Mean Squared Error")
+            .axis_desc_style(("Linux Biolinum", 72, FontStyle::Bold).into_font()) // Bold axis text
             .x_label_formatter(&|x| format_metric(*x))
             .y_label_formatter(&|y| {
                 if *y <= 1.001 {
@@ -231,7 +231,7 @@ fn plot_db_side_by_side(
                     format_metric(*y)
                 }
             })
-            .label_style(("Linux Biolinum", 26, FontStyle::Bold).into_font()) // Bold axis tick numbers
+            .label_style(("Linux Biolinum", 62).into_font()) // Bold axis tick numbers
             .draw()?;
 
         // Grab the methods and explicitly map them to their formatted name and rank order
@@ -282,11 +282,11 @@ fn plot_db_side_by_side(
         chart
             .configure_series_labels()
             // Change UpperRight to MiddleRight
-            .position(SeriesLabelPosition::MiddleRight)
+            .position(SeriesLabelPosition::LowerRight)
             // I've added the solid background back here, but you can leave it TRANSPARENT if you prefer!
             .background_style(RGBColor(255, 255, 255).mix(0.9))
             .border_style(RGBColor(200, 200, 200))
-            .label_font(("Linux Biolinum", 24))
+            .label_font(("Linux Biolinum", 38, FontStyle::Bold).into_font())
             .margin(10)
             .draw()?;
     }

@@ -101,19 +101,17 @@ pub fn do_plotting() {
 
     plot_grid_by_mse(&grid_sizes, &datasets, &methods, &distributions).unwrap();
 
-    for dist in distributions {
-        // The numbers for the domains below don't exactly match the original domain. This is
-        // because somethimes the best case/procrustes analysis sometimes actually falls outside the
-        // domain. This is a little arbitrary, but just give these methods some more room to get the
-        // truly best result.
+    // The numbers for the domains below don't exactly match the original domain. This is
+    // because somethimes the best case/procrustes analysis sometimes actually falls outside the
+    // domain. This is a little arbitrary, but just give these methods some more room to get the
+    // truly best result.
 
-        for name in datasets.clone() {
-            let res = plot_histograms_of_all_reconstructions(name, (50, 50), (60, 60), dist);
-            match res {
-                Ok(_) => {}
-                Err(e) => {
-                    warn!("{name} hustogram of all recons 50x50 failed:  {e}")
-                }
+    for name in datasets.clone() {
+        let res = plot_histograms_of_all_reconstructions(name, (50, 50), (60, 60), "uniform");
+        match res {
+            Ok(_) => {}
+            Err(e) => {
+                warn!("{name} hustogram of all recons 50x50 failed:  {e}")
             }
         }
     }

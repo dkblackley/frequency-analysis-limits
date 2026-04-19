@@ -26,7 +26,7 @@ pub fn plot_histograms_of_all_reconstructions(
 
     let shift_step = 1.0;
     let scale_step = 1.0;
-    let rotate = 45.0;
+    let rotate = 30.0;
 
     let path = format!("{path_to_root}/even_less/{name}_prob100.0_{dist}_{grid}_even_less.json");
     debug!("About to load data from {}", &path);
@@ -357,7 +357,7 @@ pub fn plot_mse_frequency_histogram_split(
 ) -> Result<(), Box<dyn Error>> {
     let num_plots = mse_data.len().max(1);
 
-    let root = SVGBackend::new(output_path, (700 * num_plots as u32, 600)).into_drawing_area();
+    let root = SVGBackend::new(output_path, (800 * num_plots as u32, 600)).into_drawing_area();
     root.fill(&WHITE)?;
 
     if mse_data.is_empty() {
@@ -369,7 +369,7 @@ pub fn plot_mse_frequency_histogram_split(
 
     let text_color = BLACK;
     let font_family = "Linux Biolinum";
-    let super_title_font = (font_family, 44, FontStyle::Bold)
+    let super_title_font = (font_family, 76, FontStyle::Bold)
         .into_font()
         .color(&text_color);
 
@@ -383,11 +383,11 @@ pub fn plot_mse_frequency_histogram_split(
     let num_bins = 8;
 
     // Typography
-    let label_font = (font_family, 28).into_font().color(&text_color);
-    let axis_font = (font_family, 30, FontStyle::Bold)
+    let label_font = (font_family, 60).into_font().color(&text_color);
+    let axis_font = (font_family, 60, FontStyle::Bold)
         .into_font()
         .color(&text_color);
-    let title_font = (font_family, 36, FontStyle::Bold)
+    let title_font = (font_family, 66, FontStyle::Bold)
         .into_font()
         .color(&text_color);
 
@@ -457,16 +457,16 @@ pub fn plot_mse_frequency_histogram_split(
         let max_y = ((local_max_freq as f64 * 1.1).ceil() as usize).max(1);
 
         // Expanded label area to fix Y-axis overlap
-        let y_label_area = if *method == "LAMa" { 60 } else { 80 };
+        let y_label_area = if *method == "LAMa" { 80 } else { 130 };
 
         // Render Chart
         let mut chart = ChartBuilder::on(panel)
-            .margin_top(40)
-            .margin_bottom(40)
-            .margin_left(20)
-            .margin_right(20)
+            .margin_top(70)
+            .margin_bottom(0)
+            .margin_left(50)
+            .margin_right(50)
             .caption(*method, title_font.clone())
-            .x_label_area_size(55)
+            .x_label_area_size(100)
             .y_label_area_size(y_label_area)
             // THE FIX: Fake the X-axis domain to be perfectly 0.0 to 8.0
             // Plotters will effortlessly align ticks to exactly 0, 1, 2, etc.
@@ -475,7 +475,7 @@ pub fn plot_mse_frequency_histogram_split(
         chart
             .configure_mesh()
             .disable_x_mesh()
-            .x_labels(num_bins * 2)
+            .x_labels(num_bins)
             .y_desc("Number of Solutions")
             .x_desc("Mean Squared Error (MSE)")
             .x_label_formatter(&|x| {

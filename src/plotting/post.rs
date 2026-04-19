@@ -96,18 +96,15 @@ fn print_min_val_2d(points: &Vec<Vec<f64>>) {
 // "fix" the spitz DB to the original.
 pub fn do_spitz_align(
     remin_data: Vec<ReconstructionDataPoint>,
-    remin_path: &str,
-    unique_rem_name: &str,
     less_data: Vec<ReconstructionDataPoint>,
-    less_path: &str,
-    unique_less_name: &str,
-    dir: &str,
-) {
+) -> (Vec<ReconstructionDataPoint>, Vec<ReconstructionDataPoint>) {
     let spitz_orig = "/home/yelnat/Nextcloud/10TB-STHDD/datasets/freq_an/graw_drawing".to_string();
+
+    // Process, map, and align 'remin_data'
     let lat_long_truth = process_and_map_points(
         &format!("{spitz_orig}/metadata.json"),
         &format!("{spitz_orig}/Spitz.csv"),
-        remin_data.clone(),
+        remin_data,
     )
     .unwrap();
 
@@ -119,27 +116,10 @@ pub fn do_spitz_align(
             .collect(),
     );
 
-    let aligned = procrustes_align(&*lat_long_truth, true, true, true);
+    let aligned_rem = procrustes_align(&*lat_long_truth, true, true, true);
+    info!("MSE of Remin (On map): {:?}", aligned_rem.1);
 
-    info!("MSE of Remin (On map): {:?}", aligned.1);
-
-    let out_path = format!("{remin_path}/{unique_rem_name}.geojson");
-    let recon_points_vec: Vec<Vec<f64>> = aligned
-        .0
-        .iter()
-        .map(|point| point.reconstructed_points.clone())
-        .collect();
-
-    export_to_geojson(recon_points_vec, &out_path).unwrap();
-
-    let true_points: Vec<Vec<f64>> = aligned
-        .0
-        .iter()
-        .map(|point| point.true_points.clone())
-        .collect();
-    let true_path = format!("{dir}spitz/true.geojson");
-    export_to_geojson(true_points, &true_path).unwrap();
-
+    // Process, map, and align 'less_data'
     let lat_long_truth = process_and_map_points(
         &format!("{spitz_orig}/metadata.json"),
         &format!("{spitz_orig}/Spitz.csv"),
@@ -147,20 +127,10 @@ pub fn do_spitz_align(
     )
     .unwrap();
 
-    let aligned = procrustes_align(&*lat_long_truth, true, true, true);
+    let aligned_less = procrustes_align(&*lat_long_truth, true, true, true);
+    info!("MSE of even less (On map): {:?}", aligned_less.1);
 
-    info!("MSE of even less (On map): {:?}", aligned.1);
-
-    let out_path = format!("{less_path}/{unique_less_name}.geojson");
-
-    let recon_points_vec: Vec<Vec<f64>> = aligned
-        .0
-        .iter()
-        .map(|point| point.reconstructed_points.clone())
-        .collect();
-    export_to_geojson(recon_points_vec, &out_path).unwrap();
-
-    info!("Saved lili to geojson");
+    (aligned_rem.0, aligned_less.0)
 }
 
 /// Calculates the standard Mean Squared Error (MSE) across N dimensions

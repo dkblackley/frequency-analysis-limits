@@ -117,7 +117,7 @@ pub fn plot_histograms_of_all_reconstructions(
         &methods_to_mse,
         format_db_name(name),
         format_dist_name(dist),
-        &format!("figures/mse_histogram_{name}_{dist}.svg"),
+        &format!("figures/histogram_mse_sol_num/mse_histogram_{name}_{dist}.svg"),
     )?;
 
     Ok(())

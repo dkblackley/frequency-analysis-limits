@@ -82,7 +82,7 @@ pub fn plot_grid_by_mse(
         }
 
         if !db_data.is_empty() {
-            let output_path = format!("figures/{}_mse_vs_grid_combined.svg", db);
+            let output_path = format!("figures/mse_grid_size/mse_grid_{}.svg", db);
             plot_db_side_by_side(db, &db_data, distributions, &output_path)?;
             println!(
                 "Generated combined plot for {} -> saved to {}",

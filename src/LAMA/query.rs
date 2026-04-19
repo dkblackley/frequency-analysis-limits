@@ -45,8 +45,21 @@ impl<'a> QueryDistribution<'a> {
 
         info!("Computing true cumulative probabilities for every MBQ");
 
-        let mbq_to_cumulative_prob = Self::precompute_cumulative_res(
-            &pairs,
+        let dims = lowest_rec.len();
+
+        // Create a vector of vectors, one for each dimension
+        let mut sorted_by_low_pairs = vec![pairs.to_vec(); dims];
+        let mut sorted_by_high_pairs = vec![pairs.to_vec(); dims];
+
+        // Sort each inner vector by its respective dimension
+        for dim in 0..dims {
+            sorted_by_low_pairs[dim].sort_unstable_by_key(|p| p.0[dim]);
+            sorted_by_high_pairs[dim].sort_unstable_by(|a, b| b.1[dim].cmp(&a.1[dim]));
+        }
+
+        let mbq_to_cumulative_prob = Self::precompute_cumulative_results(
+            &sorted_by_low_pairs,
+            &sorted_by_high_pairs,
             &dom_pair_to_known_weight,
             &lowest_rec,
             &largest_rec,
@@ -82,61 +95,51 @@ impl<'a> QueryDistribution<'a> {
     /// using an N-dimensional prefix sum approach.
     /// Dynamically precomputes the cumulative probabilities for all possible DomPairs
     /// using an N-dimensional prefix sum approach.
-    fn precompute_cumulative_res(
-        pairs: &[DomPair],
+    fn precompute_cumulative_results(
+        sorted_by_lowest: &[Vec<DomPair>],  // Notice the type change here
+        sorted_by_highest: &[Vec<DomPair>], // Notice the type change here
         dom_pair_to_known_weight: &FxHashMap<DomPair, f64>,
         lowest_rec: &[Value],
         largest_rec: &[Value],
         total_weight: f64,
         return_weights: bool,
     ) -> FxHashMap<DomPair, Probability> {
-        // Start with the raw weights
         let mut dp = dom_pair_to_known_weight.clone();
-        if pairs.is_empty() {
+
+        // Safety check to ensure we have data
+        if sorted_by_highest.is_empty() || sorted_by_highest[0].is_empty() {
             return dp;
         }
 
         let dims = lowest_rec.len();
 
         // 1. Sweep over LOWER bounds
-        // Accumulate probabilities from smaller lower bounds to larger lower bounds (l <= L)
         for dim in 0..dims {
-            let mut sorted_pairs = pairs.to_vec();
-            // Sort ascending by the lower bound in this specific dimension
-            sorted_pairs.par_sort_unstable_by_key(|p| p.0[dim]);
-
-            for pair in sorted_pairs {
+            // Grab the vector specifically sorted for THIS dimension
+            for pair in &sorted_by_lowest[dim] {
                 if pair.0[dim] > lowest_rec[dim] {
-                    // Look at the pair that is exactly 1 step "smaller" in this dimension's lower bound
                     let mut prev_pair = pair.clone();
                     prev_pair.0[dim] -= 1;
 
-                    // If that previous pair exists in our map, add its accumulated weight to the current pair
                     if let Some(&prev_val) = dp.get(&prev_pair) {
-                        let current_val = *dp.get(&pair).unwrap_or(&0.0);
-                        dp.insert(pair, current_val + prev_val);
+                        let current_val = *dp.get(pair).unwrap_or(&0.0);
+                        dp.insert(pair.clone(), current_val + prev_val);
                     }
                 }
             }
         }
 
         // 2. Sweep over UPPER bounds
-        // Accumulate probabilities from larger upper bounds to smaller upper bounds (u >= U)
         for dim in 0..dims {
-            let mut sorted_pairs = pairs.to_vec();
-            // Sort descending by the upper bound in this specific dimension
-            sorted_pairs.par_sort_unstable_by(|a, b| b.1[dim].cmp(&a.1[dim]));
-
-            for pair in sorted_pairs {
+            // Grab the vector specifically sorted for THIS dimension
+            for pair in &sorted_by_highest[dim] {
                 if pair.1[dim] < largest_rec[dim] {
-                    // Look at the pair that is exactly 1 step "larger" in this dimension's upper bound
                     let mut next_pair = pair.clone();
                     next_pair.1[dim] += 1;
 
-                    // If that next pair exists in our map, add its accumulated weight to the current pair
                     if let Some(&next_val) = dp.get(&next_pair) {
-                        let current_val = *dp.get(&pair).unwrap_or(&0.0);
-                        dp.insert(pair, current_val + next_val);
+                        let current_val = *dp.get(pair).unwrap_or(&0.0);
+                        dp.insert(pair.clone(), current_val + next_val);
                     }
                 }
             }
@@ -145,12 +148,10 @@ impl<'a> QueryDistribution<'a> {
         let mut final_probs = FxHashMap::default();
 
         if return_weights {
-            // Return raw cumulative weights (NO division)
             for (pair, cumulative_weight) in dp {
                 final_probs.insert(pair, cumulative_weight);
             }
         } else {
-            // Return true cumulative probabilities [0.0 - 1.0]
             for (pair, cumulative_weight) in dp {
                 final_probs.insert(pair, cumulative_weight / total_weight);
             }
@@ -421,11 +422,22 @@ impl<'a> QueryDistribution<'a> {
             }
         }
 
+        let dims = low_pair.len();
+
+        let mut sorted_by_low_pairs = vec![pairs.to_vec(); dims];
+        let mut sorted_by_high_pairs = vec![pairs.to_vec(); dims];
+
+        for dim in 0..dims {
+            sorted_by_low_pairs[dim].sort_unstable_by_key(|p| p.0[dim]);
+            sorted_by_high_pairs[dim].sort_unstable_by(|a, b| b.1[dim].cmp(&a.1[dim]));
+        }
+
         let pb = ProgressBar::new(largest_l1 + 1);
 
         for d in (0..=largest_l1).rev() {
-            let cumul_weight_mapping = Self::precompute_cumulative_res(
-                &pairs,
+            let cumul_weight_mapping = Self::precompute_cumulative_results(
+                &sorted_by_low_pairs,
+                &sorted_by_high_pairs,
                 &mapping,
                 &low_pair,
                 &high_pair,

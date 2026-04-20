@@ -6,6 +6,7 @@ use crate::plotting::{DbResult, ReconstructionDataPoint};
 use crate::LAMA::error::LAMAError;
 use crate::LAMA::query::QueryDistribution;
 use crate::LAMA::selector::Selector;
+use crate::LAMA::solver::CpSolverStatus::{Feasible, Optimal};
 use crate::LAMA::solver::Solver;
 use crate::LAMA::translator::Translator;
 use crate::LAMA::utility::get_mbq;
@@ -19,6 +20,7 @@ use std::io::BufWriter;
 use std::time::Instant;
 
 mod error;
+mod ortools_wrap;
 pub mod query;
 pub mod selector;
 pub mod solver;
@@ -177,15 +179,15 @@ pub fn lama_attack(
     }
 
     info!("Building and executing the CP-SAT Solver for the final constraint graph...");
-    let mut solver = Solver::new(translator.get_var_index_map());
     let end = Instant::now();
+    let mut solver = Solver::new(translator.get_var_index_map());
 
     let mut model = translator.get_proto_model();
-    let responses = solver.solve(&mut model, false);
 
-    if solver.solution_stat != CpSolverStatus::Optimal
-        && solver.solution_stat != CpSolverStatus::Feasible
-    {
+    // NOTE: The only change in the test is passing largest_enc_val here
+    let responses = solver.solve(&mut model, largest_possible_val, false);
+
+    if solver.solution_stat != Optimal && solver.solution_stat != Feasible {
         // minimum number of expected reconstructions
         let _freq_to_t_tuple: HashMap<(Value, Frequency), Vec<Vec<Value>>> =
             selector.get_freq_val_t_tup_dict(1).unwrap();

@@ -1,10 +1,30 @@
-use cp_sat::builder::IntVar;
-use cp_sat::ffi;
-use cp_sat::proto::CpSolverStatus;
-use cp_sat::proto::{CpModelProto, CpSolverSolution, SatParameters};
+use crate::LAMA::ortools_wrap::{IntVar, PythonCpModel};
 use indicatif::{ProgressBar, ProgressStyle};
 use log::{debug, error, info};
 use std::collections::HashMap;
+
+/// A local recreation of the CP-SAT status enum.
+/// This prevents your codebase from breaking since you rely on these specific variants.
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+pub enum CpSolverStatus {
+    Unknown = 0,
+    ModelInvalid = 1,
+    Feasible = 2,
+    Infeasible = 3,
+    Optimal = 4,
+}
+
+impl From<i32> for CpSolverStatus {
+    fn from(val: i32) -> Self {
+        match val {
+            1 => CpSolverStatus::ModelInvalid,
+            2 => CpSolverStatus::Feasible,
+            3 => CpSolverStatus::Infeasible,
+            4 => CpSolverStatus::Optimal,
+            _ => CpSolverStatus::Unknown,
+        }
+    }
+}
 
 /// Solver Reconstruction as Constraint-Satisfaction.
 /// Finds an assignment of values to identifiers that satisfies the formula C output by the Translator.
@@ -24,36 +44,18 @@ impl Solver {
         }
     }
 
-    /// Reconstructs an assignment of values to records.
-    ///
-    /// # Arguments
-    ///
-    ///
-    /// # Returns
-    ///
-    pub fn solve(&mut self, model: &mut CpModelProto, get_one: bool) -> HashMap<i64, Vec<i64>> {
-        let mut params = SatParameters::default();
-        params.linearization_level = Some(0);
-        params.add_cg_cuts = Some(false);
-        params.add_mir_cuts = Some(false);
-        params.add_lin_max_cuts = Some(false);
-
-        if get_one {
-            params.num_workers = Some(256);
-        } else {
-            params.enumerate_all_solutions = Some(true);
-            params.fill_additional_solutions_in_response = Some(true);
-            // Store all solutions found. I don't know how many reflections higher
-            // dim DBs will have but I don't think it should be above this....
-            params.solution_pool_size = Some(1000);
-        }
-
-        // Validate the model structurally before solving
-        info!("Model Validation: {}", ffi::validate_cp_model(&model));
+    /// Reconstructs an assignment of values to records via the external Python solver.
+    pub fn solve(
+        &mut self,
+        model: &mut PythonCpModel,
+        largest_enc_val: i64,
+        get_one: bool,
+    ) -> HashMap<i64, Vec<i64>> {
+        info!("Model Validation: Deferred to Python CP-SAT");
         info!(
             "Starting solve with {} variables and {} constraints...",
-            model.variables.len(),
-            model.constraints.len()
+            model.num_vars,
+            model.table_constraints.len()
         );
 
         let pb = ProgressBar::new_spinner();
@@ -63,53 +65,61 @@ impl Solver {
                 .template("{spinner:.blue} [{elapsed_precise}] Solver thinking (no strict ETA for SAT problems)...")
                 .unwrap()
         );
-        let response = ffi::solve_with_parameters(&model, &params);
+
+        // Delegate execution and binary formatting to our wrapper
+        let response = model.solve(largest_enc_val, get_one);
         pb.finish_with_message(format!("Solver finished in {:?}", pb.elapsed()));
-        let status = response.status();
 
-        info!("Solver finished in {:?}", pb.elapsed());
-        debug!("Solver status: {:?}", status);
+        if response.is_none() {
+            let numb: i32 = 3; // Infeasible
+            error!("Solver failed to find a consistent reconstruction. Status: {numb} - (3) means infeasible");
+            self.solution_stat = CpSolverStatus::Infeasible;
+            return HashMap::new();
+        }
 
-        let mut reconstructed_dbs = HashMap::new();
-
-        let all_solutions: &Vec<CpSolverSolution> = &response.additional_solutions;
+        let all_solutions = response.unwrap();
         let total_solutions = all_solutions.len();
+
         info!("Found {} solutions", total_solutions);
         self.num_sols = total_solutions as i32;
 
-        self.solution_stat = status.into();
-
-        if status == CpSolverStatus::Optimal || status == CpSolverStatus::Feasible {
-            // Read the final chosen values out of the solver response
-            for (intvar, ids) in &self.var_index_map {
-                let mut found_vals = Vec::new();
-                let orig_sol = intvar.solution_value(&response);
-                let mut orig_appear = false;
-
-                if get_one {
-                    orig_appear = true;
-                    found_vals.push(orig_sol);
-                }
-
-                for i in 0..total_solutions {
-                    let extra_sol =
-                        all_solutions[i].values[self.var_index_map.get(intvar).unwrap().0 as usize];
-                    if orig_sol == extra_sol {
-                        orig_appear = true;
-                    }
-                    found_vals.push(extra_sol);
-                }
-
-                if !orig_appear {
-                    panic!("Original response was not pushed to all solutions!")
-                }
-                // ids is the original 'encrypted' db. For convenience, the key is a true encoded
-                // val of the record.
-                reconstructed_dbs.insert(ids.1, found_vals);
-            }
+        if total_solutions > 0 {
+            self.solution_stat = CpSolverStatus::Optimal;
         } else {
-            let numb: i32 = status.into();
-            error!("Solver failed to find a consistent reconstruction. Status: {numb} - (3) means infeasible");
+            self.solution_stat = CpSolverStatus::Infeasible;
+        }
+
+        debug!("Solver status: {:?}", self.solution_stat);
+
+        let mut reconstructed_dbs = HashMap::new();
+
+        // Map the flat Python outputs exactly back to your internal tracking IDs
+        for (intvar, ids) in &self.var_index_map {
+            let mut found_vals = Vec::new();
+            let mut orig_appear = false;
+
+            // Extract the 'primary' solution from the first slot
+            let orig_sol = all_solutions[0][ids.0 as usize];
+
+            if get_one {
+                orig_appear = true;
+                found_vals.push(orig_sol);
+            }
+
+            for i in 0..total_solutions {
+                let extra_sol = all_solutions[i][ids.0 as usize];
+                if orig_sol == extra_sol {
+                    orig_appear = true;
+                }
+                found_vals.push(extra_sol);
+            }
+
+            if !orig_appear {
+                panic!("Original response was not pushed to all solutions!")
+            }
+
+            // ids.1 is the true encoded value of the record
+            reconstructed_dbs.insert(ids.1, found_vals);
         }
 
         reconstructed_dbs

@@ -75,11 +75,11 @@ impl PythonCpModel {
 
         let python_exe = env::var("PYTHON_EXEC").unwrap_or_else(|_| "python3".to_string());
 
-        info!("Using python: {}", python_exe);
+        info!("Using python: {:?}", python_exe);
 
-        let temp = "/home/yelnat/miniconda3/envs/main/bin/python";
+        //let temp = "/home/yelnat/miniconda3/envs/main/bin/python";
 
-        let output = Command::new(temp)
+        let output = Command::new(python_exe)
             .arg("src/LAMA/solver.py")
             .arg(self.num_vars.to_string())
             .arg(largest_val.to_string())

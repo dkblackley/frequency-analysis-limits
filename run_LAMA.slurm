@@ -87,7 +87,7 @@ $SG_RUN cargo clean
 echo "Building project inside container..."
 $SG_RUN cargo rustc --bin frequency_analysis_limits --release -- -Clink-arg=-lprotobuf
 
-padding=10
+padding=5
 
 #NAMES=("spitz")
 #DISTS=("uniform" "gaussian" "beta" "flat")

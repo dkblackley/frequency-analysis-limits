@@ -1,7 +1,6 @@
 import json
-import sys
-
 import numpy as np
+import sys
 from ortools.sat.python import cp_model
 
 
@@ -17,7 +16,7 @@ class SolutionCollector(cp_model.CpSolverSolutionCallback):
 
 def main():
     # proj_root = "/home/yelnat/Nextcloud/10TB-STHDD/Sync-Folder-STHDD/programmin/frequency_analysis_limits/"
-    proj_root = ""
+    proj_root = "/scratch/dblackle/frequency-analysis-limits/"
     num_variables = int(sys.argv[1])
     largest_val = int(sys.argv[2])
     get_one = sys.argv[3].lower() == "true"

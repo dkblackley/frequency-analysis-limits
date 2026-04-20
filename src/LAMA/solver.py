@@ -1,6 +1,7 @@
 import json
-import numpy as np
 import sys
+
+import numpy as np
 from ortools.sat.python import cp_model
 
 
@@ -15,15 +16,15 @@ class SolutionCollector(cp_model.CpSolverSolutionCallback):
 
 
 def main():
-    proj_root = "/home/yelnat/Nextcloud/10TB-STHDD/Sync-Folder-STHDD/programmin/frequency_analysis_limits/"
+    # proj_root = "/home/yelnat/Nextcloud/10TB-STHDD/Sync-Folder-STHDD/programmin/frequency_analysis_limits/"
     num_variables = int(sys.argv[1])
     largest_val = int(sys.argv[2])
     get_one = sys.argv[3].lower() == "true"
 
-    with open(f"{proj_root}meta.json", "r") as f:
+    with open(f"meta.json", "r") as f:
         metadata = json.load(f)
 
-    flat_data = np.fromfile(f"{proj_root}allowed.bin", dtype=np.int64)
+    flat_data = np.fromfile(f"allowed.bin", dtype=np.int64)
 
     model = cp_model.CpModel()
     variables = [model.NewIntVar(0, largest_val, f"var_{i}") for i in range(num_variables)]

@@ -129,7 +129,7 @@ for data_dir in "${DATA_DIRS[@]}"; do
 
             # Determine initial 't' value based on distribution type
             if [ "$dist" == "flat" ]; then
-                t_val=3
+                t_val=2
             else
                 t_val=2
             fi

@@ -179,14 +179,13 @@ pub fn lama_attack(
     }
 
     info!("Building and executing the CP-SAT Solver for the final constraint graph...");
-    let end = Instant::now();
     let mut solver = Solver::new(translator.get_var_index_map());
 
     let mut model = translator.get_proto_model();
 
     // NOTE: The only change in the test is passing largest_enc_val here
     let responses = solver.solve(&mut model, largest_possible_val, false);
-
+    let end = Instant::now();
     if solver.solution_stat != Optimal && solver.solution_stat != Feasible {
         // minimum number of expected reconstructions
         let _freq_to_t_tuple: HashMap<(Value, Frequency), Vec<Vec<Value>>> =

@@ -45,13 +45,12 @@ def main():
     model.AddAllDifferent(variables)
 
     solver = cp_model.CpSolver()
-    solver.parameters.cp_model_presolve = False
 
     if get_one:
         solver.parameters.num_search_workers = 256
     else:
         solver.parameters.enumerate_all_solutions = True
-        # solver.parameters.keep_all_feasible_solutions_in_presolve = True
+        solver.parameters.keep_all_feasible_solutions_in_presolve = True
 
     collector = SolutionCollector(variables)
     status = solver.Solve(model, collector)

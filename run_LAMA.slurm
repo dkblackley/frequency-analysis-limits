@@ -87,7 +87,7 @@ $SG_RUN cargo clean
 echo "Building project inside container..."
 $SG_RUN cargo rustc --bin frequency_analysis_limits --release -- -Clink-arg=-lprotobuf
 
-padding=25
+padding=15
 
 #NAMES=("spitz")
 #DISTS=("uniform" "gaussian" "beta" "flat")
@@ -128,8 +128,8 @@ for data_dir in "${DATA_DIRS[@]}"; do
             echo "========================================"
 
             # Determine initial 't' value based on distribution type
-            if [ "$dist" == "uniform" ]; then
-                t_val=2
+            if [ "$dist" == "flat" ]; then
+                t_val=3
             else
                 t_val=2
             fi

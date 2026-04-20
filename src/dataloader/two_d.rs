@@ -23,6 +23,7 @@ pub struct TwoDMap {
     upper: Vec<Value>,
     lower: Vec<Value>,
     offset: Vec<Value>,
+    pub pad: Option<(Value, Value)>, // NEW: Explicitly track the lower padding
 }
 
 impl TwoDMap {
@@ -179,6 +180,7 @@ impl TwoDMap {
             upper: upper.to_vec(),
             lower: lower.to_vec(),
             offset,
+            pad: None,
         })
     }
 
@@ -274,6 +276,7 @@ impl TwoDMap {
             upper: upper.to_vec(),
             lower: lower.to_vec(),
             offset,
+            pad: Some((x_pad.0, y_pad.0)),
         })
     }
 }
@@ -325,6 +328,15 @@ impl Searchable for TwoDMap {
         let grid_point = unflatten_nd(*val, &self.upper, &self.lower);
 
         if self.scale == -1.0 {
+            // Undo the explicit padding, forcing grid origin [0,0] to [-pad_x, -pad_y]
+            if let Some((pad_x, pad_y)) = self.pad {
+                return vec![
+                    (grid_point[0] - pad_x) as f64,
+                    (grid_point[1] - pad_y) as f64,
+                ];
+            }
+
+            // Fallback just in case
             return vec![
                 (grid_point[0] + self.offset[0]) as f64,
                 (grid_point[1] + self.offset[1]) as f64,

@@ -14,13 +14,13 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 
 pub struct QueryDistribution<'a> {
     encrypted_db: &'a Box<dyn Searchable + Sync>,
-    pairs: Vec<DomPair>,
+    pub pairs: Vec<DomPair>,
     weights: Vec<f64>,
     pub dom_pair_to_known_raw_weight: FxHashMap<DomPair, f64>,
     mbq_to_cumulative_prob: FxHashMap<DomPair, Probability>,
     pub cumulative_probs_and_dom_pairs: Vec<(Probability, DomPair)>,
     pub total_weight: f64,
-    sampler: WeightedIndex<f64>,
+    pub sampler: WeightedIndex<f64>,
     pub dist: DistributionType,
     pub lowest_rec: Vec<Value>,
     pub largest_rec: Vec<Value>,

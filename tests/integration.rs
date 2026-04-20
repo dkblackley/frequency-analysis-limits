@@ -5,12 +5,13 @@ use cp_sat::proto::CpSolverStatus;
 use frequency_analysis_limits::dataloader::tester::testDB;
 use frequency_analysis_limits::dataloader::two_d::{Location, TwoDMap};
 use frequency_analysis_limits::dataloader::{flatten_nd, unflatten_nd, Searchable};
-use frequency_analysis_limits::Value;
 use frequency_analysis_limits::LAMA::query::QueryDistribution;
 use frequency_analysis_limits::LAMA::solver::Solver;
 use frequency_analysis_limits::LAMA::utility::get_mbq;
+use frequency_analysis_limits::{DomPair, Value};
 use frequency_analysis_limits::{Frequency, Record};
 use log::{debug, error, info};
+use rand::distributions::Distribution;
 use sha2::Digest;
 use std::collections::HashMap;
 use std::fmt::format;
@@ -149,7 +150,7 @@ fn end_flat() {
     let eps = 0.0; // Perfect knowledge constraint
     let delt = 0.0;
 
-    let selector = Selector::new(dist, &loaded_db, eps, delt);
+    let selector = Selector::new(dist, &loaded_db);
 
     let (low_pair, high_pair) = loaded_db.get_dom_pair();
     assert_eq!(high_pair, vec![3, 3]);
@@ -318,7 +319,7 @@ fn end_to_end() {
     let eps = 0.0; // Perfect knowledge constraint
     let delt = 0.0;
 
-    let selector = Selector::new(dist, &loaded_db, eps, delt);
+    let selector = Selector::new(dist, &loaded_db);
 
     let (low_pair, high_pair) = loaded_db.get_dom_pair();
     let universe = loaded_db.get_universe();
@@ -390,9 +391,212 @@ fn end_to_end() {
         || dist == "uniform" && responses[&0].len() < 2)
         || (dist == "gaussian" && responses[&0].len() < 1)
     {
-        let _freq_to_t_tuple: HashMap<(Value, Frequency), Vec<Vec<Value>>> =
-            selector.get_freq_val_t_tup_dict(2).unwrap();
+        error!("FATAL: Solver failed to reconstruct full universe!!");
+        error!("'encrypted/encoded' universe of plaintexts: {universe:?}");
+        error!("Intvars workings: {:?}", solver);
+        error!("Solver Status: {:?}", solver.solution_stat);
+        panic!("Solver did not return a full assignment.");
+    }
 
+    let mut correct = 0;
+    let mut incorrect = 0;
+
+    for (encrypted_alias, guessed_plaintext) in responses.clone() {
+        if guessed_plaintext[0] == encrypted_alias {
+            correct += 1;
+        } else {
+            incorrect += 1;
+        }
+    }
+
+    info!(
+        "Direct matches: {} correct, {} incorrect",
+        correct, incorrect
+    );
+    info!("6. Running Isomorphism Checks...");
+
+    let total_responses = responses[&0].len();
+    let mut found_truth = false;
+
+    for i in 0..total_responses {
+        let mut iso_map = HashMap::new();
+        for (key, val) in responses.clone() {
+            iso_map.insert(key, val[i]);
+        }
+        match check_isomorphism(&iso_map, rows_cols as i64, rows_cols as i64) {
+            Some(transformation_name) => {
+                if transformation_name.contains("Perfect") {
+                    found_truth = true;
+                }
+                info!(
+                    "SUCCESS! Solver found a valid isomorphism: {}",
+                    transformation_name
+                );
+            }
+            None => {
+                error!("Solver produced a mathematically invalid reconstruction.");
+                panic!("Test Failed: Not a valid rotation or reflection.");
+            }
+        }
+    }
+
+    assert!(found_truth);
+    info!("Test completed successfully.")
+}
+
+#[test]
+fn end_to_end_sampled() {
+    let _ = env_logger::builder()
+        .is_test(true)
+        .filter_level(log::LevelFilter::Debug)
+        .try_init();
+
+    // Force rayon to one thread
+    rayon::ThreadPoolBuilder::new()
+        .num_threads(0)
+        .build_global()
+        .unwrap();
+
+    let rows_cols = 20;
+    let dim = 2;
+
+    info!("Loading test DB ({}x{})", rows_cols, rows_cols);
+    let loaded_db: Box<dyn Searchable + Sync> = Box::new(testDB::new(dim, rows_cols, 80));
+
+    let dist = "gaussian";
+    let target_query_percentage = 0.15; // e.g., observe 15% of all possible queries
+    let fixed_delta = 0.3; // 70% confidence that error <= epsilon
+
+    // 1. Initialize a baseline selector to generate the distribution space
+    // We pass 0.0 for eps/delt temporarily just to build the QueryDistribution
+    let mut selector = Selector::new(dist, &loaded_db);
+
+    let largest_dom = loaded_db.get_dom_pair();
+
+    // How many queries can we do? A query is a hyperrectangle, The total number of hyper rectangles
+    // in a space is n*(n+1)/2 where n is the length of a dim, then mutliply for each dim.
+    let mut total = 0;
+
+    for item in largest_dom.1 {
+        total += ((item + 1) * (item + 2)) / 2;
+    }
+
+    let total_possible_queries = total;
+    let num_queries_to_observe =
+        ((total_possible_queries as f64) * target_query_percentage).ceil() as usize;
+
+    info!("--- Sampling Parameters ---");
+    info!(
+        "Targeting {}% of queries ({} samples).",
+        target_query_percentage * 100.0,
+        num_queries_to_observe
+    );
+
+    // 5. Sample the specific number of queries based on the distribution weights
+    let mut rng = rand::thread_rng();
+    let mut observed_queries: Vec<DomPair> = Vec::with_capacity(num_queries_to_observe);
+
+    info!("Sampling {} queries...", num_queries_to_observe);
+    for _ in 0..num_queries_to_observe {
+        // Use the WeightedIndex sampler you built in QueryDistribution
+        let sampled_idx = selector.query_distribution.sampler.sample(&mut rng);
+        let sampled_pair = selector.query_distribution.pairs[sampled_idx].clone();
+        observed_queries.push(sampled_pair);
+    }
+
+    // 3. Calculate Empirical VC Dimension (Fixing Issue A)
+    // Assuming you update `get_vc_sukp_bound` to return the `q` profit, we calculate `b` here.
+    // Ideally, `get_vc_sukp_bound` should just return `b` directly.
+    let responses = selector.get_responses_from_queries(observed_queries.clone());
+    let q_profit = selector.get_vc_sukp_bound(responses.clone());
+    let empirical_vc_dim = q_profit.log2().floor() + 1.0;
+
+    // 4. Reverse-calculate Epsilon (Fixing Issue B)
+    // Note: You must update `calculate_epsilon` to accept `d` (the EVC) directly,
+    // replacing the hardcoded `num_items - 1`.
+    let eps = Selector::calculate_epsilon(
+        empirical_vc_dim, // Pass the EVC, not num_items
+        num_queries_to_observe,
+        fixed_delta,
+    );
+
+    info!("Empirical VC Dimension: {}", empirical_vc_dim);
+    info!("Guaranteed Epsilon Bound: {}", eps);
+    info!("---------------------------");
+
+    // 6. Update selector and Translator initialization with our real epsilon
+
+    let (low_pair, high_pair) = loaded_db.get_dom_pair();
+    let universe = loaded_db.get_universe();
+    let largest_enc_val: i64 = flatten_nd(&high_pair, &high_pair, &low_pair);
+
+    let mut translator = Translator::new(largest_enc_val, universe.clone());
+    let query_dist_ref = &selector.query_distribution;
+    let high_pair_ref = &high_pair;
+    let low_pair_ref = &low_pair;
+
+    let weight_map = Selector::get_raw_dompair_weight_map(responses, &loaded_db);
+    let pair_to_prob = Selector::compute_cumulative_prob_map(
+        &low_pair,
+        &high_pair,
+        &weight_map,
+        num_queries_to_observe as f64,
+    );
+
+    info!("4. Compiling probabilistic closures for dynamic lookups...");
+
+    let get_observed_prob = |enc_tuple: &[i64]| -> f64 {
+        let true_plaintexts: Vec<Record> = enc_tuple
+            .iter()
+            .map(|rec| unflatten_nd(*rec, high_pair_ref, low_pair_ref))
+            .collect();
+        let dom_pair = get_mbq(&true_plaintexts);
+
+        pair_to_prob.get(&dom_pair).cloned().unwrap_or(0.0)
+    };
+
+    let get_expected_prob = |plaintexts: &[i64]| -> f64 {
+        let pt_records: Vec<Record> = plaintexts
+            .iter()
+            .map(|&v| unflatten_nd(v, high_pair_ref, low_pair_ref))
+            .collect();
+        let pt_mbq = get_mbq(&pt_records);
+
+        query_dist_ref.cumulative_prob_lookup(&pt_mbq)
+    };
+
+    let active_eps = if eps == 0.0 { 1e-5 } else { eps };
+    let validate_candidate = |enc_tuple: &[i64], proposed_plaintexts: &[i64]| -> bool {
+        let obs_prob = get_observed_prob(enc_tuple);
+        if obs_prob == 0.0 {
+            return false;
+        }
+
+        let exp_prob = get_expected_prob(proposed_plaintexts);
+        (obs_prob - exp_prob).abs() <= active_eps
+    };
+
+    info!("--> Processing Base Case (t=1)");
+    translator.process_t1(&universe, &validate_candidate);
+
+    info!("--> Processing Recursive Case (t=2) sequentially across chunk models...");
+    translator.process_t_greater_than_1(2, &universe, &validate_candidate);
+
+    info!("--> Processing Recursive Case (t=3) sequentially across chunk models...");
+    translator.process_t_greater_than_1(3, &universe, &validate_candidate);
+
+    info!("5. Building and executing the CP-SAT Solver for the final constraint graph...");
+    let mut solver = Solver::new(translator.get_var_index_map());
+
+    let mut model = translator.get_proto_model();
+
+    // NOTE: The only change in the test is passing largest_enc_val here
+    let responses = solver.solve(&mut model, largest_enc_val, false);
+
+    if (solver.solution_stat != Optimal && solver.solution_stat != Feasible
+        || dist == "uniform" && responses[&0].len() < 2)
+        || (dist == "gaussian" && responses[&0].len() < 1)
+    {
         error!("FATAL: Solver failed to reconstruct full universe!!");
         error!("'encrypted/encoded' universe of plaintexts: {universe:?}");
         error!("Intvars workings: {:?}", solver);

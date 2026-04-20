@@ -83,7 +83,7 @@ pub fn lama_attack(
 
     let (low_pair, high_pair) = loaded_db.get_dom_pair();
     let largest_possible_val: i64 = flatten_nd(&high_pair, &high_pair, &low_pair);
-    let selector = Selector::new(dist, &loaded_db, *eps, *delt);
+    let selector = Selector::new(dist, &loaded_db);
 
     debug!(
         "Working with padding: {}, low_pair: {:?}, high_pair: {:?}",
@@ -188,8 +188,6 @@ pub fn lama_attack(
     let end = Instant::now();
     if solver.solution_stat != Optimal && solver.solution_stat != Feasible {
         // minimum number of expected reconstructions
-        let _freq_to_t_tuple: HashMap<(Value, Frequency), Vec<Vec<Value>>> =
-            selector.get_freq_val_t_tup_dict(1).unwrap();
         warn!(
             "Solver did not return the expected number of reconstructions. No solutions were found."
         );

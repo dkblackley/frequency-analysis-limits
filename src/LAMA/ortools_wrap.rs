@@ -1,3 +1,4 @@
+use log::info;
 use serde::Serialize;
 use std::env;
 use std::fs::File;
@@ -70,6 +71,8 @@ impl PythonCpModel {
         serde_json::to_writer(meta_file, &metadata).expect("Failed to write metadata");
 
         let python_exe = env::var("PYTHON_EXEC").unwrap_or_else(|_| "python3".to_string());
+
+        info!("Using python: {}", python_exe);
 
         let output = Command::new(python_exe)
             .arg("src/LAMA/solver.py")

@@ -54,6 +54,8 @@ cd "$SLURM_SUBMIT_DIR"
 # Safely prepend the portable binary to the container's internal PATH
 export SINGULARITYENV_PREPEND_PATH="$CMAKE_DIR/bin"
 
+source /home/dblackle/miniconda3/etc/profile.d/conda.sh
+conda activate main
 export PYTHON_EXEC="/home/dblackle/.conda/envs/main/bin/python3.10"
 
 ## --- 3. Download and Unpack portable LLVM/Clang ---

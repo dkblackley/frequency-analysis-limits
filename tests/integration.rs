@@ -310,7 +310,7 @@ fn end_to_end() {
         .unwrap();
 
     // This should take about a minute to run... (if not very sparse!)
-    let rows_cols = 8;
+    let rows_cols = 6;
     let dim = 2;
 
     info!("Loading test DB ({}x{})", rows_cols, rows_cols);

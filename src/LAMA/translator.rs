@@ -8,7 +8,7 @@ use rand::SeedableRng;
 use rayon::prelude::*;
 use std::collections::{HashMap, HashSet};
 
-const trunc_amount: usize = 1000;
+const TRUNC_AMOUNT: usize = 1000;
 
 /// Translator: One Formula from All Matching Pairs.
 pub struct Translator {
@@ -145,7 +145,7 @@ impl Translator {
                 let var = *self.enc_id_to_intvar.get(&enc_id).unwrap();
 
                 valid_plaintexts.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
-                valid_plaintexts.truncate(trunc_amount);
+                valid_plaintexts.truncate(TRUNC_AMOUNT);
                 let just_plaintexts: Vec<Vec<i64>> =
                     valid_plaintexts.iter().map(|(pt, _)| pt.clone()).collect();
 
@@ -256,7 +256,7 @@ impl Translator {
                 .collect();
 
             valid_assignments.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
-            valid_assignments.truncate(trunc_amount);
+            valid_assignments.truncate(TRUNC_AMOUNT);
             let just_plaintexts: Vec<Vec<i64>> =
                 valid_assignments.iter().map(|(pt, _)| pt.clone()).collect();
 
@@ -351,7 +351,7 @@ impl Translator {
                 .collect();
 
             valid_assignments.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
-            valid_assignments.truncate(trunc_amount);
+            valid_assignments.truncate(TRUNC_AMOUNT);
             let just_plaintexts = valid_assignments.iter().map(|(pt, _)| pt.clone()).collect();
 
             // Pushing constraints into global proto_model

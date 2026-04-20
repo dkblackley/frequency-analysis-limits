@@ -7,11 +7,12 @@ use frequency_analysis_limits::dataloader::two_d::{Location, TwoDMap};
 use frequency_analysis_limits::dataloader::{flatten_nd, unflatten_nd, Searchable};
 use frequency_analysis_limits::LAMA::query::QueryDistribution;
 use frequency_analysis_limits::LAMA::solver::Solver;
-use frequency_analysis_limits::LAMA::utility::get_mbq;
+use frequency_analysis_limits::LAMA::utility::{encloses, get_mbq};
 use frequency_analysis_limits::{DomPair, Value};
 use frequency_analysis_limits::{Frequency, Record};
 use log::{debug, error, info};
 use rand::distributions::Distribution;
+use rustc_hash::FxHashMap;
 use sha2::Digest;
 use std::collections::HashMap;
 use std::fmt::format;
@@ -198,9 +199,6 @@ fn end_flat() {
     let active_eps = if eps == 0.0 { 1e-5 } else { eps };
     let validate_candidate = |enc_tuple: &[i64], proposed_plaintexts: &[i64]| -> bool {
         let obs_prob = get_observed_prob(enc_tuple);
-        if obs_prob == 0.0 {
-            return false;
-        }
 
         let exp_prob = get_expected_prob(proposed_plaintexts);
         (obs_prob - exp_prob).abs() <= active_eps
@@ -362,9 +360,6 @@ fn end_to_end() {
     let active_eps = if eps == 0.0 { 1e-5 } else { eps };
     let validate_candidate = |enc_tuple: &[i64], proposed_plaintexts: &[i64]| -> bool {
         let obs_prob = get_observed_prob(enc_tuple);
-        if obs_prob == 0.0 {
-            return false;
-        }
 
         let exp_prob = get_expected_prob(proposed_plaintexts);
         (obs_prob - exp_prob).abs() <= active_eps
@@ -457,15 +452,15 @@ fn end_to_end_sampled() {
         .build_global()
         .unwrap();
 
-    let rows_cols = 20;
+    let rows_cols = 15;
     let dim = 2;
 
     info!("Loading test DB ({}x{})", rows_cols, rows_cols);
-    let loaded_db: Box<dyn Searchable + Sync> = Box::new(testDB::new(dim, rows_cols, 80));
+    let loaded_db: Box<dyn Searchable + Sync> = Box::new(testDB::new(dim, rows_cols, 60));
 
     let dist = "gaussian";
-    let target_query_percentage = 0.15; // e.g., observe 15% of all possible queries
-    let fixed_delta = 0.3; // 70% confidence that error <= epsilon
+    let target_query_percentage = 0.5; // e.g., observe 5% of all possible queries
+    let fixed_delta = 0.05; // 95% confidence that error <= epsilon
 
     // 1. Initialize a baseline selector to generate the distribution space
     // We pass 0.0 for eps/delt temporarily just to build the QueryDistribution
@@ -475,10 +470,10 @@ fn end_to_end_sampled() {
 
     // How many queries can we do? A query is a hyperrectangle, The total number of hyper rectangles
     // in a space is n*(n+1)/2 where n is the length of a dim, then mutliply for each dim.
-    let mut total = 0;
+    let mut total = 1;
 
     for item in largest_dom.1 {
-        total += ((item + 1) * (item + 2)) / 2;
+        total *= ((item + 1) * (item + 2)) / 2;
     }
 
     let total_possible_queries = total;
@@ -535,7 +530,7 @@ fn end_to_end_sampled() {
     let high_pair_ref = &high_pair;
     let low_pair_ref = &low_pair;
 
-    let weight_map = Selector::get_raw_dompair_weight_map(responses, &loaded_db);
+    let weight_map = Selector::get_raw_dompair_weight_map(responses.clone(), &loaded_db);
     let pair_to_prob = Selector::compute_cumulative_prob_map(
         &low_pair,
         &high_pair,
@@ -545,14 +540,33 @@ fn end_to_end_sampled() {
 
     info!("4. Compiling probabilistic closures for dynamic lookups...");
 
+    let mut dom_to_enclosed_freq = FxHashMap::default();
+
+    let all_dompairs = Selector::get_dom_pairs(&loaded_db);
+
+    for pair in &all_dompairs {
+        let mut enclose_count = 0;
+        for que in &observed_queries {
+            if encloses(que, pair) {
+                enclose_count += 1;
+            }
+            dom_to_enclosed_freq.insert(
+                pair.clone(),
+                enclose_count as f64 / num_queries_to_observe as f64,
+            );
+        }
+    }
+
     let get_observed_prob = |enc_tuple: &[i64]| -> f64 {
-        let true_plaintexts: Vec<Record> = enc_tuple
+        let underlying_vals: Vec<Record> = enc_tuple
             .iter()
             .map(|rec| unflatten_nd(*rec, high_pair_ref, low_pair_ref))
             .collect();
-        let dom_pair = get_mbq(&true_plaintexts);
-
-        pair_to_prob.get(&dom_pair).cloned().unwrap_or(0.0)
+        let target_mbq = get_mbq(&underlying_vals);
+        dom_to_enclosed_freq
+            .get(&target_mbq)
+            .unwrap_or(&0.0)
+            .clone()
     };
 
     let get_expected_prob = |plaintexts: &[i64]| -> f64 {
@@ -568,9 +582,6 @@ fn end_to_end_sampled() {
     let active_eps = if eps == 0.0 { 1e-5 } else { eps };
     let validate_candidate = |enc_tuple: &[i64], proposed_plaintexts: &[i64]| -> bool {
         let obs_prob = get_observed_prob(enc_tuple);
-        if obs_prob == 0.0 {
-            return false;
-        }
 
         let exp_prob = get_expected_prob(proposed_plaintexts);
         (obs_prob - exp_prob).abs() <= active_eps

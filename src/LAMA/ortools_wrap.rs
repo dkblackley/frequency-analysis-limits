@@ -70,11 +70,16 @@ impl PythonCpModel {
         let meta_file = File::create("meta.json").expect("Failed to create meta file");
         serde_json::to_writer(meta_file, &metadata).expect("Failed to write metadata");
 
+        drop(bin_file);
+        //drop(meta_file);
+
         let python_exe = env::var("PYTHON_EXEC").unwrap_or_else(|_| "python3".to_string());
 
         info!("Using python: {}", python_exe);
 
-        let output = Command::new(python_exe)
+        let temp = "/home/yelnat/miniconda3/envs/main/bin/python";
+
+        let output = Command::new(temp)
             .arg("src/LAMA/solver.py")
             .arg(self.num_vars.to_string())
             .arg(largest_val.to_string())

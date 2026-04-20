@@ -151,9 +151,6 @@ pub fn lama_attack(
     let active_eps = if *eps == 0.0 { 1e-5 } else { *eps };
     let validate_candidate = |enc_tuple: &[i64], proposed_plaintexts: &[i64]| -> bool {
         let obs_prob = get_observed_prob(enc_tuple);
-        if obs_prob == 0.0 {
-            return false;
-        }
 
         let exp_prob = get_expected_prob(proposed_plaintexts);
         (obs_prob - exp_prob).abs() <= active_eps

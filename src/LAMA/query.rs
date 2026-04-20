@@ -17,7 +17,7 @@ pub struct QueryDistribution<'a> {
     pub pairs: Vec<DomPair>,
     weights: Vec<f64>,
     pub dom_pair_to_known_raw_weight: FxHashMap<DomPair, f64>,
-    mbq_to_cumulative_prob: FxHashMap<DomPair, Probability>,
+    pub mbq_to_cumulative_prob: FxHashMap<DomPair, Probability>,
     pub cumulative_probs_and_dom_pairs: Vec<(Probability, DomPair)>,
     pub total_weight: f64,
     pub sampler: WeightedIndex<f64>,

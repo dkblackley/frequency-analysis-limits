@@ -443,9 +443,7 @@ impl Translator {
         let current_t_cache =
             self.process_cpsat_global(prev_t_cache, &direct_map, &validate_candidate);
 
-        self.t_assignment_archive.insert(
-            t,
-            current_t_cache.expect("WHAT IN THE GOOD GOD DAMN IS GOING ON"),
-        );
+        self.t_assignment_archive
+            .insert(t, current_t_cache.expect("Failed..."));
     }
 }

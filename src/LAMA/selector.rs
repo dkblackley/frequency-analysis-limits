@@ -31,7 +31,7 @@ impl<'a> Selector<'a> {
         let dim = loaded_db.get_dims();
 
         let query_distribution = QueryDistribution::new(
-            Self::get_dom_pairs(&**loaded_db),
+            Self::get_dom_pairs(loaded_db),
             loaded_db,
             dist.parse().unwrap(),
         );
@@ -48,7 +48,7 @@ impl<'a> Selector<'a> {
         Box::new(selector)
     }
 
-    pub fn get_dom_pairs(encrypted_db: &(dyn Searchable + Sync)) -> Vec<DomPair> {
+    pub fn get_dom_pairs(encrypted_db: &Box<dyn Searchable + Sync>) -> Vec<DomPair> {
         info!("Finding all possible responses...");
         let (lowest_rec, largest_rec) = encrypted_db.get_dom_pair();
 
@@ -165,6 +165,10 @@ impl<'a> Selector<'a> {
                 let unflattened = unflatten_nd(record, &high_pair, &low_pair);
                 observed_points.push(unflattened);
             }
+            if observed_points.len() == 0 {
+                warn!("Saw nothing?");
+                continue;
+            }
             let mbq = get_mbq(&observed_points);
             if !dom_pair_weight.contains_key(&mbq) {
                 dom_pair_weight.insert(mbq, 1.0);
@@ -213,7 +217,7 @@ impl<'a> Selector<'a> {
 
         let timer = Instant::now();
 
-        let dom_pairs = Selector::get_dom_pairs(&**self.encrypted_db);
+        let dom_pairs = Selector::get_dom_pairs(self.encrypted_db);
 
         let pb = ProgressBar::new(dom_pairs.len() as u64);
         pb.set_style(
@@ -250,10 +254,15 @@ impl<'a> Selector<'a> {
     pub fn get_vc_sukp_bound(&self, responses: Vec<Vec<Value>>) -> f64 {
         //let responses = self.get_all_possible_responses();
         // The size of the largest response
-        let largest_resp = responses.iter().map(|s| s.len()).max().unwrap();
+        let max_item = responses
+            .iter()
+            .flat_map(|r| r.iter())
+            .max()
+            .copied()
+            .unwrap_or(0);
+        let num_items = (max_item + 1) as usize;
         // let universe_size: usize = self.encrypted_db.get_universe().len();
-        let capacity = largest_resp;
-
+        let capacity = responses.iter().map(|s| s.len()).max().unwrap_or(0);
         // 1. Calculate Upper Bound via LP Relaxation
         let q_upper = Self::solve_sukp_internal(&responses, false);
 
@@ -360,45 +369,123 @@ impl<'a> Selector<'a> {
 
 #[cfg(test)]
 mod tests {
+    use crate::dataloader::tester::testDB;
+    use crate::dataloader::Searchable;
+    use crate::LAMA::selector::Selector;
 
-    // #[test]
-    // fn test_5x5_corner_probabilities() {
-    //     let db = testDB::new(5, 5, 100);
-    //     let boxed_db: Box<dyn Searchable + Sync> = Box::new(db);
-    //     let selector = Selector::new("gaussian", &boxed_db, 0.0, 0.0);
-    //
-    //     // A 5x5 grid operates on indices 0..4
-    //     let top_right = (vec![4, 4], vec![4, 4]);
-    //     let bottom_left = (vec![0, 0], vec![0, 0]);
-    //     let top_left = (vec![0, 4], vec![0, 4]);
-    //     let bottom_right = (vec![4, 0], vec![4, 0]);
-    //     let center = (vec![2, 2], vec![2, 2]);
-    //
-    //     let p_tr = selector.query_distribution.get_cumulative_prob(&top_right);
-    //     let p_bl = selector
-    //         .query_distribution
-    //         .get_cumulative_prob(&bottom_left);
-    //     let p_tl = selector.query_distribution.get_cumulative_prob(&top_left);
-    //     let p_br = selector
-    //         .query_distribution
-    //         .get_cumulative_prob(&bottom_right);
-    //     let p_center = selector.query_distribution.get_cumulative_prob(&center);
-    //
-    //     // As proven mathematically:
-    //     // Total queries = 15 * 15 = 225
-    //     // Corners = 1*5*1*5 = 25 queries -> 25 / 225 = 1/9 = 0.1111...
-    //     // Center = 3*3*3*3 = 81 queries -> 81 / 225 = 0.36
-    //
-    //     // Prove corners are identical
-    //     assert_eq!(p_tr, p_bl);
-    //     assert_eq!(p_bl, p_tl);
-    //     assert_eq!(p_tl, p_br);
-    //
-    //     // Prove the math perfectly matches the float math from our function
-    //     assert_eq!(p_tr, 25.0 / 225.0);
-    //     assert_eq!(p_center, 81.0 / 225.0);
-    //
-    //     // Prove center is larger than edges
-    //     assert!(p_tr < p_center);
-    // }
+    use super::*;
+
+    #[cfg(test)]
+    mod statistical_bounds_tests {
+        use super::*;
+        use crate::dataloader::tester::testDB;
+        use crate::LAMA::utility::{dominates, encloses, get_mbq};
+        use log::error;
+        use rand::Rng;
+
+        #[test]
+        fn verify_vc_cumulative_probability_bounds() {
+            let _ = env_logger::builder()
+                .is_test(true)
+                .filter_level(log::LevelFilter::Info)
+                .try_init();
+
+            // 1. Setup a dense 10x10 DB to ensure we have plenty of overlapping queries
+            let dim = 2;
+            let size_per_dim = 10;
+            let db: Box<dyn Searchable + Sync + 'static> =
+                Box::new(testDB::new(dim, size_per_dim, 100));
+
+            // Use uniform distribution to easily verify the true probabilities
+            let mut selector = Selector::new("beta", &db);
+
+            // 2. Sample 15% of the total query space
+            let target_pct = 0.15;
+            let total_queries = selector.query_distribution.pairs.len();
+            let num_samples = ((total_queries as f64) * target_pct).ceil() as usize;
+
+            let mut rng = rand::thread_rng();
+            let mut sampled_queries = Vec::with_capacity(num_samples);
+            for _ in 0..num_samples {
+                let idx = selector.query_distribution.sampler.sample(&mut rng);
+                sampled_queries.push(selector.query_distribution.pairs[idx].clone());
+            }
+
+            // 3. Calculate VC bounds based on the sample
+            let responses = selector.get_responses_from_queries(sampled_queries.clone());
+            let q_profit = selector.get_vc_sukp_bound(responses);
+            let empirical_vc = q_profit.log2().floor() + 1.0;
+
+            let delta = 0.1; // 90% confidence that the maximum error across ALL itemsets <= epsilon
+            let epsilon = Selector::calculate_epsilon(empirical_vc, num_samples, delta);
+
+            info!("Total Query Space: {}", total_queries);
+            info!("Sample Size: {}", num_samples);
+            info!("Empirical VC Dim: {}", empirical_vc);
+            info!("Guaranteed Epsilon Error Bound: {}", epsilon);
+
+            // 4. Generate 100 random itemsets (t=2 tuples) to test the theorem
+            let universe = db.get_universe();
+            let mut test_tuples = Vec::new();
+            for _ in 0..100 {
+                let pt_a = universe[rng.gen_range(0..universe.len())];
+                let pt_b = universe[rng.gen_range(0..universe.len())];
+                test_tuples.push(vec![pt_a, pt_b]);
+            }
+
+            let (low_pair, high_pair) = db.get_dom_pair();
+            let mut violations = 0;
+            let mut max_observed_error = 0.0;
+
+            // 5. Run the Cumulative Probability Verification
+            for tuple in test_tuples {
+                // Unflatten to get actual coordinates to compute the Minimum Bounding Query (MBQ)
+                let pt_a = unflatten_nd(tuple[0], &high_pair, &low_pair);
+                let pt_b = unflatten_nd(tuple[1], &high_pair, &low_pair);
+                let target_mbq = get_mbq(&[pt_a, pt_b]);
+
+                // A. True Cumulative Probability (Calculated by your exact prefix-sum algorithm)
+                let p_true = selector
+                    .query_distribution
+                    .cumulative_prob_lookup(&target_mbq);
+
+                // B. Empirical Cumulative Probability (Calculated by observing our sample)
+                let mut enclose_count = 0;
+                for obs_mbq in &sampled_queries {
+                    // The "Transaction" (obs_mbq) contains the "Itemset" if the query's
+                    // bounding box stretches beyond the itemset's Minimum Bounding Query.
+                    if encloses(obs_mbq, &target_mbq) {
+                        enclose_count += 1;
+                    }
+                }
+
+                let p_emp = (enclose_count as f64) / (num_samples as f64);
+
+                // C. Validate Theorem
+                let error = (p_emp - p_true).abs();
+                if error > max_observed_error {
+                    max_observed_error = error;
+                }
+
+                if error > epsilon {
+                    violations += 1;
+                    error!("VIOLATION! Tuple: {:?} | p_true: {:.4} | p_emp: {:.4} | error: {:.4} > eps: {:.4}",
+                       tuple, p_true, p_emp, error, epsilon);
+                }
+            }
+
+            info!(
+                "Maximum observed error: {:.4} (Allowed: {:.4})",
+                max_observed_error, epsilon
+            );
+            info!("Total Violations: {} / 100", violations);
+
+            // The theorem states that with 1 - delta probability, the error for ALL itemsets is <= epsilon.
+            // Assuming we didn't hit the 10% bad luck draw, violations should be exactly 0.
+            assert_eq!(
+                violations, 0,
+                "The empirical probability deviated beyond the guaranteed VC bound!"
+            );
+        }
+    }
 }

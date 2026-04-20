@@ -247,6 +247,67 @@ impl<'a> Selector<'a> {
         responses
     }
 
+    pub fn sample_percent_responses(
+        &self,
+        target_query_percentage: f64,
+        delta: f64,
+    ) -> (Vec<DomPair>, Vec<Vec<Value>>, f64) {
+        let largest_dom = self.encrypted_db.get_dom_pair();
+
+        // How many queries can we do? A query is a hyperrectangle, The total number of hyper rectangles
+        // in a space is n*(n+1)/2 where n is the length of a dim, then mutliply for each dim.
+        let mut total = 1;
+
+        for item in largest_dom.1 {
+            total *= ((item + 1) * (item + 2)) / 2;
+        }
+
+        let total_possible_queries = total;
+        let num_queries_to_observe =
+            ((total_possible_queries as f64) * target_query_percentage).ceil() as usize;
+
+        info!("--- Sampling Parameters ---");
+        info!(
+            "Targeting {}% of queries ({} samples).",
+            target_query_percentage * 100.0,
+            num_queries_to_observe
+        );
+
+        // 5. Sample the specific number of queries based on the distribution weights
+        let mut rng = rand::thread_rng();
+        let mut observed_queries: Vec<DomPair> = Vec::with_capacity(num_queries_to_observe);
+
+        info!("Sampling {} queries...", num_queries_to_observe);
+        for _ in 0..num_queries_to_observe {
+            // Use the WeightedIndex sampler you built in QueryDistribution
+            let sampled_idx = self.query_distribution.sampler.sample(&mut rng);
+            let sampled_pair = self.query_distribution.pairs[sampled_idx].clone();
+            observed_queries.push(sampled_pair);
+        }
+
+        // 3. Calculate Empirical VC Dimension (Fixing Issue A)
+        // Assuming you update `get_vc_sukp_bound` to return the `q` profit, we calculate `b` here.
+        // Ideally, `get_vc_sukp_bound` should just return `b` directly.
+        let responses = self.get_responses_from_queries(observed_queries.clone());
+        let q_profit = self.get_vc_sukp_bound(responses.clone());
+        let empirical_vc_dim = q_profit.log2().floor() + 1.0;
+
+        // 4. Reverse-calculate Epsilon (Fixing Issue B)
+        // Note: You must update `calculate_epsilon` to accept `d` (the EVC) directly,
+        // replacing the hardcoded `num_items - 1`.
+        let eps = Selector::calculate_epsilon(
+            empirical_vc_dim, // Pass the EVC, not num_items
+            num_queries_to_observe,
+            delta,
+        );
+
+        info!("Empirical VC Dimension: {}", empirical_vc_dim);
+        info!("Guaranteed Epsilon Bound: {}", eps);
+        info!("---------------------------");
+
+        return (observed_queries, responses, eps);
+    }
+
     /// Evaluates the SUKP to find the bounding profit `q` for empirical VC-dimension.
     /// `capacity`: The maximum transaction length (l)
     /// `itemsets`: A slice of vectors, where each vector contains the indices of items in that set.

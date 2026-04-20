@@ -9,10 +9,12 @@ use crate::LAMA::selector::Selector;
 use crate::LAMA::solver::CpSolverStatus::{Feasible, Optimal};
 use crate::LAMA::solver::Solver;
 use crate::LAMA::translator::Translator;
-use crate::LAMA::utility::get_mbq;
-use crate::{Frequency, Record, Value};
+use crate::LAMA::utility::{encloses, get_mbq};
+use crate::{DomPair, Frequency, Record, Value};
 use cp_sat::proto::CpSolverStatus;
 use log::{debug, error, info, warn};
+use rand::distributions::Distribution;
+use rustc_hash::FxHashMap;
 use std::collections::HashMap;
 use std::fs;
 use std::fs::File;
@@ -35,12 +37,10 @@ pub fn lama_attack(
     dim: &usize,
     padding: &Value,
     _save: &bool,
-    eps: &f64,
-    delt: &f64,
+    query_percent: &f64,
 ) {
     let loaded_db: Box<dyn Searchable + Sync>;
     let full_datapath = format!("{0}/{1}", dir_path, db_name);
-    let unique_name = format!("{db_name}_{dist}_e{eps}_d{delt}");
 
     if db_name == "grid" {
         loaded_db = Box::new(testDB::new(*dim, 5, 65));
@@ -79,8 +79,6 @@ pub fn lama_attack(
         loaded_db.get_dom_pair().1
     );
 
-    debug!("Using eps: {}, delta: {}", eps, delt);
-
     let (low_pair, high_pair) = loaded_db.get_dom_pair();
     let largest_possible_val: i64 = flatten_nd(&high_pair, &high_pair, &low_pair);
     let selector = Selector::new(dist, &loaded_db);
@@ -105,27 +103,6 @@ pub fn lama_attack(
     let high_pair_ref = &high_pair;
     let low_pair_ref = &low_pair;
 
-    let get_observed_prob = |enc_tuple: &[i64]| -> f64 {
-        let true_point: Vec<Record> = enc_tuple
-            .iter()
-            .map(|rec| unflatten_nd(*rec, high_pair_ref, low_pair_ref))
-            .collect();
-        let dom_pair = get_mbq(&true_point);
-
-        // Use the native cumulative probability directly
-        //query_dist_ref.get_cumulative_prob(&dom_pair)
-        // QueryDistribution::compute_cumulative_prob(
-        //     &dom_pair,
-        //     &query_dist_ref.dist,
-        //     &*query_dist_ref.lowest_rec,
-        //     &*query_dist_ref.largest_rec,
-        //     &query_dist_ref.dom_pair_to_known_prob,
-        //     query_dist_ref.total_weight,
-        // )
-
-        query_dist_ref.cumulative_prob_lookup(&dom_pair)
-    };
-
     // 2. Expected (true) probability of proposed plaintexts
     let get_expected_prob = |plaintexts: &[i64]| -> f64 {
         let pt_records: Vec<Record> = plaintexts
@@ -134,21 +111,76 @@ pub fn lama_attack(
             .collect();
         let pt_mbq = get_mbq(&pt_records);
 
-        // Use the native cumulative probability directly
-        // QueryDistribution::compute_cumulative_prob(
-        //     &pt_mbq,
-        //     &query_dist_ref.dist,
-        //     &*query_dist_ref.lowest_rec,
-        //     &*query_dist_ref.largest_rec,
-        //     &query_dist_ref.dom_pair_to_known_prob,
-        //     query_dist_ref.total_weight,
-        // )
-
         query_dist_ref.cumulative_prob_lookup(&pt_mbq)
     };
 
-    // if in the 'perfect' world only use things within 0.01\% of the true
-    let active_eps = if *eps == 0.0 { 1e-5 } else { *eps };
+    let eps;
+    let delta = 0.35;
+    let num_queries;
+
+    let get_observed_prob: Box<dyn Sync + Send + Fn(&[i64]) -> f64>;
+
+    if *query_percent != 1.0 {
+        let (observed_queries, responses, epsil) =
+            selector.sample_percent_responses(*query_percent, delta);
+        eps = epsil;
+        num_queries = observed_queries.len();
+
+        let mut dom_to_enclosed_freq = FxHashMap::default();
+        let all_dompairs = Selector::get_dom_pairs(&loaded_db);
+
+        for pair in &all_dompairs {
+            let mut enclose_count = 0;
+            for que in &observed_queries {
+                if encloses(que, pair) {
+                    enclose_count += 1;
+                }
+            }
+            // 2. Moved insertion outside the inner loop
+            dom_to_enclosed_freq.insert(
+                pair.clone(),
+                enclose_count as f64 / observed_queries.len() as f64,
+            );
+        }
+
+        // 3. Box the closure and use 'move' to take ownership of the HashMap
+        get_observed_prob = Box::new(move |enc_tuple: &[i64]| -> f64 {
+            let underlying_vals: Vec<Record> = enc_tuple
+                .iter()
+                .map(|rec| unflatten_nd(*rec, high_pair_ref, low_pair_ref))
+                .collect();
+            let target_mbq = get_mbq(&underlying_vals);
+
+            dom_to_enclosed_freq
+                .get(&target_mbq)
+                .copied() // Cleaner than .unwrap_or(&0.0).clone()
+                .unwrap_or(0.0)
+        });
+    } else {
+        eps = 0.0;
+        // How many queries can we do? A query is a hyperrectangle, The total number of hyper rectangles
+        // in a space is n*(n+1)/2 where n is the length of a dim, then mutliply for each dim.
+        let mut total = 1;
+
+        for item in high_pair.clone() {
+            total *= ((item + 1) * (item + 2)) / 2;
+        }
+        num_queries = total as usize;
+
+        // 4. Box the else closure as well to match types
+        get_observed_prob = Box::new(move |enc_tuple: &[i64]| -> f64 {
+            let true_point: Vec<Record> = enc_tuple
+                .iter()
+                .map(|rec| unflatten_nd(*rec, high_pair_ref, low_pair_ref))
+                .collect();
+            let dom_pair = get_mbq(&true_point);
+
+            query_dist_ref.cumulative_prob_lookup(&dom_pair)
+        });
+    }
+
+    // if in the 'perfect' world only use things within 0.001\% of the true
+    let active_eps = if eps == 0.0 { 1e-6 } else { eps };
     let validate_candidate = |enc_tuple: &[i64], proposed_plaintexts: &[i64]| -> (bool, f64) {
         let obs_prob = get_observed_prob(enc_tuple);
 
@@ -201,6 +233,8 @@ pub fn lama_attack(
         return;
     }
 
+    let unique_name = format!("{db_name}_{dist}_e{eps}_d{delta}");
+
     let mut correct = 0;
     let mut first_resp = HashMap::new();
 
@@ -237,10 +271,10 @@ pub fn lama_attack(
         number_of_reconstructions: format!("{}", responses.len()),
         time_taken: end.duration_since(start).as_secs_f64(),
         total_db_size: loaded_db.get_universe().len() as u64,
-        percent_queries_used: 1.0,
-        num_queries_used: 1, //todo:
-        eps: Some(*eps),
-        delt: Some(*delt),
+        percent_queries_used: *query_percent,
+        num_queries_used: num_queries as u64,
+        eps: Some(eps),
+        delt: Some(delta),
     };
 
     if let Err(e) = save_results(

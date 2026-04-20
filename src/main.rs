@@ -1,6 +1,6 @@
 use clap::Parser;
-use frequency_analysis_limits::plotting::post::export_to_geo_and_align;
 use frequency_analysis_limits::plotting::do_plotting;
+use frequency_analysis_limits::plotting::post::export_to_geo_and_align;
 use frequency_analysis_limits::LAMA::lama_attack;
 use log::{debug, info};
 
@@ -54,12 +54,8 @@ pub struct Args {
     #[arg(long)]
     post: bool,
 
-    // 0.0 means full query dist
-    #[arg(long, default_value = "0.0")]
-    eps: f64,
-
-    #[arg(long, default_value = "0.9")]
-    delta: f64,
+    #[arg(long, default_value = "1.0")]
+    query_percent: f64,
 }
 
 fn main() {
@@ -87,8 +83,7 @@ fn main() {
             &args.dim,
             &args.padding,
             &args.save,
-            &args.eps,
-            &args.delta,
+            &args.query_percent,
         );
     }
 

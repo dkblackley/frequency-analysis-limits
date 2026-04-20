@@ -113,6 +113,14 @@ padding=5
 # PROBS=("0.05" "0.10" "0.15" "0.20")
 PROBS=("1.0")
 
+echo "Running canary"
+$SG_RUN ./target/release/frequency_analysis_limits \
+                --dir-path "$SLURM_SUBMIT_DIR/databases/20x20" \
+                --name "spitz" \
+                --t "2" \
+                --dist "gaussian" \
+                --padding "0"
+
 
 echo "Starting batch processing..."
 
@@ -147,7 +155,8 @@ for data_dir in "${DATA_DIRS[@]}"; do
                 --name "$name" \
                 --t "$t_val" \
                 --dist "$dist" \
-                --padding "$padding"
+                --padding "$padding" \
+                --query-percent "$prob"
 
             # Check if the initial run failed
             if [ $? -ne 0 ]; then
@@ -159,7 +168,8 @@ for data_dir in "${DATA_DIRS[@]}"; do
                         --name "$name" \
                         --t 3 \
                         --dist "$dist" \
-                        --padding "$padding"
+                        --padding "$padding" \
+                        --query-percent "$prob"
 
                 # Check if the retry also failed
                 if [ $? -ne 0 ]; then

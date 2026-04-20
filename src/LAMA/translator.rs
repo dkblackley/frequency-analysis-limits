@@ -8,6 +8,8 @@ use rand::SeedableRng;
 use rayon::prelude::*;
 use std::collections::{HashMap, HashSet};
 
+const trunc_amount: usize = 1000;
+
 /// Translator: One Formula from All Matching Pairs.
 pub struct Translator {
     upper: i64,
@@ -109,7 +111,7 @@ impl Translator {
 
     pub fn process_t1<V>(&mut self, encrypted_records: &[i64], validate_candidate: V)
     where
-        V: Fn(&[i64], &[i64]) -> bool,
+        V: Fn(&[i64], &[i64]) -> (bool, f64),
     {
         let mut t1_cache = HashMap::new();
 
@@ -133,23 +135,29 @@ impl Translator {
 
             for pt in 0..=self.upper {
                 let pt_tuple = vec![pt];
-                if validate_candidate(&enc_tuple, &pt_tuple) {
-                    valid_plaintexts.push(pt_tuple);
+                let (valid, prob) = validate_candidate(&enc_tuple, &pt_tuple);
+                if valid {
+                    valid_plaintexts.push((pt_tuple, prob));
                 }
             }
 
             if !valid_plaintexts.is_empty() {
                 let var = *self.enc_id_to_intvar.get(&enc_id).unwrap();
 
+                valid_plaintexts.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
+                valid_plaintexts.truncate(trunc_amount);
+                let just_plaintexts: Vec<Vec<i64>> =
+                    valid_plaintexts.iter().map(|(pt, _)| pt.clone()).collect();
+
                 // Exactly matches your logic: modifying global proto_model
                 Self::add_allowed_assignments(
                     &mut self.proto_model,
                     &vec![var],
-                    &valid_plaintexts,
+                    &just_plaintexts,
                     &self.var_index_map,
                 );
 
-                t1_cache.insert(enc_tuple, valid_plaintexts);
+                t1_cache.insert(enc_tuple, just_plaintexts);
             } else {
                 warn!(
                     "Encrypted record {} has no valid plaintext assignments!",
@@ -190,7 +198,7 @@ impl Translator {
         validate_candidate: V,
     ) -> (PythonCpModel, HashMap<IntVar, (i32, i64)>)
     where
-        V: Fn(&[i64], &[i64]) -> bool + Sync + Send,
+        V: Fn(&[i64], &[i64]) -> (bool, f64) + Sync + Send,
     {
         info!("Processing t={} directly", t);
 
@@ -214,7 +222,7 @@ impl Translator {
 
         // 3. Brute-force evaluate all possible plaintexts for every tuple
         // (Using par_iter because this search space is huge)
-        let t_table_constraints: Vec<(Vec<i64>, Vec<Vec<i64>>)> = enc_combinations
+        let t_table_constraints: Vec<(Vec<i64>, Vec<(Vec<i64>, f64)>)> = enc_combinations
             .into_par_iter()
             .filter_map(|enc_tuple| {
                 let mut valid_plaintexts = Vec::new();
@@ -223,8 +231,9 @@ impl Translator {
                 let domains: Vec<_> = (0..t).map(|_| 0..=largest_val).collect();
 
                 for pt_tuple in domains.into_iter().multi_cartesian_product() {
-                    if validate_candidate(&enc_tuple, &pt_tuple) {
-                        valid_plaintexts.push(pt_tuple);
+                    let (valid, prob) = validate_candidate(&enc_tuple, &pt_tuple);
+                    if valid {
+                        valid_plaintexts.push((pt_tuple, prob));
                     }
                 }
 
@@ -240,17 +249,22 @@ impl Translator {
             .collect();
 
         // 4. Append all surviving valid permutations into the model state
-        for (enc_t_tuple, valid_assignments) in &t_table_constraints {
+        for (enc_t_tuple, mut valid_assignments) in t_table_constraints {
             let main_vars: Vec<_> = enc_t_tuple
                 .iter()
                 .map(|rec| *enc_id_to_intvar.get(rec).unwrap())
                 .collect();
 
+            valid_assignments.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
+            valid_assignments.truncate(trunc_amount);
+            let just_plaintexts: Vec<Vec<i64>> =
+                valid_assignments.iter().map(|(pt, _)| pt.clone()).collect();
+
             // Mutate our custom PythonCpModel directly
             Self::add_allowed_assignments(
                 &mut cp_model,
                 &main_vars,
-                valid_assignments,
+                &just_plaintexts,
                 &var_index_map,
             );
         }
@@ -269,7 +283,7 @@ impl Translator {
         validate_candidate: &V,
     ) -> Option<HashMap<Vec<i64>, Vec<Vec<i64>>>>
     where
-        V: Fn(&[i64], &[i64]) -> bool + Sync + Send,
+        V: Fn(&[i64], &[i64]) -> (bool, f64) + Sync + Send,
     {
         // ------------------------------------------------------------------------
         // PHASE 1: Parallel Dynamic Candidate Generation
@@ -282,7 +296,8 @@ impl Translator {
                 .progress_chars("##-"),
         );
 
-        let table_constraints: Vec<(Vec<i64>, Vec<Vec<i64>>)> = t_minus_1_assignments
+        let table_constraints: Vec<(Vec<i64>, Vec<(Vec<i64>, f64)>)> = t_minus_1_assignments
+            .clone()
             .par_iter()
             .flat_map(|(t_minus_1_tuple, sub_assigns)| {
                 let mut local_constraints = Vec::new();
@@ -304,9 +319,10 @@ impl Translator {
                             let mut candidate = Vec::with_capacity(sub_assign.len() + 1);
                             candidate.extend_from_slice(sub_assign);
                             candidate.push(*single_assign);
+                            let (valid, prob) = validate_candidate(&t_tuple, &candidate);
 
-                            if validate_candidate(&t_tuple, &candidate) {
-                                pre_validated_assignments.push(candidate);
+                            if valid {
+                                pre_validated_assignments.push((candidate, prob));
                             }
                         }
                     }
@@ -328,17 +344,21 @@ impl Translator {
         // ------------------------------------------------------------------------
         let mut current_t_cache = HashMap::with_capacity(table_constraints.len());
 
-        for (enc_t_tuple, valid_assignments) in &table_constraints {
+        for (enc_t_tuple, mut valid_assignments) in table_constraints.clone() {
             let main_vars: Vec<_> = enc_t_tuple
                 .iter()
                 .map(|rec| *self.enc_id_to_intvar.get(rec).unwrap())
                 .collect();
 
+            valid_assignments.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
+            valid_assignments.truncate(trunc_amount);
+            let just_plaintexts = valid_assignments.iter().map(|(pt, _)| pt.clone()).collect();
+
             // Pushing constraints into global proto_model
             Self::add_allowed_assignments(
                 &mut self.proto_model,
                 &main_vars,
-                &valid_assignments,
+                &just_plaintexts,
                 &self.var_index_map,
             );
 
@@ -394,7 +414,7 @@ impl Translator {
 
             // Match your sanity check
             for survived in &surviving_assignments {
-                if !validate_candidate(&enc_t_tuple, survived) {
+                if !validate_candidate(&enc_t_tuple, survived).0 {
                     panic!("Solver broken!")
                 }
             }
@@ -430,7 +450,7 @@ impl Translator {
         _encrypted_records: &[i64],
         validate_candidate: V,
     ) where
-        V: Fn(&[i64], &[i64]) -> bool + Sync + Send,
+        V: Fn(&[i64], &[i64]) -> (bool, f64) + Sync + Send,
     {
         let prev_t_cache = &self
             .t_assignment_archive

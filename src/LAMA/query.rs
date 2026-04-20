@@ -1,4 +1,4 @@
-use crate::dataloader::{flatten_dompair, unflatten_nd, Searchable};
+use crate::dataloader::{flatten_dompair, flatten_nd, unflatten_nd, Searchable};
 use crate::LAMA::utility::{get_mbq, DistributionType};
 // Adjust imports as necessary for DomPair
 use crate::{Coord, DomPair, Probability, Record, Value};
@@ -410,15 +410,26 @@ impl<'a> QueryDistribution<'a> {
         let mut distance_groups: Vec<Vec<((Value, Value), DomPair)>> =
             vec![Vec::new(); largest_l1 as usize + 1];
 
-        for outer in &all_recs {
-            let unflat_out = unflatten_nd(*outer, &high_pair, &low_pair);
-            for inner in &all_recs {
-                let unflat_in = unflatten_nd(*inner, &high_pair, &low_pair);
-                let taxicab = taxicab_distance(&unflat_out, &unflat_in);
-                let query = get_mbq(&[unflat_out.clone(), unflat_in.clone()]);
+        let domain_iter = low_pair
+            .iter()
+            .zip(high_pair.iter())
+            .map(|(&low, &high)| low..=high)
+            .multi_cartesian_product();
 
-                // Push directly into the vector at index `taxicab`
-                distance_groups[taxicab as usize].push(((*outer, *inner), query));
+        let all_possible_coords: Vec<Vec<i64>> = domain_iter.collect();
+
+        // 2. Iterate over the entire domain, not just the DB records
+        for outer in &all_possible_coords {
+            for inner in &all_possible_coords {
+                let taxicab = taxicab_distance(outer, inner);
+                let query = get_mbq(&[outer.clone(), inner.clone()]);
+
+                // You will need to flatten these coordinates if your distance_groups
+                // expects the 1D Value representation
+                let flat_outer = flatten_nd(outer, &high_pair, &low_pair);
+                let flat_inner = flatten_nd(inner, &high_pair, &low_pair);
+
+                distance_groups[taxicab as usize].push(((flat_outer, flat_inner), query));
             }
         }
 

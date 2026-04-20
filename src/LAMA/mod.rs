@@ -149,11 +149,14 @@ pub fn lama_attack(
 
     // if in the 'perfect' world only use things within 0.01\% of the true
     let active_eps = if *eps == 0.0 { 1e-5 } else { *eps };
-    let validate_candidate = |enc_tuple: &[i64], proposed_plaintexts: &[i64]| -> bool {
+    let validate_candidate = |enc_tuple: &[i64], proposed_plaintexts: &[i64]| -> (bool, f64) {
         let obs_prob = get_observed_prob(enc_tuple);
 
         let exp_prob = get_expected_prob(proposed_plaintexts);
-        (obs_prob - exp_prob).abs() <= active_eps
+        (
+            (obs_prob - exp_prob).abs() <= active_eps,
+            (obs_prob - exp_prob).abs(),
+        )
     };
 
     let universe = loaded_db.get_universe();

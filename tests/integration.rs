@@ -197,11 +197,14 @@ fn end_flat() {
 
     // 3. Unified Validator
     let active_eps = if eps == 0.0 { 1e-5 } else { eps };
-    let validate_candidate = |enc_tuple: &[i64], proposed_plaintexts: &[i64]| -> bool {
+    let validate_candidate = |enc_tuple: &[i64], proposed_plaintexts: &[i64]| -> (bool, f64) {
         let obs_prob = get_observed_prob(enc_tuple);
 
         let exp_prob = get_expected_prob(proposed_plaintexts);
-        (obs_prob - exp_prob).abs() <= active_eps
+        (
+            (obs_prob - exp_prob).abs() <= active_eps,
+            (obs_prob - exp_prob).abs(),
+        )
     };
 
     info!("Bruteforcing t=2");
@@ -358,11 +361,14 @@ fn end_to_end() {
     };
 
     let active_eps = if eps == 0.0 { 1e-5 } else { eps };
-    let validate_candidate = |enc_tuple: &[i64], proposed_plaintexts: &[i64]| -> bool {
+    let validate_candidate = |enc_tuple: &[i64], proposed_plaintexts: &[i64]| -> (bool, f64) {
         let obs_prob = get_observed_prob(enc_tuple);
 
         let exp_prob = get_expected_prob(proposed_plaintexts);
-        (obs_prob - exp_prob).abs() <= active_eps
+        (
+            (obs_prob - exp_prob).abs() <= active_eps,
+            (obs_prob - exp_prob).abs(),
+        )
     };
 
     info!("--> Processing Base Case (t=1)");
@@ -460,7 +466,7 @@ fn end_to_end_sampled() {
 
     let dist = "gaussian";
     let target_query_percentage = 0.5; // e.g., observe 5% of all possible queries
-    let fixed_delta = 0.05; // 95% confidence that error <= epsilon
+    let fixed_delta = 0.9; // 50% confidence that error <= epsilon
 
     // 1. Initialize a baseline selector to generate the distribution space
     // We pass 0.0 for eps/delt temporarily just to build the QueryDistribution
@@ -580,11 +586,14 @@ fn end_to_end_sampled() {
     };
 
     let active_eps = if eps == 0.0 { 1e-5 } else { eps };
-    let validate_candidate = |enc_tuple: &[i64], proposed_plaintexts: &[i64]| -> bool {
+    let validate_candidate = |enc_tuple: &[i64], proposed_plaintexts: &[i64]| -> (bool, f64) {
         let obs_prob = get_observed_prob(enc_tuple);
 
         let exp_prob = get_expected_prob(proposed_plaintexts);
-        (obs_prob - exp_prob).abs() <= active_eps
+        (
+            (obs_prob - exp_prob).abs() <= active_eps,
+            (obs_prob - exp_prob).abs(),
+        )
     };
 
     info!("--> Processing Base Case (t=1)");

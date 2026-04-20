@@ -8,7 +8,7 @@ use rand::SeedableRng;
 use rayon::prelude::*;
 use std::collections::{HashMap, HashSet};
 
-const TRUNC_AMOUNT: usize = 1000;
+const TRUNC_AMOUNT: usize = 2500;
 
 /// Translator: One Formula from All Matching Pairs.
 pub struct Translator {

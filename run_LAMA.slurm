@@ -1,8 +1,8 @@
 #!/bin/bash -l
 #SBATCH --job-name=rust_ortools_batch
 #SBATCH --partition=bigmem
-#SBATCH --output=LAMA_prob.out
-#SBATCH --error=LAMA_prob.err
+#SBATCH --output=LAMA.out
+#SBATCH --error=LAMA.err
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=128
@@ -87,7 +87,7 @@ $SG_RUN cargo clean
 echo "Building project inside container..."
 $SG_RUN cargo rustc --bin frequency_analysis_limits --release -- -Clink-arg=-lprotobuf
 
-padding=0
+padding=5
 
 #NAMES=("spitz")
 #DISTS=("uniform" "gaussian" "beta" "flat")
@@ -95,7 +95,7 @@ padding=0
 
  NAMES=("shopparis" "highway" "busstop" "drink" "spitz" "cali")
  # DISTS=("uniform" "gaussian" "beta" "flat")
- DISTS=("uniform" "gaussian" "beta")
+ DISTS=("uniform" "gaussian" "beta" "uniform")
  DATA_DIRS=(
      "$SLURM_SUBMIT_DIR/databases/20x20"
      "$SLURM_SUBMIT_DIR/databases/25x25"
@@ -110,7 +110,8 @@ padding=0
 #DISTS=("uniform" "gaussian" "beta")
 #DATA_DIRS=("$SLURM_SUBMIT_DIR/databases/16x16x14")
 
-PROBS=("0.05" "0.10" "0.15" "0.20")
+# PROBS=("0.05" "0.10" "0.15" "0.20")
+PROBS=("1.0")
 
 
 echo "Starting batch processing..."

@@ -498,14 +498,14 @@ fn end_to_end_sampled() {
         .build_global()
         .unwrap();
 
-    let rows_cols = 25;
+    let rows_cols = 12;
     let dim = 2;
 
     info!("Loading test DB ({}x{})", rows_cols, rows_cols);
-    let loaded_db: Box<dyn Searchable + Sync> = Box::new(testDB::new(dim, rows_cols, 60));
+    let loaded_db: Box<dyn Searchable + Sync> = Box::new(testDB::new(dim, rows_cols, 75));
 
-    let dist = "gaussian";
-    let target_query_percentage = 0.02; // e.g., observe 5% of all possible queries
+    let dist = "uniform";
+    let target_query_percentage = 0.15; // e.g., observe 5% of all possible queries
     let fixed_delta = 0.9; // 50% confidence that error <= epsilon
 
     // 1. Initialize a baseline selector to generate the distribution space
@@ -513,8 +513,6 @@ fn end_to_end_sampled() {
     let mut selector = Selector::new(dist, &loaded_db);
 
     let largest_dom = loaded_db.get_dom_pair();
-
-    let all_queries = loaded_db.do_search(&largest_dom.0, &largest_dom.1);
 
     // How many queries can we do? A query is a hyperrectangle, The total number of hyper rectangles
     // in a space is n*(n+1)/2 where n is the length of a dim, then mutliply for each dim.
@@ -552,11 +550,14 @@ fn end_to_end_sampled() {
     // 3. Calculate Empirical VC Dimension (Fixing Issue A)
     // Assuming you update `get_vc_sukp_bound` to return the `q` profit, we calculate `b` here.
     // Ideally, `get_vc_sukp_bound` should just return `b` directly.
-    //let mut empirical_vc_dim = (responses.len() as f64).log2().floor() + 1.0;
-    let mut empirical_vc_dim =
-        Selector::simple_bound_corollary2(&responses, &loaded_db.get_universe());
-    // let q_profit = selector.get_vc_sukp_bound(responses.clone());
-    // let mut empirical_vc_dim = q_profit.log2().floor() + 1.0;
+    //n let mut empirical_vc_dim = (responses.len() as f64).log2().floor() + 1.0;
+    // let mut empirical_vc_dim =
+    //     Selector::simple_bound_corollary2(&responses, &loaded_db.get_universe());
+    let all_resps = selector.get_all_possible_responses();
+    let mut empirical_vc_dim = selector.get_vc_sukp_bound(responses.clone(), &all_resps);
+    if empirical_vc_dim == 0.0 {
+        empirical_vc_dim = Selector::simple_bound_corollary2(&all_resps, &loaded_db.get_universe());
+    }
 
     // calculate the VC-dim directly via the 'antichain' method (algorithm)
     // empirical_vc_dim =
@@ -571,7 +572,7 @@ fn end_to_end_sampled() {
         fixed_delta,
     );
 
-    info!("Empirical VC Dimension: {}", empirical_vc_dim);
+    info!("VC Dimension: {}", empirical_vc_dim);
     info!("Guaranteed Epsilon Bound: {}", eps);
     info!("---------------------------");
 

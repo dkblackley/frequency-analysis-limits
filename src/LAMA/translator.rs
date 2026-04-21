@@ -9,6 +9,7 @@ use rand::SeedableRng;
 use rayon::prelude::*;
 use sha2::digest::typenum::Pow;
 use std::collections::{HashMap, HashSet};
+use std::sync::atomic::AtomicUsize;
 
 /// Translator: One Formula from All Matching Pairs.
 pub struct Translator {
@@ -48,7 +49,7 @@ impl Translator {
 
         for i in 1..(max_t + 1) {
             let amount = largest_val.pow(i as u32);
-            trunc_amount.push(amount);
+            trunc_amount.push(amount * (i as i64));
         }
         trunc_amount
     }
@@ -126,6 +127,7 @@ impl Translator {
     where
         V: Fn(&[i64], &[i64]) -> (bool, f64),
     {
+        let mut constraint_count = 0;
         let mut t1_cache = HashMap::new();
 
         let pb = ProgressBar::new(encrypted_records.len() as u64);
@@ -161,6 +163,7 @@ impl Translator {
                 valid_plaintexts.truncate(self.trunc_amount[0] as usize);
                 let just_plaintexts: Vec<Vec<i64>> =
                     valid_plaintexts.iter().map(|(pt, _)| pt.clone()).collect();
+                constraint_count += valid_plaintexts.len();
 
                 // Exactly matches your logic: modifying global proto_model
                 Self::add_allowed_assignments(
@@ -182,6 +185,7 @@ impl Translator {
         pb.finish_with_message("Finished finding tuples for t=1");
         self.t_assignment_archive.insert(1, t1_cache);
         debug!("Done with t1");
+        info!("Added {} assignments in round t=1", constraint_count);
     }
 
     fn genereate_direct_mapping(
@@ -298,6 +302,8 @@ impl Translator {
     where
         V: Fn(&[i64], &[i64]) -> (bool, f64) + Sync + Send,
     {
+        let mut constrain_count = AtomicUsize::new(0);
+
         // ------------------------------------------------------------------------
         // PHASE 1: Parallel Dynamic Candidate Generation
         // ------------------------------------------------------------------------
@@ -369,8 +375,9 @@ impl Translator {
 
             valid_assignments.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
             valid_assignments.truncate(*self.trunc_amount.get(t).unwrap_or(&4000) as usize);
-            let just_plaintexts = valid_assignments.iter().map(|(pt, _)| pt.clone()).collect();
-
+            let just_plaintexts: Vec<Vec<i64>> =
+                valid_assignments.iter().map(|(pt, _)| pt.clone()).collect();
+            constrain_count.fetch_add(just_plaintexts.len(), std::sync::atomic::Ordering::Relaxed);
             // Pushing constraints into global proto_model
             Self::add_allowed_assignments(
                 &mut self.proto_model,
@@ -395,6 +402,7 @@ impl Translator {
         );
 
         // This calls your wrapper instead of ffi::solve_with_parameters
+        self.proto_model.validate(&self.var_index_map);
         let response = self.proto_model.solve(self.upper, false);
         solve_pb.finish_with_message(format!("Mini-Solver finished in {:?}", solve_pb.elapsed()));
 
@@ -457,7 +465,11 @@ impl Translator {
                 updated_t_cache.insert(enc_t_tuple, surviving_assignments);
             }
         }
-
+        info!(
+            "Added {} assignments in round t={}",
+            constrain_count.load(std::sync::atomic::Ordering::Relaxed),
+            t + 1
+        );
         Some(updated_t_cache)
     }
 

@@ -7,8 +7,8 @@ use good_lp::{
     default_solver, highs, variable, Expression, ProblemVariables, Solution, SolverModel, Variable,
 };
 use indicatif::{ProgressBar, ProgressStyle};
-use itertools::Itertools;
-use log::{info, warn};
+use itertools::{all, Itertools};
+use log::{debug, info, trace, warn};
 use rand::distributions::Distribution;
 use rayon::prelude::*;
 use rustc_hash::FxHashMap;
@@ -320,6 +320,7 @@ impl<'a> Selector<'a> {
         &self,
         target_query_percentage: f64,
         delta: f64,
+        all_possible_responses: &Vec<Vec<Value>>,
     ) -> (Vec<DomPair>, Vec<Vec<Value>>, f64) {
         let largest_dom = self.encrypted_db.get_dom_pair();
 
@@ -358,11 +359,19 @@ impl<'a> Selector<'a> {
         // Assuming you update `get_vc_sukp_bound` to return the `q` profit, we calculate `b` here.
         // Ideally, `get_vc_sukp_bound` should just return `b` directly.
         let responses = self.get_responses_from_queries(observed_queries.clone());
-        // let q_profit = self.get_vc_sukp_bound(responses.clone());
-        //let empirical_vc_dim = q_profit.log2().floor() + 1.0;
-        // Using corollary 2:
-        let vc_dim =
-            Selector::simple_bound_corollary2(&responses, &self.encrypted_db.get_universe());
+        let mut vc_dim = self.get_vc_sukp_bound(responses.clone(), all_possible_responses);
+
+        if vc_dim == 0.0 {
+            // Using corollary 2:
+            vc_dim = Selector::simple_bound_corollary2(
+                &all_possible_responses,
+                &self.encrypted_db.get_universe(),
+            );
+        }
+
+        // let vc_dim =
+        //     Selector::simple_bound_corollary2(&responses, &self.encrypted_db.get_universe()) * 3.0;
+        // let vc_dim = 163.0;
 
         // 4. Reverse-calculate Epsilon (Fixing Issue B)
         // Note: You must update `calculate_epsilon` to accept `d` (the EVC) directly,
@@ -399,10 +408,14 @@ impl<'a> Selector<'a> {
     /// everything. Weights are assigned to encrypted records but profits to subsets. Capacity -
     /// From corollary 1 we know that the capacity we want to solve for is the largest response. TO
     /// get a tighter bound, we have to iterate over each l and L.
-    pub fn get_vc_sukp_bound(&self, responses: Vec<Vec<Value>>) -> f64 {
-        // 1. Find all distinct transaction lengths (ell_i)
+    pub fn get_vc_sukp_bound(
+        &self,
+        responses: Vec<Vec<Value>>,
+        all_respones: &Vec<Vec<Value>>,
+    ) -> f64 {
+        // 1. Find all distinct transaction lengths (ell_i) (computed wrt D)
         let mut distinct_lengths = Vec::new();
-        for response in &responses {
+        for response in all_respones {
             let len = response.len();
             let mut found = false;
 
@@ -434,53 +447,56 @@ impl<'a> Selector<'a> {
 
         // Now we want capital L_i, that is, for each l_i, find all transactions of length AT LEAST
         // l_i and then find the largest set such that no to items are subset of each-other.
-        let mut l_sets = Vec::new();
 
-        for i in 0..distinct_lengths.len() {
-            let current_l = distinct_lengths[i];
-            let mut transactions_at_least_l = Vec::new();
+        let l_sets: Vec<_> = distinct_lengths
+            .par_iter()
+            .map(|&current_l| {
+                let mut transactions_at_least_l = Vec::new();
 
-            // Cleaned up: Iterate directly over the items rather than using indices
-            for tx in &responses {
-                if tx.len() >= current_l {
-                    transactions_at_least_l.push(tx);
-                }
-            }
-
-            let mut largest_set_no_subsets = Vec::new();
-
-            // Cleaned up: .enumerate() gives us the index (j) and the transaction (current_tx)
-            for (j, &current_tx) in transactions_at_least_l.iter().enumerate() {
-                let mut is_subset_of_something_else = false;
-
-                for (k, &other_tx) in transactions_at_least_l.iter().enumerate() {
-                    if j == k {
-                        continue;
+                for tx in all_respones {
+                    if tx.len() >= current_l {
+                        transactions_at_least_l.push(tx);
                     }
+                }
 
-                    if current_tx.len() <= other_tx.len() {
-                        // --- THE MAGIC LINE ---
-                        // This says: "For every item in current_tx, does other_tx contain it?"
-                        // It immediately stops and returns false if it finds a missing item.
-                        let is_subset = current_tx.iter().all(|item| other_tx.contains(item));
+                let mut largest_set_no_subsets = Vec::new();
 
-                        if is_subset {
-                            if other_tx.len() > current_tx.len() || k < j {
-                                is_subset_of_something_else = true;
-                                break;
+                // Cleaned up: .enumerate() gives us the index (j) and the transaction (current_tx)
+                for (j, &current_tx) in transactions_at_least_l.iter().enumerate() {
+                    let mut is_subset_of_something_else = false;
+
+                    for (k, &other_tx) in transactions_at_least_l.iter().enumerate() {
+                        if j == k {
+                            continue;
+                        }
+
+                        if current_tx.len() <= other_tx.len() {
+                            // --- THE MAGIC LINE ---
+                            // This says: "For every item in current_tx, does other_tx contain it?"
+                            // It immediately stops and returns false if it finds a missing item.
+                            let is_subset = current_tx.iter().all(|item| other_tx.contains(item));
+
+                            if is_subset {
+                                if other_tx.len() > current_tx.len() || k < j {
+                                    is_subset_of_something_else = true;
+                                    break;
+                                }
                             }
                         }
                     }
+
+                    if !is_subset_of_something_else {
+                        largest_set_no_subsets.push(current_tx);
+                    }
                 }
 
-                if !is_subset_of_something_else {
-                    largest_set_no_subsets.push(current_tx);
-                }
-            }
+                // 3. Update the progress bar inside the thread and return the result
+                // (If `pb` is an `indicatif::ProgressBar`, it is completely thread-safe)
+                pb.inc(1);
 
-            l_sets.push(largest_set_no_subsets);
-            pb.inc(1);
-        }
+                largest_set_no_subsets
+            })
+            .collect(); // 4. Collect gathers the parallel results back into a Vec in the correct order
         let pb = ProgressBar::new(distinct_lengths.len() as u64);
         pb.set_style(
             ProgressStyle::default_bar()
@@ -489,33 +505,42 @@ impl<'a> Selector<'a> {
                 .progress_chars("=> "),
         );
 
-        for j in 0..distinct_lengths.len() {
-            let ell_i = distinct_lengths[j];
-            let cap_l_i = l_sets[j].len(); // number of itemsets of len ell.
+        return (0..distinct_lengths.len())
+            .into_par_iter()
+            .find_map_first(|j| {
+                let ell_i = distinct_lengths[j];
+                let cap_l_i = l_sets[j][0].len();
 
-            // 4. Compute q_i (Optimal SUKP profit with capacity ell_i)
-            // The lemma requires the optimal integer solution, so we pass `is_integer = true`.
-            let q_i = Self::solve_sukp_internal(&responses, ell_i);
-            pb.inc(1);
+                // 4. Compute q_i (Optimal SUKP profit with capacity ell_i)
+                // Note: `responses` is captured by reference, which is perfectly safe in Rayon
+                let q_i = Self::solve_sukp_internal(&responses, ell_i);
 
-            // Safety check: log2(0) is negative infinity, so handle a profit of 0
-            let b_i = if q_i <= 0.0 {
-                0.0
-            } else {
-                // 5. Compute b_i = floor(log_2(q_i)) + 1
-                q_i.log2().floor() + 1.0
-            };
+                // Progress bar increments safely from any thread
+                pb.inc(1);
 
-            // 6. Lemma 1 check: Let j be the minimum integer for which b_i <= L_i.
-            // Because we iterate starting from j=0 (the start of our decreasing array),
-            // the very first time this condition is met, we have found our minimum `j`.
-            if b_i <= cap_l_i as f64 {
-                return b_i;
-            }
-        }
+                // Safety check: log2(0) is negative infinity, so handle a profit of 0
+                let b_i = if q_i <= 0.0 {
+                    0.0
+                } else {
+                    // 5. Compute b_i = floor(log_2(q_i)) + 1
+                    q_i.log2().floor() + 1.0
+                };
 
-        // Fallback if no such j is found (mathematically, it should find one before this)
-        0.0
+                // 6. Lemma 1 check
+                // If the condition is met, we return Some(b_i).
+                // Rayon will stop processing remaining chunks and return this value.
+                if b_i <= cap_l_i as f64 {
+                    Some(b_i)
+                } else {
+                    trace!(
+                        "Missed profit val, log2 profit was {} and cap was {}",
+                        b_i,
+                        cap_l_i
+                    );
+                    None
+                }
+            })
+            .unwrap_or(0.0); // Fallback if no such j is found
     }
 
     fn solve_sukp_internal(itemsets: &[Vec<Value>], capacity: usize) -> f64 {
@@ -567,11 +592,7 @@ impl<'a> Selector<'a> {
     /// Calculates the guaranteed error bound (epsilon) for a given sample size.
     ///
     /// Ref: "Finding the True Frequent Itemsets" (Riondato & Vandin, 2014)
-    pub fn calculate_epsilon_real_vc(empirical_vc: f64, num_samples: usize, delta: f64) -> f64 {
-        // Corollary 2: The absolute worst-case VC-dimension for the power set of items.
-        // VC(R(2^I)) <= |I| - 1
-        // let d = (num_items - 1) as f64;
-
+    pub fn calculate_epsilon_real_vc(vc: f64, num_samples: usize, delta: f64) -> f64 {
         let l = num_samples as f64;
 
         // Theorem 1: Universal constant c is estimated to be <= 0.5
@@ -579,7 +600,7 @@ impl<'a> Selector<'a> {
 
         // Equation 1: epsilon = sqrt( (c / l) * (d + ln(1 / delta)) )
         // Note: We use natural log (.ln()) as is standard for Chernoff/VC bounds.
-        let epsilon = ((c / l) * (empirical_vc + (1.0 / delta).ln())).sqrt();
+        let epsilon = ((c / l) * (vc + (1.0 / delta).ln())).sqrt();
 
         epsilon
     }
@@ -675,8 +696,9 @@ mod tests {
 
             // 3. Calculate VC bounds based on the sample
             let responses = selector.get_responses_from_queries(sampled_queries.clone());
-            let q_profit = selector.get_vc_sukp_bound(responses);
-            let empirical_vc = q_profit.log2().floor() + 1.0;
+            let all_resposnes = selector.get_all_possible_responses();
+            let empirical_vc = selector.get_vc_sukp_bound(responses, &all_resposnes);
+            // let empirical_vc = q_profit.log2().floor() + 1.0;
 
             let delta = 0.1; // 90% confidence that the maximum error across ALL itemsets <= epsilon
             let epsilon = Selector::calculate_epsilon_real_vc(empirical_vc, num_samples, delta);

@@ -42,7 +42,7 @@ pub fn lama_attack(
     let full_datapath = format!("{0}/{1}", dir_path, db_name);
 
     if db_name == "grid" {
-        loaded_db = Box::new(testDB::new(*dim, 5, 65));
+        loaded_db = Box::new(testDB::new(*dim, 8, 65));
     } else if db_name == "nh" {
         info!("Starting LAMA attack using {} dataset", db_name);
         debug!("Loading data from {full_datapath}/{db_name}.json");
@@ -118,14 +118,17 @@ pub fn lama_attack(
     };
 
     let eps;
-    let delta = 0.35;
+    let delta = 0.01;
     let num_queries;
 
     let get_observed_prob: Box<dyn Sync + Send + Fn(&[i64]) -> f64>;
 
     if *query_percent != 1.0 {
-        let (observed_queries, responses, epsil) =
-            selector.sample_percent_responses(*query_percent, delta);
+        let (observed_queries, responses, epsil) = selector.sample_percent_responses(
+            *query_percent,
+            delta,
+            &selector.get_all_possible_responses(),
+        );
         eps = epsil;
         num_queries = observed_queries.len();
 

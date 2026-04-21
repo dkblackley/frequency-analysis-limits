@@ -41,12 +41,7 @@ impl PythonCpModel {
         Self::default()
     }
 
-    pub fn validate(
-        &self,
-        var_index_map: &HashMap<IntVar, (i32, i64)>,
-        lower: &[i64],
-        upper: &[i64],
-    ) {
+    pub fn validate(&self, var_index_map: &HashMap<IntVar, (i32, i64)>) {
         let mut found_tracker = HashMap::new();
         let mut found_all = true;
 

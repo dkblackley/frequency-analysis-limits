@@ -1,5 +1,5 @@
 #!/bin/bash -l
-#SBATCH --job-name=rust_ortools_batch
+#SBATCH --job-name=LAMA_probs
 #SBATCH --partition=bigmem
 #SBATCH --output=prob_LAMA.out
 #SBATCH --error=prob_LAMA.err

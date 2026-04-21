@@ -47,9 +47,11 @@ impl Translator {
     fn get_trunc_amount(largest_val: &i64, max_t: &usize) -> Vec<i64> {
         let mut trunc_amount = Vec::new();
 
+        let mut amount = largest_val.clone();
         for i in 1..(max_t + 1) {
-            let amount = largest_val.pow(i as u32);
-            trunc_amount.push(amount * (i as i64));
+            let safety_cap = (largest_val.clone() * 30) * (i as i64);
+            // amount = largest_val.pow(i as u32);
+            trunc_amount.push(safety_cap);
         }
         trunc_amount
     }
@@ -303,6 +305,7 @@ impl Translator {
         V: Fn(&[i64], &[i64]) -> (bool, f64) + Sync + Send,
     {
         let mut constrain_count = AtomicUsize::new(0);
+        let mut mini_constrain_count = AtomicUsize::new(0);
 
         // ------------------------------------------------------------------------
         // PHASE 1: Parallel Dynamic Candidate Generation
@@ -327,8 +330,12 @@ impl Translator {
                 pb.inc(1);
 
                 for (&single_var, single_assigns) in single_assignments.iter() {
-                    if t_minus_1_tuple.contains(&single_var) {
-                        continue;
+                    // FIX 1: Enforce strictly ascending order to prevent [B, A] permutations.
+                    // This replaces your `contains` check.
+                    if let Some(&last_val) = t_minus_1_tuple.last() {
+                        if single_var <= last_val {
+                            continue;
+                        }
                     }
 
                     let mut t_tuple = Vec::with_capacity(t_minus_1_tuple.len() + 1);
@@ -339,12 +346,22 @@ impl Translator {
 
                     for sub_assign in sub_assigns {
                         for single_assign in single_assigns {
+                            // FIX 2: Do not generate illegal plaintext duplicates!
+                            // If we don't filter them, they steal slots during truncate.
+                            if sub_assign.contains(single_assign) {
+                                continue;
+                            }
+
                             let mut candidate = Vec::with_capacity(sub_assign.len() + 1);
                             candidate.extend_from_slice(sub_assign);
                             candidate.push(*single_assign);
                             let (valid, prob) = validate_candidate(&t_tuple, &candidate);
 
                             if valid {
+                                mini_constrain_count.fetch_add(
+                                    candidate.len(),
+                                    std::sync::atomic::Ordering::Relaxed,
+                                );
                                 pre_validated_assignments.push((candidate, prob));
                             }
                         }
@@ -354,6 +371,7 @@ impl Translator {
                         local_constraints.push((t_tuple, pre_validated_assignments));
                     }
                 }
+
                 local_constraints
             })
             .collect();
@@ -366,6 +384,12 @@ impl Translator {
         // PHASE 2: Single Global CP-SAT Model
         // ------------------------------------------------------------------------
         let mut current_t_cache = HashMap::with_capacity(table_constraints.len());
+        debug!("Mini model clone");
+        let mut mini_model = self.proto_model.clone();
+        info!(
+            "Setting up mini-model, {} constraints were added",
+            mini_constrain_count.load(std::sync::atomic::Ordering::Relaxed)
+        );
 
         for (enc_t_tuple, mut valid_assignments) in table_constraints.clone() {
             let main_vars: Vec<_> = enc_t_tuple
@@ -373,14 +397,15 @@ impl Translator {
                 .map(|rec| *self.enc_id_to_intvar.get(rec).unwrap())
                 .collect();
 
-            valid_assignments.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
-            valid_assignments.truncate(*self.trunc_amount.get(t).unwrap_or(&4000) as usize);
+            let trunk_amount = *self.trunc_amount.get(t).unwrap_or(&4000) as usize;
+            valid_assignments.par_sort_unstable_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
+            valid_assignments.truncate(trunk_amount);
             let just_plaintexts: Vec<Vec<i64>> =
                 valid_assignments.iter().map(|(pt, _)| pt.clone()).collect();
             constrain_count.fetch_add(just_plaintexts.len(), std::sync::atomic::Ordering::Relaxed);
-            // Pushing constraints into global proto_model
+            // Pushing constraints into LOCAL mini model
             Self::add_allowed_assignments(
-                &mut self.proto_model,
+                &mut mini_model,
                 &main_vars,
                 &just_plaintexts,
                 &self.var_index_map,
@@ -402,8 +427,8 @@ impl Translator {
         );
 
         // This calls your wrapper instead of ffi::solve_with_parameters
-        self.proto_model.validate(&self.var_index_map);
-        let response = self.proto_model.solve(self.upper, false);
+        mini_model.validate(&self.var_index_map);
+        let response = mini_model.solve(self.upper, false);
         solve_pb.finish_with_message(format!("Mini-Solver finished in {:?}", solve_pb.elapsed()));
 
         if response.is_none() {
@@ -449,7 +474,7 @@ impl Translator {
                 .map(|rec| *self.enc_id_to_intvar.get(rec).unwrap())
                 .collect();
 
-            // Match your double-addition
+            // Now only add survivors to the global...
             Self::add_allowed_assignments(
                 &mut self.proto_model,
                 &main_vars,
@@ -495,4 +520,41 @@ impl Translator {
         self.t_assignment_archive
             .insert(t, current_t_cache.expect("Failed..."));
     }
+}
+
+#[test]
+fn test_table_constraint_permutations() {
+    let mut model = PythonCpModel::new();
+
+    // Setup a simple 2-variable problem
+    model.num_vars = 2;
+    model.all_different = true; // Var_0 and Var_1 must be unique
+
+    // Add ONE table constraint for the variable combination [0, 1].
+    // Inside this single table, we provide BOTH permutations as valid rows.
+    model.table_constraints.push(TableConstraint {
+        vars: vec![0, 1], // The columns: Var_0, Var_1
+        values: vec![
+            vec![1, 2], // Row A: Var_0 = 1, Var_1 = 2
+            vec![2, 1], // Row B: Var_0 = 2, Var_1 = 1
+        ],
+    });
+
+    // Run the Python solver (largest_val = 5, get_one = false)
+    let result = model
+        .solve(5, false)
+        .expect("Python solver crashed or failed to run");
+
+    println!("Solutions found: {:?}", result);
+
+    // Verify that the solver successfully traversed both permutations
+    // from a single TableConstraint object.
+    assert_eq!(
+        result.len(),
+        2,
+        "Solver should find exactly two valid combinations"
+    );
+
+    assert!(result.contains(&vec![1, 2]));
+    assert!(result.contains(&vec![2, 1]));
 }

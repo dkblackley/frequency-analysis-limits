@@ -16,6 +16,7 @@ use frequency_analysis_limits::LAMA::translator::Translator;
 use frequency_analysis_limits::LAMA::utility::{encloses, get_mbq};
 use frequency_analysis_limits::{DomPair, Value};
 use frequency_analysis_limits::{Frequency, Record};
+use itertools::all;
 use log::{debug, error, info};
 use rand::distributions::Distribution;
 use rustc_hash::FxHashMap;
@@ -350,7 +351,7 @@ fn end_to_end() {
         .unwrap();
 
     // This should take about a minute to run... (if not very sparse!)
-    let rows_cols = 4;
+    let rows_cols = 10;
     let dim = 2;
 
     info!("Loading test DB ({}x{})", rows_cols, rows_cols);
@@ -498,15 +499,15 @@ fn end_to_end_sampled() {
         .build_global()
         .unwrap();
 
-    let rows_cols = 12;
+    let rows_cols = 8;
     let dim = 2;
 
     info!("Loading test DB ({}x{})", rows_cols, rows_cols);
-    let loaded_db: Box<dyn Searchable + Sync> = Box::new(testDB::new(dim, rows_cols, 75));
+    let loaded_db: Box<dyn Searchable + Sync> = Box::new(testDB::new(dim, rows_cols, 25));
 
     let dist = "uniform";
     let target_query_percentage = 0.15; // e.g., observe 5% of all possible queries
-    let fixed_delta = 0.9; // 50% confidence that error <= epsilon
+    let fixed_delta = 0.001; // 99.9% confidence that error <= epsilon
 
     // 1. Initialize a baseline selector to generate the distribution space
     // We pass 0.0 for eps/delt temporarily just to build the QueryDistribution
@@ -535,46 +536,49 @@ fn end_to_end_sampled() {
 
     // 5. Sample the specific number of queries based on the distribution weights
     let mut rng = rand::thread_rng();
-    let mut observed_queries: Vec<DomPair> = Vec::with_capacity(num_queries_to_observe);
+    // let mut observed_queries: Vec<DomPair> = Vec::with_capacity(num_queries_to_observe);
 
-    info!("Sampling {} queries...", num_queries_to_observe);
-    for _ in 0..num_queries_to_observe {
-        // Use the WeightedIndex sampler you built in QueryDistribution
-        let sampled_idx = selector.query_distribution.sampler.sample(&mut rng);
-        let sampled_pair = selector.query_distribution.pairs[sampled_idx].clone();
-        observed_queries.push(sampled_pair);
-    }
+    // info!("Sampling {} queries...", num_queries_to_observe);
+    // for _ in 0..num_queries_to_observe {
+    //     // Use the WeightedIndex sampler you built in QueryDistribution
+    //     let sampled_idx = selector.query_distribution.sampler.sample(&mut rng);
+    //     let sampled_pair = selector.query_distribution.pairs[sampled_idx].clone();
+    //     observed_queries.push(sampled_pair);
+    // }
 
-    let responses = selector.get_responses_from_queries(observed_queries.clone());
+    let all_resp = selector.get_all_possible_responses();
 
-    // 3. Calculate Empirical VC Dimension (Fixing Issue A)
-    // Assuming you update `get_vc_sukp_bound` to return the `q` profit, we calculate `b` here.
-    // Ideally, `get_vc_sukp_bound` should just return `b` directly.
-    //n let mut empirical_vc_dim = (responses.len() as f64).log2().floor() + 1.0;
-    // let mut empirical_vc_dim =
-    //     Selector::simple_bound_corollary2(&responses, &loaded_db.get_universe());
-    let all_resps = selector.get_all_possible_responses();
-    let mut empirical_vc_dim = selector.get_vc_sukp_bound(responses.clone(), &all_resps);
-    if empirical_vc_dim == 0.0 {
-        empirical_vc_dim = Selector::simple_bound_corollary2(&all_resps, &loaded_db.get_universe());
-    }
+    let (observed_queries, responses, eps) =
+        selector.sample_percent_responses(target_query_percentage, fixed_delta, &all_resp);
 
-    // calculate the VC-dim directly via the 'antichain' method (algorithm)
-    // empirical_vc_dim =
-    //     Selector::compute_antichain_bound(responses.clone(), loaded_db.get_universe());
-
-    // 4. Reverse-calculate Epsilon (Fixing Issue B)
-    // Note: You must update `calculate_epsilon` to accept `d` (the EVC) directly,
-    // replacing the hardcoded `num_items - 1`.
-    let eps = Selector::calculate_epsilon_real_vc(
-        empirical_vc_dim, // Pass the EVC, not num_items
-        num_queries_to_observe,
-        fixed_delta,
-    );
-
-    info!("VC Dimension: {}", empirical_vc_dim);
-    info!("Guaranteed Epsilon Bound: {}", eps);
-    info!("---------------------------");
+    // // 3. Calculate Empirical VC Dimension (Fixing Issue A)
+    // // Assuming you update `get_vc_sukp_bound` to return the `q` profit, we calculate `b` here.
+    // // Ideally, `get_vc_sukp_bound` should just return `b` directly.
+    // //n let mut empirical_vc_dim = (responses.len() as f64).log2().floor() + 1.0;
+    // // let mut empirical_vc_dim =
+    // //     Selector::simple_bound_corollary2(&responses, &loaded_db.get_universe());
+    // let all_resps = selector.get_all_possible_responses();
+    // let mut empirical_vc_dim = selector.get_emp_vc_sukp_bound(responses.clone(), &all_resps);
+    // if empirical_vc_dim == 0.0 {
+    //     empirical_vc_dim = Selector::simple_bound_corollary2(&all_resps, &loaded_db.get_universe());
+    // }
+    //
+    // // calculate the VC-dim directly via the 'antichain' method (algorithm)
+    // // empirical_vc_dim =
+    // //     Selector::compute_antichain_bound(responses.clone(), loaded_db.get_universe());
+    //
+    // // 4. Reverse-calculate Epsilon (Fixing Issue B)
+    // // Note: You must update `calculate_epsilon` to accept `d` (the EVC) directly,
+    // // replacing the hardcoded `num_items - 1`.
+    // let eps = Selector::calculate_epsilon_real_vc(
+    //     empirical_vc_dim, // Pass the EVC, not num_items
+    //     num_queries_to_observe,
+    //     fixed_delta,
+    // );
+    //
+    // info!("VC Dimension: {}", empirical_vc_dim);
+    // info!("Guaranteed Epsilon Bound: {}", eps);
+    // info!("---------------------------");
 
     // 6. Update selector and Translator initialization with our real epsilon
 

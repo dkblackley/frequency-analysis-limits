@@ -356,34 +356,31 @@ impl<'a> Selector<'a> {
         }
 
         // 3. Calculate Empirical VC Dimension (Fixing Issue A)
-        // Assuming you update `get_vc_sukp_bound` to return the `q` profit, we calculate `b` here.
-        // Ideally, `get_vc_sukp_bound` should just return `b` directly.
         let responses = self.get_responses_from_queries(observed_queries.clone());
-        let mut vc_dim = self.get_vc_sukp_bound(responses.clone(), all_possible_responses);
+        let emp_vc_dim = self.get_emp_vc_sukp_bound(responses.clone(), all_possible_responses);
 
-        if vc_dim == 0.0 {
-            // Using corollary 2:
-            vc_dim = Selector::simple_bound_corollary2(
-                &all_possible_responses,
-                &self.encrypted_db.get_universe(),
-            );
-        }
+        // A simple bound as per corollary 2
+        let vc_dim =
+            Selector::simple_bound_corollary2(&responses, &self.encrypted_db.get_universe());
 
-        // let vc_dim =
-        //     Selector::simple_bound_corollary2(&responses, &self.encrypted_db.get_universe()) * 3.0;
-        // let vc_dim = 163.0;
-
-        // 4. Reverse-calculate Epsilon (Fixing Issue B)
-        // Note: You must update `calculate_epsilon` to accept `d` (the EVC) directly,
-        // replacing the hardcoded `num_items - 1`.
-        let eps = Selector::calculate_epsilon_real_vc(
-            vc_dim, // Pass the EVC, not num_items
+        let eps_empr = Selector::calculate_epsilon_emp_vc(
+            emp_vc_dim, // Pass the EVC
             num_queries_to_observe,
             delta,
         );
 
-        info!("VC Dimension: {}", vc_dim);
-        info!("Guaranteed Epsilon Bound: {}", eps);
+        let eps_reg = Selector::calculate_epsilon_real_vc(vc_dim, num_queries_to_observe, delta);
+
+        let eps = eps_reg.min(eps_empr);
+
+        info!(
+            "VC Dimension: {}, Empirical VC Dimension: {}",
+            vc_dim, emp_vc_dim
+        );
+        info!(
+            "Empirical Epsilon Bound: {}, Regular Epsilon Bound: {}",
+            eps_empr, eps_reg
+        );
         info!("---------------------------");
 
         return (observed_queries, responses, eps);
@@ -408,7 +405,7 @@ impl<'a> Selector<'a> {
     /// everything. Weights are assigned to encrypted records but profits to subsets. Capacity -
     /// From corollary 1 we know that the capacity we want to solve for is the largest response. TO
     /// get a tighter bound, we have to iterate over each l and L.
-    pub fn get_vc_sukp_bound(
+    pub fn get_emp_vc_sukp_bound(
         &self,
         responses: Vec<Vec<Value>>,
         all_respones: &Vec<Vec<Value>>,
@@ -605,6 +602,17 @@ impl<'a> Selector<'a> {
         epsilon
     }
 
+    pub fn calculate_epsilon_emp_vc(d: f64, num_samples: usize, delta: f64) -> f64 {
+        let l = num_samples as f64;
+
+        let part_1 = 2.0 * ((2.0 * d * (l + 1.0).ln()) / l).sqrt();
+        let part_2 = ((2.0 * (2.0 / delta).ln()) / l).sqrt();
+
+        let epsilon = part_1 + part_2;
+
+        epsilon
+    }
+
     /// Calculates the number of samples required to hit a target epsilon and delta.
     pub fn calculate_required_samples(empirical_vc: f64, target_epsilon: f64, delta: f64) -> usize {
         let c = 0.5;
@@ -697,7 +705,7 @@ mod tests {
             // 3. Calculate VC bounds based on the sample
             let responses = selector.get_responses_from_queries(sampled_queries.clone());
             let all_resposnes = selector.get_all_possible_responses();
-            let empirical_vc = selector.get_vc_sukp_bound(responses, &all_resposnes);
+            let empirical_vc = selector.get_emp_vc_sukp_bound(responses, &all_resposnes);
             // let empirical_vc = q_profit.log2().floor() + 1.0;
 
             let delta = 0.1; // 90% confidence that the maximum error across ALL itemsets <= epsilon

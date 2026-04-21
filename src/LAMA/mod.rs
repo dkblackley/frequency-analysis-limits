@@ -118,7 +118,7 @@ pub fn lama_attack(
     };
 
     let eps;
-    let delta = 0.01;
+    let delta = 0.1; // fix to 90% confidence
     let num_queries;
 
     let get_observed_prob: Box<dyn Sync + Send + Fn(&[i64]) -> f64>;
@@ -189,8 +189,11 @@ pub fn lama_attack(
     let active_eps = if eps == 0.0 { 1e-6 } else { eps };
     let validate_candidate = |enc_tuple: &[i64], proposed_plaintexts: &[i64]| -> (bool, f64) {
         let obs_prob = get_observed_prob(enc_tuple);
-
         let exp_prob = get_expected_prob(proposed_plaintexts);
+        // if obs_prob == 0.0 && exp_prob != 0.0 {
+        //     warn!("There was a tuple that was never observed! LAMa cannot continue!");
+        // }
+
         (
             (obs_prob - exp_prob).abs() <= active_eps,
             (obs_prob - exp_prob).abs(),

@@ -55,13 +55,14 @@ impl PythonCpModel {
         for tc in &self.table_constraints {
             for i in 0..tc.vars.len() {
                 let orig_val = var_index_map.get(&(IntVar(tc.vars[i].clone()))).unwrap().1;
-                let assign = tc.values[i][i];
-                if assign == orig_val {
-                    found_tracker.insert(orig_val, true);
+
+                // Search down the entire column 'i' across all valid assignment rows
+                for assignment in &tc.values {
+                    if assignment[i] == orig_val {
+                        found_tracker.insert(orig_val, true);
+                        break;
+                    }
                 }
-                // for y in 0..tc.values[i].len() {
-                //
-                // }
             }
         }
         for (k, v) in &found_tracker {

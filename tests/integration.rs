@@ -160,7 +160,7 @@ fn end_flat() {
         "3. Initializing Translator with universe size: {}",
         universe.len()
     );
-    let mut translator = Translator::new(largest_enc_val, universe.clone(), &high_pair, &low_pair);
+    let mut translator = Translator::new(largest_enc_val, universe.clone());
 
     // Grab references to avoid lifetime closure issues
     let query_dist_ref = &selector.query_distribution;
@@ -332,7 +332,7 @@ fn end_to_end() {
         low_pair,
         high_pair
     );
-    let mut translator = Translator::new(largest_enc_val, universe.clone(), &high_pair, &low_pair);
+    let mut translator = Translator::new(largest_enc_val, universe.clone());
 
     let query_dist_ref = &selector.query_distribution;
     let high_pair_ref = &high_pair;
@@ -541,7 +541,7 @@ fn end_to_end_sampled() {
     let universe = loaded_db.get_universe();
     let largest_enc_val: i64 = flatten_nd(&high_pair, &high_pair, &low_pair);
 
-    let mut translator = Translator::new(largest_enc_val, universe.clone(), &high_pair, &low_pair);
+    let mut translator = Translator::new(largest_enc_val, universe.clone());
     let query_dist_ref = &selector.query_distribution;
     let high_pair_ref = &high_pair;
     let low_pair_ref = &low_pair;

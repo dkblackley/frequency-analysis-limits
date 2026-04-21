@@ -54,11 +54,21 @@ def main():
 
     solver = cp_model.CpSolver()
 
-    if get_one:
-        solver.parameters.num_search_workers = 256
+    solver.parameters.num_search_workers = 128
+    solver.parameters.stop_after_first_solution = True
+
+    status = solver.Solve(model)
+
+    if status in (cp_model.OPTIMAL, cp_model.FEASIBLE):
+        print(f"At least one solution found. Status: {status}")
     else:
-        solver.parameters.enumerate_all_solutions = True
-        solver.parameters.keep_all_feasible_solutions_in_presolve = True
+        print("Could not find a single solution...")
+
+    solver.parameters.stop_after_first_solution = False
+    solver.parameters.num_search_workers = 0
+
+    solver.parameters.enumerate_all_solutions = True
+    solver.parameters.keep_all_feasible_solutions_in_presolve = True
 
     collector = SolutionCollector(variables)
     status = solver.Solve(model, collector)

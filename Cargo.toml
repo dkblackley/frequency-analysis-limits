@@ -5,7 +5,6 @@ edition = "2021"
 
 [dependencies]
 itertools = "0.14.0"
-cp_sat = { git = "https://github.com/KardinalAI/cp_sat.git", rev = "4cf0d8929a7eb60b80e1f6ddb2e22bf62b8e2071" }
 log = "0.4.29"
 env_logger = "0.11.9"
 serde = { version = "1.0.228", features = ["derive"] }
@@ -19,7 +18,6 @@ ndarray = { version = "0.17.2", features = ["rayon"] }
 rand = "0.8.5"
 rayon = "1.11.0"
 clap = { version = "4.5", features = ["derive"] }
-comfy-table = "7.2.2"
 plotters = "0.3.7"
 good_lp = { version = "1.15.0", features = ["highs"] }
 statrs = "0.18.0"

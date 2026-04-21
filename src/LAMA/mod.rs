@@ -11,7 +11,6 @@ use crate::LAMA::solver::Solver;
 use crate::LAMA::translator::Translator;
 use crate::LAMA::utility::{encloses, get_mbq};
 use crate::{DomPair, Frequency, Record, Value};
-use cp_sat::proto::CpSolverStatus;
 use log::{debug, error, info, warn};
 use rand::distributions::Distribution;
 use rustc_hash::FxHashMap;
@@ -22,7 +21,7 @@ use std::io::BufWriter;
 use std::time::Instant;
 
 mod error;
-mod ortools_wrap;
+pub mod ortools_wrap;
 pub mod query;
 pub mod selector;
 pub mod solver;
@@ -97,7 +96,12 @@ pub fn lama_attack(
 
     info!("Selector computing values");
 
-    let mut translator = Translator::new(largest_possible_val, loaded_db.get_universe());
+    let mut translator = Translator::new(
+        largest_possible_val,
+        loaded_db.get_universe(),
+        &high_pair,
+        &low_pair,
+    );
 
     let query_dist_ref = &selector.query_distribution;
     let high_pair_ref = &high_pair;

@@ -15,25 +15,9 @@ module --quiet purge
 module load hosts/hopper
 module load singularity
 
-## --- 1. Download and Unpack OR-Tools ---
-ORTOOLS_DIR="/scratch/dblackle/ortools"
-echo "Setting up OR-Tools..."
-rm -rf "$ORTOOLS_DIR"
-mkdir -p "$ORTOOLS_DIR"
-cd "$ORTOOLS_DIR"
-
-wget -q https://github.com/google/or-tools/releases/download/v9.14/or-tools_amd64_debian-12_cpp_v9.14.6206.tar.gz
-tar -xf or-tools_amd64_debian-12_cpp_v9.14.6206.tar.gz --strip-components=1
-rm or-tools_amd64_debian-12_cpp_v9.14.6206.tar.gz
-
 cd "$SLURM_SUBMIT_DIR"
 # ---------------------------------------
 
-export SINGULARITYENV_ORTOOLS_PREFIX="$ORTOOLS_DIR"
-export SINGULARITYENV_LD_LIBRARY_PATH="$ORTOOLS_DIR/lib"
-export SINGULARITYENV_LIBRARY_PATH="
-/lib"
-#
 # Enable Rust logging and backtraces
 export SINGULARITYENV_RUST_LOG="debug"
 export SINGULARITYENV_RUST_BACKTRACE="1"
@@ -88,7 +72,7 @@ echo "Cleaning previous cached builds..."
 $SG_RUN cargo clean
 
 echo "Building project inside container..."
-$SG_RUN cargo rustc --bin frequency_analysis_limits --release -- -Clink-arg=-lprotobuf
+$SG_RUN cargo rustc --bin frequency_analysis_limits --release
 
 padding=5
 

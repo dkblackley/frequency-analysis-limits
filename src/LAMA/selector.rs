@@ -3,14 +3,16 @@ use crate::LAMA::error::LAMAError;
 use crate::LAMA::query::QueryDistribution;
 use crate::LAMA::utility::{binomial_coefficient, get_mbq};
 use crate::{DomPair, Frequency, Probability, Record, Value};
-use good_lp::{default_solver, variable, Expression, ProblemVariables, Solution, SolverModel};
+use good_lp::{
+    default_solver, highs, variable, Expression, ProblemVariables, Solution, SolverModel, Variable,
+};
 use indicatif::{ProgressBar, ProgressStyle};
 use itertools::Itertools;
 use log::{info, warn};
 use rand::distributions::Distribution;
 use rayon::prelude::*;
 use rustc_hash::FxHashMap;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
 use std::time::Instant;
 
@@ -147,6 +149,73 @@ impl<'a> Selector<'a> {
             dom_pair_to_known_prob.insert(mbq.clone(), true_prob / total_weight);
         }
         dom_pair_to_known_prob
+    }
+
+    pub fn compute_antichain_bound<Value: PartialEq + Clone>(
+        dataset: Vec<Vec<Value>>,
+        universe: Vec<Value>,
+    ) -> f64 {
+        let mut iter = dataset.into_iter();
+
+        let first_tx = match iter.next() {
+            Some(tx) => tx,
+            None => return 0.0, // Edge case: empty dataset
+        };
+
+        // T <- {τ}
+        let mut t: Vec<Vec<Value>> = vec![first_tx];
+
+        // q <- 1
+        let mut q = 1;
+
+        // while scanIsNotComplete do (iterating over the rest)
+        for tau in iter {
+            //if |τ| > q and τ != I and ¬∃a ∈ T such that τ = a then
+            if tau.len() > q && tau != universe && !t.contains(&tau) {
+                // R <- T ∪ {τ}
+                let mut r = t.clone();
+                r.push(tau.clone());
+
+                // q <- max integer such that R contains at least q transactions of length at least q
+                // To compute this efficiently sort `t` by length descending.
+                r.sort_unstable_by(|a, b| b.len().cmp(&a.len()));
+
+                let mut new_q = 1;
+                // The largest possible q is the length of the longest transaction (t[0].len()),
+                // but it also can't be larger than the total number of transactions we have (t.len()).
+                let mut test_q = std::cmp::min(r[0].len(), r.len());
+
+                while test_q > 0 {
+                    let mut all_valid = true;
+
+                    // Explicitly check the first `test_q` itemsets
+                    for tx in r.iter().take(test_q) {
+                        if tx.len() < test_q {
+                            all_valid = false;
+                            break;
+                        }
+                    }
+
+                    // If they all passed the length check, we found our max integer!
+                    if all_valid {
+                        new_q = test_q;
+                        break;
+                    }
+
+                    // If not, decrease the target by 1 and repeat
+                    test_q -= 1;
+                }
+
+                q = new_q;
+
+                // T <- set of the q longest transactions from R
+                r.truncate(q);
+                t = r;
+            }
+        }
+
+        // 12. return q (cast to f64 to match your required signature)
+        q as f64
     }
 
     pub fn get_raw_dompair_weight_map(
@@ -289,107 +358,205 @@ impl<'a> Selector<'a> {
         // Assuming you update `get_vc_sukp_bound` to return the `q` profit, we calculate `b` here.
         // Ideally, `get_vc_sukp_bound` should just return `b` directly.
         let responses = self.get_responses_from_queries(observed_queries.clone());
-        let q_profit = self.get_vc_sukp_bound(responses.clone());
-        let empirical_vc_dim = q_profit.log2().floor() + 1.0;
+        // let q_profit = self.get_vc_sukp_bound(responses.clone());
+        //let empirical_vc_dim = q_profit.log2().floor() + 1.0;
+        // Using corollary 2:
+        let vc_dim =
+            Selector::simple_bound_corollary2(&responses, &self.encrypted_db.get_universe());
 
         // 4. Reverse-calculate Epsilon (Fixing Issue B)
         // Note: You must update `calculate_epsilon` to accept `d` (the EVC) directly,
         // replacing the hardcoded `num_items - 1`.
-        let eps = Selector::calculate_epsilon(
-            empirical_vc_dim, // Pass the EVC, not num_items
+        let eps = Selector::calculate_epsilon_real_vc(
+            vc_dim, // Pass the EVC, not num_items
             num_queries_to_observe,
             delta,
         );
 
-        info!("Empirical VC Dimension: {}", empirical_vc_dim);
+        info!("VC Dimension: {}", vc_dim);
         info!("Guaranteed Epsilon Bound: {}", eps);
         info!("---------------------------");
 
         return (observed_queries, responses, eps);
     }
 
-    /// Evaluates the SUKP to find the bounding profit `q` for empirical VC-dimension.
-    /// `capacity`: The maximum transaction length (l)
-    /// `itemsets`: A slice of vectors, where each vector contains the indices of items in that set.
-    /// `num_items`: The total number of unique items in the universe |U|.
-    pub fn get_vc_sukp_bound(&self, responses: Vec<Vec<Value>>) -> f64 {
-        //let responses = self.get_all_possible_responses();
-        // The size of the largest response
-        let max_item = responses
-            .iter()
-            .flat_map(|r| r.iter())
-            .max()
-            .copied()
-            .unwrap_or(0);
-        let num_items = (max_item + 1) as usize;
-        // let universe_size: usize = self.encrypted_db.get_universe().len();
-        let capacity = responses.iter().map(|s| s.len()).max().unwrap_or(0);
-        // 1. Calculate Upper Bound via LP Relaxation
-        let q_upper = Self::solve_sukp_internal(&responses, false);
-
-        // Simple heuristic for lower bound (e.g., just count itemsets smaller than capacity)
-        // In a real implementation, you might want a slightly smarter greedy heuristic here.
-        let q_lower = responses.iter().filter(|s| s.len() <= capacity).count() as f64;
-
-        // The Power of 2 check
-        let b_upper = q_upper.log2().floor();
-        let b_lower = q_lower.log2().floor();
-
-        if b_upper == b_lower {
-            // We proved no power of 2 exists between the bounds.
-            return q_upper;
+    pub fn simple_bound_corollary2(responses: &Vec<Vec<Value>>, universe: &Vec<Value>) -> f64 {
+        let mut total = 0;
+        for record in universe {
+            for response in responses {
+                if response.contains(record) {
+                    total += 1;
+                }
+            }
         }
-
-        warn!("Couldn't find exact power of 2, fallback to raw SUKP");
-        // 2. Fallback to exact MILP if the bounds straddle a power of 2
-        Self::solve_sukp_internal(&responses, true)
+        let q = Self::solve_sukp_internal(&responses, total);
+        q.log2().floor() + 1.0
     }
 
-    fn solve_sukp_internal(itemsets: &[Vec<Value>], is_integer: bool) -> f64 {
-        let max_item = itemsets
-            .iter()
-            .flat_map(|r| r.iter())
-            .max()
-            .copied()
-            .unwrap_or(0);
-        let num_items = (max_item + 1) as usize;
+    /// Evaluates the SUKP to find the bounding profit `q` for empirical VC-dimension.
+    /// What we need for setup: Universe - iterate over the response and set of encrypted records.
+    /// Set of elements that are subsets of U. The set of responses. Weights and profits are 1 for
+    /// everything. Weights are assigned to encrypted records but profits to subsets. Capacity -
+    /// From corollary 1 we know that the capacity we want to solve for is the largest response. TO
+    /// get a tighter bound, we have to iterate over each l and L.
+    pub fn get_vc_sukp_bound(&self, responses: Vec<Vec<Value>>) -> f64 {
+        // 1. Find all distinct transaction lengths (ell_i)
+        let mut distinct_lengths = Vec::new();
+        for response in &responses {
+            let len = response.len();
+            let mut found = false;
 
-        let capacity = itemsets.iter().map(|s| s.len()).max().unwrap_or(0);
+            // Basic loop to check if we already recorded this lengt
+            // each length is indexed by i, as in the paper
+            for i in 0..distinct_lengths.len() {
+                if distinct_lengths[i] == len {
+                    found = true;
+                    break;
+                }
+            }
 
+            if !found {
+                distinct_lengths.push(len);
+            }
+        }
+        // Sort lengths in decreasing order so: ell_1 > ell_2 > ... > ell_w
+        distinct_lengths.sort_unstable_by(|a, b| b.cmp(a));
+
+        let pb = ProgressBar::new(distinct_lengths.len() as u64);
+        pb.set_style(
+            ProgressStyle::default_bar()
+                .template("[{elapsed_precise}] [{bar:40}] {pos}/{len} ({eta})")
+                .unwrap()
+                .progress_chars("=> "),
+        );
+
+        info!("Finding all responses of length ell with ");
+
+        // Now we want capital L_i, that is, for each l_i, find all transactions of length AT LEAST
+        // l_i and then find the largest set such that no to items are subset of each-other.
+        let mut l_sets = Vec::new();
+
+        for i in 0..distinct_lengths.len() {
+            let current_l = distinct_lengths[i];
+            let mut transactions_at_least_l = Vec::new();
+
+            // Cleaned up: Iterate directly over the items rather than using indices
+            for tx in &responses {
+                if tx.len() >= current_l {
+                    transactions_at_least_l.push(tx);
+                }
+            }
+
+            let mut largest_set_no_subsets = Vec::new();
+
+            // Cleaned up: .enumerate() gives us the index (j) and the transaction (current_tx)
+            for (j, &current_tx) in transactions_at_least_l.iter().enumerate() {
+                let mut is_subset_of_something_else = false;
+
+                for (k, &other_tx) in transactions_at_least_l.iter().enumerate() {
+                    if j == k {
+                        continue;
+                    }
+
+                    if current_tx.len() <= other_tx.len() {
+                        // --- THE MAGIC LINE ---
+                        // This says: "For every item in current_tx, does other_tx contain it?"
+                        // It immediately stops and returns false if it finds a missing item.
+                        let is_subset = current_tx.iter().all(|item| other_tx.contains(item));
+
+                        if is_subset {
+                            if other_tx.len() > current_tx.len() || k < j {
+                                is_subset_of_something_else = true;
+                                break;
+                            }
+                        }
+                    }
+                }
+
+                if !is_subset_of_something_else {
+                    largest_set_no_subsets.push(current_tx);
+                }
+            }
+
+            l_sets.push(largest_set_no_subsets);
+            pb.inc(1);
+        }
+        let pb = ProgressBar::new(distinct_lengths.len() as u64);
+        pb.set_style(
+            ProgressStyle::default_bar()
+                .template("[{elapsed_precise}] [{bar:40}] {pos}/{len} ({eta})")
+                .unwrap()
+                .progress_chars("=> "),
+        );
+
+        for j in 0..distinct_lengths.len() {
+            let ell_i = distinct_lengths[j];
+            let cap_l_i = l_sets[j].len(); // number of itemsets of len ell.
+
+            // 4. Compute q_i (Optimal SUKP profit with capacity ell_i)
+            // The lemma requires the optimal integer solution, so we pass `is_integer = true`.
+            let q_i = Self::solve_sukp_internal(&responses, ell_i);
+            pb.inc(1);
+
+            // Safety check: log2(0) is negative infinity, so handle a profit of 0
+            let b_i = if q_i <= 0.0 {
+                0.0
+            } else {
+                // 5. Compute b_i = floor(log_2(q_i)) + 1
+                q_i.log2().floor() + 1.0
+            };
+
+            // 6. Lemma 1 check: Let j be the minimum integer for which b_i <= L_i.
+            // Because we iterate starting from j=0 (the start of our decreasing array),
+            // the very first time this condition is met, we have found our minimum `j`.
+            if b_i <= cap_l_i as f64 {
+                return b_i;
+            }
+        }
+
+        // Fallback if no such j is found (mathematically, it should find one before this)
+        0.0
+    }
+
+    fn solve_sukp_internal(itemsets: &[Vec<Value>], capacity: usize) -> f64 {
+        // 1. Gather unique items and create a stable mapping to indices 0..num_items
+        let mut unique_items = HashSet::new();
+        for itemset in itemsets {
+            for item in itemset {
+                unique_items.insert(*item);
+            }
+        }
+
+        let item_to_index: HashMap<Value, usize> = unique_items
+            .into_iter()
+            .enumerate()
+            .map(|(idx, item)| (item, idx))
+            .collect();
+
+        let num_items = item_to_index.len();
         let mut vars = ProblemVariables::new();
 
-        // x_j: 1 if item j is included in the knapsack capacity
-        let mut x = Vec::with_capacity(num_items);
-        for _ in 0..num_items {
-            let mut var = variable().min(0.0).max(1.0);
-            if is_integer {
-                var = var.integer();
-            }
-            x.push(vars.add(var));
-        }
+        let x: Vec<Variable> = (0..num_items)
+            .map(|_| vars.add(variable().min(0.0).max(1.0)))
+            .collect();
 
-        // y_i: 1 if itemset i is fully included
-        let mut y = Vec::with_capacity(itemsets.len());
-        for _ in 0..itemsets.len() {
-            let mut var = variable().min(0.0).max(1.0);
-            if is_integer {
-                var = var.integer();
-            }
-            y.push(vars.add(var));
-        }
+        let y: Vec<Variable> = (0..itemsets.len())
+            .map(|_| vars.add(variable().min(0.0).max(1.0)))
+            .collect();
 
-        // Objective: Maximize sum(y_i)
         let objective: Expression = y.iter().sum();
-        let mut model = vars.maximise(objective).using(default_solver);
 
-        // Constraint 1: Capacity limit -> sum(x_j) <= l
+        // Note: Consider using highs instead of default_solver for better performance
+        let mut model = highs(vars.maximise(objective));
+
         let weight_expr: Expression = x.iter().sum();
         model = model.with(weight_expr << capacity as f64);
 
-        // Constraint 2: Union constraint -> y_i <= x_j for all j in A_i
         for (i, itemset) in itemsets.iter().enumerate() {
-            for &j in itemset {
-                model = model.with(y[i] - x[j as usize] << 0.0);
+            for item in itemset {
+                // 2. Safely look up the contiguous index for this specific item
+                let safe_j = item_to_index[item];
+                model = model.with(y[i] - x[safe_j] << 0.0);
             }
         }
 
@@ -400,7 +567,7 @@ impl<'a> Selector<'a> {
     /// Calculates the guaranteed error bound (epsilon) for a given sample size.
     ///
     /// Ref: "Finding the True Frequent Itemsets" (Riondato & Vandin, 2014)
-    pub fn calculate_epsilon(empirical_vc: f64, num_samples: usize, delta: f64) -> f64 {
+    pub fn calculate_epsilon_real_vc(empirical_vc: f64, num_samples: usize, delta: f64) -> f64 {
         // Corollary 2: The absolute worst-case VC-dimension for the power set of items.
         // VC(R(2^I)) <= |I| - 1
         // let d = (num_items - 1) as f64;
@@ -445,6 +612,40 @@ mod tests {
         use rand::Rng;
 
         #[test]
+        fn test_simple_fit_all() {
+            // All items fit within the capacity.
+            let itemsets = vec![vec![1, 2], vec![2, 3]];
+            let capacity = 5;
+
+            assert_eq!(Selector::solve_sukp_internal(&itemsets, capacity), 2.0);
+        }
+
+        #[test]
+        fn test_overlapping_sets() {
+            // Sets 0 and 1 share a lot of items. Set 2 is totally disjoint.
+            let itemsets = vec![
+                vec![1, 2, 3],      // Set 0
+                vec![2, 3, 4],      // Set 1
+                vec![8, 9, 10, 11], // Set 2
+            ];
+            let capacity = 4;
+
+            // Upper bound will be >= the exact answer. By relaxing integers, it might
+            // take fractions of Set 2, yielding a slightly higher theoretical profit limit.
+            let upper_bound = Selector::solve_sukp_internal(&itemsets, capacity);
+            assert!(upper_bound >= 2.0);
+        }
+
+        #[test]
+        fn test_capacity_too_small() {
+            // Impossible to pick even a single set.
+            let itemsets = vec![vec![1, 2, 3], vec![4, 5, 6]];
+            let capacity = 2;
+
+            assert_eq!(Selector::solve_sukp_internal(&itemsets, capacity), 0.0);
+        }
+
+        #[test]
         fn verify_vc_cumulative_probability_bounds() {
             let _ = env_logger::builder()
                 .is_test(true)
@@ -478,7 +679,7 @@ mod tests {
             let empirical_vc = q_profit.log2().floor() + 1.0;
 
             let delta = 0.1; // 90% confidence that the maximum error across ALL itemsets <= epsilon
-            let epsilon = Selector::calculate_epsilon(empirical_vc, num_samples, delta);
+            let epsilon = Selector::calculate_epsilon_real_vc(empirical_vc, num_samples, delta);
 
             info!("Total Query Space: {}", total_queries);
             info!("Sample Size: {}", num_samples);

@@ -1,6 +1,10 @@
-use log::info;
+use crate::dataloader::unflatten_nd;
+use itertools::Itertools;
+use log::{debug, info, warn};
 use serde::Serialize;
+use std::collections::HashMap;
 use std::env;
+use std::env::var;
 use std::fs::File;
 use std::io::Write;
 use std::process::Command;
@@ -35,6 +39,45 @@ pub struct ConstraintMeta {
 impl PythonCpModel {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    pub fn validate(
+        &self,
+        var_index_map: &HashMap<IntVar, (i32, i64)>,
+        lower: &[i64],
+        upper: &[i64],
+    ) {
+        let mut found_tracker = HashMap::new();
+        let mut found_all = true;
+
+        for tc in &self.table_constraints {
+            for vars in tc.vars.iter() {
+                let orig_val = var_index_map.get(&(IntVar(vars.clone()))).unwrap().1;
+                found_tracker.insert(orig_val, false);
+            }
+        }
+
+        for tc in &self.table_constraints {
+            for i in 0..tc.vars.len() {
+                let orig_val = var_index_map.get(&(IntVar(tc.vars[i].clone()))).unwrap().1;
+                let assign = tc.values[i][i];
+                if assign == orig_val {
+                    found_tracker.insert(orig_val, true);
+                }
+                // for y in 0..tc.values[i].len() {
+                //
+                // }
+            }
+        }
+        for (k, v) in &found_tracker {
+            if !v {
+                found_all = false;
+                warn!("There is no valid assignment for {k}!! Solver is VERY LIKELY to crash.");
+            }
+        }
+        if found_all {
+            debug!("Every variable has at least 1 valid constraint! (They may still contradict...)")
+        }
     }
 
     /// Mirrors the CP-SAT solve_with_parameters logic
@@ -92,12 +135,19 @@ impl PythonCpModel {
             eprintln!("Python failed with status: {}", output.status);
             eprintln!("Python stderr: {}", String::from_utf8_lossy(&output.stderr));
             eprintln!("Python stdout: {}", String::from_utf8_lossy(&output.stdout));
+            std::fs::remove_file("allowed.bin").ok();
+            std::fs::remove_file("meta.json").ok();
+            std::fs::remove_file("solutions.json").ok();
             return None;
         }
 
         let sol_str =
             std::fs::read_to_string("solutions.json").unwrap_or_else(|_| "[]".to_string());
         let all_solutions: Vec<Vec<i64>> = serde_json::from_str(&sol_str).unwrap_or_default();
+
+        std::fs::remove_file("allowed.bin").ok();
+        std::fs::remove_file("meta.json").ok();
+        std::fs::remove_file("solutions.json").ok();
 
         if all_solutions.is_empty() {
             None

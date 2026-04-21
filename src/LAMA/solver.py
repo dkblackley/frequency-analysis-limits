@@ -65,6 +65,7 @@ def main():
 
     if status in (cp_model.OPTIMAL, cp_model.FEASIBLE) or len(collector.solutions) > 0:
         # If get_one is true, return just the primary solution wrapped in an array
+        print(f"Solution found. Status: {status}")
         if get_one and len(collector.solutions) == 0:
             single_sol = [[solver.Value(v) for v in variables]]
             with open("solutions.json", "w") as f:
@@ -73,6 +74,7 @@ def main():
             with open("solutions.json", "w") as f:
                 json.dump(collector.solutions, f)
     else:
+        print(f"No solution found. Status: {status}")
         sys.exit(1)
 
 

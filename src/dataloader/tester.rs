@@ -45,8 +45,8 @@ impl testDB {
         let mut rng = StdRng::seed_from_u64(42);
 
         let size_per_dim = size_per_dim_orig;
-        let lower = vec![2; dim];
-        let upper = vec![(size_per_dim - 3) as i64; dim];
+        let lower = vec![0; dim];
+        let upper = vec![(size_per_dim - 1) as i64; dim];
 
         // Create a shape array where each dimension is 'size_per_dim' long
         let shape = vec![size_per_dim; dim];

@@ -63,6 +63,7 @@ def main():
         print(f"At least one solution found. Status: {status}")
     else:
         print("Could not find a single solution...")
+        sys.exit(1)
 
     solver.parameters.stop_after_first_solution = False
     solver.parameters.num_search_workers = 0

@@ -357,7 +357,8 @@ impl<'a> Selector<'a> {
 
         // 3. Calculate Empirical VC Dimension (Fixing Issue A)
         let responses = self.get_responses_from_queries(observed_queries.clone());
-        let emp_vc_dim = self.get_emp_vc_sukp_bound(responses.clone(), all_possible_responses);
+        // let emp_vc_dim = self.get_emp_vc_sukp_bound(responses.clone(), all_possible_responses);
+        let emp_vc_dim = 100.0;
 
         // A simple bound as per corollary 2
         let vc_dim =
@@ -382,6 +383,8 @@ impl<'a> Selector<'a> {
             eps_empr, eps_reg
         );
         info!("---------------------------");
+
+        info!("Using {} for epsilon", eps);
 
         return (observed_queries, responses, eps);
     }

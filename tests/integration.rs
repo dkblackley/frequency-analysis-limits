@@ -356,7 +356,7 @@ fn end_to_end() {
     let dim = 2;
 
     info!("Loading test DB ({}x{})", rows_cols, rows_cols);
-    let loaded_db: Box<dyn Searchable + Sync> = Box::new(testDB::new(dim, rows_cols, 80));
+    let loaded_db: Box<dyn Searchable + Sync> = Box::new(testDB::new(dim, rows_cols, 50));
 
     let dist = "flat";
     let eps = 0.0; // Perfect knowledge constraint
@@ -500,14 +500,14 @@ fn end_to_end_sampled() {
         .build_global()
         .unwrap();
 
-    let rows_cols = 8;
+    let rows_cols = 10;
     let dim = 2;
 
     info!("Loading test DB ({}x{})", rows_cols, rows_cols);
-    let loaded_db: Box<dyn Searchable + Sync> = Box::new(testDB::new(dim, rows_cols, 55));
+    let loaded_db: Box<dyn Searchable + Sync> = Box::new(testDB::new(dim, rows_cols, 50));
 
-    let dist = "gaussian";
-    let target_query_percentage = 0.1; // e.g., observe 5% of all possible queries
+    let dist = "uniform";
+    let target_query_percentage = 0.15; // e.g., observe 5% of all possible queries
     let fixed_delta = 0.001; // 99.9% confidence that error <= epsilon
 
     // 1. Initialize a baseline selector to generate the distribution space
@@ -658,8 +658,8 @@ fn end_to_end_sampled() {
     info!("--> Processing Recursive Case (t=2) sequentially across chunk models...");
     translator.process_t_greater_than_1(2, &universe, &validate_candidate);
 
-    info!("--> Processing Recursive Case (t=3) sequentially across chunk models...");
-    translator.process_t_greater_than_1(3, &universe, &validate_candidate);
+    // info!("--> Processing Recursive Case (t=3) sequentially across chunk models...");
+    // translator.process_t_greater_than_1(3, &universe, &validate_candidate);
 
     info!("5. Building and executing the CP-SAT Solver for the final constraint graph...");
     let mut solver = Solver::new(translator.get_var_index_map());

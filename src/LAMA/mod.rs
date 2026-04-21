@@ -118,7 +118,7 @@ pub fn lama_attack(
     };
 
     let eps;
-    let delta = 0.1; // fix to 90% confidence
+    let delta = 0.001; // fix to 99.9% confidence
     let num_queries;
 
     let get_observed_prob: Box<dyn Sync + Send + Fn(&[i64]) -> f64>;

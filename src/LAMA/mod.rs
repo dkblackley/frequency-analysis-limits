@@ -337,7 +337,7 @@ fn save_reconstruction_data(
     unique_name: &str,
     loaded_db: &Box<dyn Searchable + Sync>,
 ) {
-    let mut data: Vec<Vec<ReconstructionDataPoint>> = into_recon_data(responses, loaded_db);
+    let data: Vec<Vec<ReconstructionDataPoint>> = into_recon_data(responses, loaded_db);
 
     fs::create_dir_all(file_path).unwrap();
 

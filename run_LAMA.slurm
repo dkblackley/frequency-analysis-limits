@@ -24,9 +24,9 @@ rm -rf "$ORTOOLS_DIR"
 mkdir -p "$ORTOOLS_DIR"
 cd "$ORTOOLS_DIR"
 
-wget -q https://github.com/google/or-tools/releases/download/v9.14/or-tools_amd64_debian-12_cpp_v9.14.6206.tar.gz
-tar -xf or-tools_amd64_debian-12_cpp_v9.14.6206.tar.gz --strip-components=1
-rm or-tools_amd64_debian-12_cpp_v9.14.6206.tar.gz
+wget -q https://github.com/google/or-tools/releases/download/v9.15/or-tools_amd64_debian-12_cpp_v9.15.6755.tar.gz
+tar -xf or-tools_amd64_debian-12_cpp_v9.15.6755.tar.gz --strip-components=1
+rm or-tools_amd64_debian-12_cpp_v9.15.6755.tar.gz
 
 cd "$SLURM_SUBMIT_DIR"
 # ---------------------------------------

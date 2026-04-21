@@ -5,8 +5,11 @@ use cp_sat::proto::CpSolverStatus;
 use frequency_analysis_limits::dataloader::tester::testDB;
 use frequency_analysis_limits::dataloader::two_d::{Location, TwoDMap};
 use frequency_analysis_limits::dataloader::{flatten_nd, unflatten_nd, Searchable};
-use frequency_analysis_limits::LAMA::query::QueryDistribution;
+use frequency_analysis_limits::LAMA::ortools_wrap::PythonCpModel;
+use frequency_analysis_limits::LAMA::selector::Selector;
+use frequency_analysis_limits::LAMA::solver::CpSolverStatus::{Feasible, Optimal};
 use frequency_analysis_limits::LAMA::solver::Solver;
+use frequency_analysis_limits::LAMA::translator::Translator;
 use frequency_analysis_limits::LAMA::utility::{encloses, get_mbq};
 use frequency_analysis_limits::{DomPair, Value};
 use frequency_analysis_limits::{Frequency, Record};
@@ -35,10 +38,6 @@ pub fn bounded_hyperrectangle_id(coords: &[u64], bounds: &[u64]) -> u64 {
 
     id
 }
-
-use frequency_analysis_limits::LAMA::selector::Selector;
-use frequency_analysis_limits::LAMA::solver::CpSolverStatus::{Feasible, Optimal};
-use frequency_analysis_limits::LAMA::translator::Translator;
 
 fn check_isomorphism(responses: &HashMap<i64, i64>, rows: i64, cols: i64) -> Option<&'static str> {
     // 2. Build the solver's actual mapping: True_Plaintext_ID -> Guessed_Plaintext_ID
@@ -162,7 +161,7 @@ fn end_flat() {
         "3. Initializing Translator with universe size: {}",
         universe.len()
     );
-    let mut translator = Translator::new(largest_enc_val, universe.clone());
+    let mut translator = Translator::new(largest_enc_val, universe.clone(), &high_pair, &low_pair);
 
     // Grab references to avoid lifetime closure issues
     let query_dist_ref = &selector.query_distribution;
@@ -208,10 +207,12 @@ fn end_flat() {
     };
 
     info!("Bruteforcing t=2");
+    let model = PythonCpModel::new();
     let (mut model, index_map) = Translator::process_t_brute_force(
         2,
         largest_enc_val,
         &*universe.clone(),
+        model,
         &validate_candidate,
     );
     let mut solver = Solver::new(index_map);
@@ -332,7 +333,7 @@ fn end_to_end() {
         low_pair,
         high_pair
     );
-    let mut translator = Translator::new(largest_enc_val, universe.clone());
+    let mut translator = Translator::new(largest_enc_val, universe.clone(), &high_pair, &low_pair);
 
     let query_dist_ref = &selector.query_distribution;
     let high_pair_ref = &high_pair;
@@ -458,14 +459,14 @@ fn end_to_end_sampled() {
         .build_global()
         .unwrap();
 
-    let rows_cols = 15;
+    let rows_cols = 25;
     let dim = 2;
 
     info!("Loading test DB ({}x{})", rows_cols, rows_cols);
     let loaded_db: Box<dyn Searchable + Sync> = Box::new(testDB::new(dim, rows_cols, 60));
 
     let dist = "gaussian";
-    let target_query_percentage = 0.5; // e.g., observe 5% of all possible queries
+    let target_query_percentage = 0.02; // e.g., observe 5% of all possible queries
     let fixed_delta = 0.9; // 50% confidence that error <= epsilon
 
     // 1. Initialize a baseline selector to generate the distribution space
@@ -473,6 +474,8 @@ fn end_to_end_sampled() {
     let mut selector = Selector::new(dist, &loaded_db);
 
     let largest_dom = loaded_db.get_dom_pair();
+
+    let all_queries = loaded_db.do_search(&largest_dom.0, &largest_dom.1);
 
     // How many queries can we do? A query is a hyperrectangle, The total number of hyper rectangles
     // in a space is n*(n+1)/2 where n is the length of a dim, then mutliply for each dim.
@@ -505,17 +508,25 @@ fn end_to_end_sampled() {
         observed_queries.push(sampled_pair);
     }
 
+    let responses = selector.get_responses_from_queries(observed_queries.clone());
+
     // 3. Calculate Empirical VC Dimension (Fixing Issue A)
     // Assuming you update `get_vc_sukp_bound` to return the `q` profit, we calculate `b` here.
     // Ideally, `get_vc_sukp_bound` should just return `b` directly.
-    let responses = selector.get_responses_from_queries(observed_queries.clone());
-    let q_profit = selector.get_vc_sukp_bound(responses.clone());
-    let empirical_vc_dim = q_profit.log2().floor() + 1.0;
+    //let mut empirical_vc_dim = (responses.len() as f64).log2().floor() + 1.0;
+    let mut empirical_vc_dim =
+        Selector::simple_bound_corollary2(&responses, &loaded_db.get_universe());
+    // let q_profit = selector.get_vc_sukp_bound(responses.clone());
+    // let mut empirical_vc_dim = q_profit.log2().floor() + 1.0;
+
+    // calculate the VC-dim directly via the 'antichain' method (algorithm)
+    // empirical_vc_dim =
+    //     Selector::compute_antichain_bound(responses.clone(), loaded_db.get_universe());
 
     // 4. Reverse-calculate Epsilon (Fixing Issue B)
     // Note: You must update `calculate_epsilon` to accept `d` (the EVC) directly,
     // replacing the hardcoded `num_items - 1`.
-    let eps = Selector::calculate_epsilon(
+    let eps = Selector::calculate_epsilon_real_vc(
         empirical_vc_dim, // Pass the EVC, not num_items
         num_queries_to_observe,
         fixed_delta,
@@ -531,7 +542,7 @@ fn end_to_end_sampled() {
     let universe = loaded_db.get_universe();
     let largest_enc_val: i64 = flatten_nd(&high_pair, &high_pair, &low_pair);
 
-    let mut translator = Translator::new(largest_enc_val, universe.clone());
+    let mut translator = Translator::new(largest_enc_val, universe.clone(), &high_pair, &low_pair);
     let query_dist_ref = &selector.query_distribution;
     let high_pair_ref = &high_pair;
     let low_pair_ref = &low_pair;

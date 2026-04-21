@@ -1,6 +1,10 @@
-use log::info;
+use crate::dataloader::unflatten_nd;
+use itertools::Itertools;
+use log::{info, warn};
 use serde::Serialize;
+use std::collections::HashMap;
 use std::env;
+use std::env::var;
 use std::fs::File;
 use std::io::Write;
 use std::process::Command;
@@ -35,6 +39,34 @@ pub struct ConstraintMeta {
 impl PythonCpModel {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    pub fn validate(
+        &self,
+        var_index_map: &HashMap<IntVar, (i32, i64)>,
+        lower: &[i64],
+        upper: &[i64],
+    ) {
+        for tc in &self.table_constraints {
+            let mut found_tracker = HashMap::new();
+            for ids in 0..self.num_vars {
+                found_tracker.insert(ids, false);
+            }
+            for i in 0..tc.vars.len() {
+                let orig_val = var_index_map.get(&(IntVar(tc.vars[i]))).unwrap().1;
+                for assign in tc.values.iter() {
+                    if assign.iter().contains(&orig_val) {
+                        found_tracker.insert(i, true);
+                    }
+                }
+            }
+
+            for (k, v) in found_tracker {
+                if !v {
+                    warn!("There is no valid assignment for {k}!! Solver WILL crash.");
+                }
+            }
+        }
     }
 
     /// Mirrors the CP-SAT solve_with_parameters logic

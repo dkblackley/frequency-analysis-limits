@@ -8,7 +8,7 @@ use rand::SeedableRng;
 use rayon::prelude::*;
 use std::collections::{HashMap, HashSet};
 
-const TRUNC_AMOUNT: usize = 2500;
+const TRUNC_AMOUNT: [i32; 4] = [10, 500, 1000, 1500];
 
 /// Translator: One Formula from All Matching Pairs.
 pub struct Translator {
@@ -18,10 +18,17 @@ pub struct Translator {
     proto_model: PythonCpModel, // Replaced CpModelProto
     pub t_assignment_archive: HashMap<usize, HashMap<Vec<i64>, Vec<Vec<i64>>>>,
     pub prev_t_assignments: HashMap<i64, Vec<Vec<i64>>>,
+    upper_dom: Vec<i64>,
+    lower_dom: Vec<i64>,
 }
 
 impl Translator {
-    pub fn new(largest_val: i64, mut encrypted_records: Vec<i64>) -> Self {
+    pub fn new(
+        largest_val: i64,
+        mut encrypted_records: Vec<i64>,
+        upper: &[i64],
+        lower: &[i64],
+    ) -> Self {
         info!("Starting");
         let mut rng = StdRng::seed_from_u64(42);
         encrypted_records.shuffle(&mut rng);
@@ -37,6 +44,8 @@ impl Translator {
             var_index_map,
             t_assignment_archive: HashMap::new(),
             prev_t_assignments: HashMap::new(),
+            upper_dom: upper.to_vec(),
+            lower_dom: lower.to_vec(),
         }
     }
 
@@ -145,7 +154,7 @@ impl Translator {
                 let var = *self.enc_id_to_intvar.get(&enc_id).unwrap();
 
                 valid_plaintexts.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
-                valid_plaintexts.truncate(TRUNC_AMOUNT);
+                valid_plaintexts.truncate(TRUNC_AMOUNT[1] as usize);
                 let just_plaintexts: Vec<Vec<i64>> =
                     valid_plaintexts.iter().map(|(pt, _)| pt.clone()).collect();
 
@@ -195,15 +204,13 @@ impl Translator {
         t: usize,
         largest_val: i64,
         encrypted_records: &[i64],
+        mut cp_model: PythonCpModel,
         validate_candidate: V,
     ) -> (PythonCpModel, HashMap<IntVar, (i32, i64)>)
     where
         V: Fn(&[i64], &[i64]) -> (bool, f64) + Sync + Send,
     {
         info!("Processing t={} directly", t);
-
-        // 1. Initialize our custom Python wrapper model instead of CpModelBuilder
-        let mut cp_model = PythonCpModel::new();
 
         let (var_index_map, enc_id_to_intvar) =
             Self::set_all_vars(&mut cp_model, largest_val, Vec::from(encrypted_records));
@@ -256,7 +263,7 @@ impl Translator {
                 .collect();
 
             valid_assignments.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
-            valid_assignments.truncate(TRUNC_AMOUNT);
+            valid_assignments.truncate(*TRUNC_AMOUNT.get(t - 1).unwrap_or(&4000) as usize);
             let just_plaintexts: Vec<Vec<i64>> =
                 valid_assignments.iter().map(|(pt, _)| pt.clone()).collect();
 
@@ -295,6 +302,10 @@ impl Translator {
                 .unwrap()
                 .progress_chars("##-"),
         );
+        let mut t = 0;
+        if let Some(random_key) = t_minus_1_assignments.keys().next() {
+            t = random_key.len();
+        }
 
         let table_constraints: Vec<(Vec<i64>, Vec<(Vec<i64>, f64)>)> = t_minus_1_assignments
             .clone()
@@ -351,7 +362,7 @@ impl Translator {
                 .collect();
 
             valid_assignments.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
-            valid_assignments.truncate(TRUNC_AMOUNT);
+            valid_assignments.truncate(*TRUNC_AMOUNT.get(t - 1).unwrap_or(&4000) as usize);
             let just_plaintexts = valid_assignments.iter().map(|(pt, _)| pt.clone()).collect();
 
             // Pushing constraints into global proto_model
@@ -378,6 +389,8 @@ impl Translator {
         );
 
         // This calls your wrapper instead of ffi::solve_with_parameters
+        self.proto_model
+            .validate(&self.var_index_map, &*self.lower_dom, &*self.upper_dom);
         let response = self.proto_model.solve(self.upper, false);
         solve_pb.finish_with_message(format!("Mini-Solver finished in {:?}", solve_pb.elapsed()));
 

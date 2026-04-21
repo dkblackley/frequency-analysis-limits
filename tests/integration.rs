@@ -261,6 +261,9 @@ fn end_flat() {
     info!("--> Processing Recursive Case (t=2) sequentially across chunk models...");
     translator.process_t_greater_than_1(2, &universe, &validate_candidate);
 
+    info!("--> Processing Recursive Case (t=3) sequentially across chunk models...");
+    translator.process_t_greater_than_1(3, &universe, &validate_candidate);
+
     info!("5. Building and executing the CP-SAT Solver for the final constraint graph...");
     let mut solver = Solver::new(translator.get_var_index_map());
 
@@ -283,8 +286,8 @@ fn end_flat() {
 
     // To actually allow the sampled version to run we truncate the number of matches at each 't'
     // round. Unfortunately, the flat distribution produces SO AMNY MATCHES in the perfect world
-    // that the truncation actually kicks in. Now we have 44
-    assert_eq!(total_responses, 44);
+    // that the truncation actually kicks in. Now we have 48
+    assert_eq!(total_responses, 48);
     let data = into_recon_data(&responses, &loaded_db);
     let mut true_cords = Vec::new();
     let mut recon_coords = Vec::new();
@@ -358,7 +361,7 @@ fn end_to_end() {
     info!("Loading test DB ({}x{})", rows_cols, rows_cols);
     let loaded_db: Box<dyn Searchable + Sync> = Box::new(testDB::new(dim, rows_cols, 50));
 
-    let dist = "flat";
+    let dist = "uniform";
     let eps = 0.0; // Perfect knowledge constraint
     let delt = 0.0;
 

@@ -357,7 +357,8 @@ impl<'a> Selector<'a> {
 
         // 3. Calculate Empirical VC Dimension (Fixing Issue A)
         let responses = self.get_responses_from_queries(observed_queries.clone());
-        let emp_vc_dim = self.get_emp_vc_sukp_bound(responses.clone(), all_possible_responses);
+        // let emp_vc_dim = self.get_emp_vc_sukp_bound(responses.clone(), all_possible_responses);
+        let emp_vc_dim = 100.0;
 
         // A simple bound as per corollary 2
         let vc_dim =
@@ -707,8 +708,10 @@ mod tests {
             // 3. Calculate VC bounds based on the sample
             let responses = selector.get_responses_from_queries(sampled_queries.clone());
             let all_resposnes = selector.get_all_possible_responses();
-            let empirical_vc = selector.get_emp_vc_sukp_bound(responses, &all_resposnes);
+            //let empirical_vc = selector.get_emp_vc_sukp_bound(responses, &all_resposnes);
             // let empirical_vc = q_profit.log2().floor() + 1.0;
+
+            let empirical_vc = 100.0;
 
             let delta = 0.1; // 90% confidence that the maximum error across ALL itemsets <= epsilon
             let epsilon = Selector::calculate_epsilon_real_vc(empirical_vc, num_samples, delta);

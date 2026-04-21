@@ -13,6 +13,8 @@ use crate::LAMA::utility::{encloses, get_mbq};
 use crate::{DomPair, Frequency, Record, Value};
 use log::{debug, error, info, warn};
 use rand::distributions::Distribution;
+use rayon::iter::ParallelIterator;
+use rayon::prelude::IntoParallelRefIterator;
 use rustc_hash::FxHashMap;
 use std::collections::HashMap;
 use std::fs;
@@ -132,22 +134,26 @@ pub fn lama_attack(
         eps = epsil;
         num_queries = observed_queries.len();
 
-        let mut dom_to_enclosed_freq = FxHashMap::default();
         let all_dompairs = Selector::get_dom_pairs(&loaded_db);
+        info!("Making observed mapping to frequency");
 
-        for pair in &all_dompairs {
-            let mut enclose_count = 0;
-            for que in &observed_queries {
-                if encloses(que, pair) {
-                    enclose_count += 1;
-                }
-            }
-            // 2. Moved insertion outside the inner loop
-            dom_to_enclosed_freq.insert(
-                pair.clone(),
-                enclose_count as f64 / observed_queries.len() as f64,
-            );
-        }
+        let queries_len = observed_queries.len() as f64;
+
+        let dom_to_enclosed_freq: FxHashMap<_, _> = all_dompairs
+            .par_iter() // 1. Iterate over all_dompairs in parallel
+            .map(|pair| {
+                // 2. Count enclosures (safe to read observed_queries across threads)
+                let enclose_count = observed_queries
+                    .iter()
+                    .filter(|que| encloses(que, pair))
+                    .count();
+
+                let freq = enclose_count as f64 / queries_len;
+
+                // 3. Return the key-value pair tuple
+                (pair.clone(), freq)
+            })
+            .collect();
 
         // 3. Box the closure and use 'move' to take ownership of the HashMap
         get_observed_prob = Box::new(move |enc_tuple: &[i64]| -> f64 {

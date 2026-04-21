@@ -125,6 +125,7 @@ fn end_flat() {
         latitude: 0.0,
     };
 
+    // Scale to an 8x8 DB.
     let loaded_db: Box<dyn Searchable + Sync> = Box::new(
         TwoDMap::new_unscaled(vec![point_1, point_2], "flat_test", (0, 2), (0, 3)).unwrap(),
     );
@@ -275,7 +276,7 @@ fn end_flat() {
     let total_responses = solver.num_sols;
     // Remember, we cannot get rid of/hide the distances. Hence, after t=1 and t=2 the solver is
     // able to determine 'distance'. All possible shifts are still on the table. For two points, one
-    // above the other there should only be 26 reconstructions.
+    // above the other on a 4x4 there should only be 26 reconstructions.
     assert_eq!(total_responses, 26);
     let data = into_recon_data(&responses, &loaded_db);
     let mut true_cords = Vec::new();
@@ -301,7 +302,7 @@ fn end_flat() {
         &recon_coords,
         "figures/debug_flat.svg",
         true,
-        0.0,
+        0.5,
         0.0,
     )
     .expect("TODO: panic message");

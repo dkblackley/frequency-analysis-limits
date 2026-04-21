@@ -306,7 +306,8 @@ pub fn just_points(
 }
 
 // Plots arbitrary 2D points natively as an SVG with a transparent background.
-// Colors are updated to use a colorblind-friendly gradient (Okabe-Ito Palette).
+// Uses procedural HSL color generation and dynamic, strictly decreasing point
+// sizes to support visualizing 100+ overlapping reconstructed series.
 pub fn plot_spatial_reconstruction_all_items(
     true_coords: &[Vec<f64>],
     recon_coords: &[Vec<Vec<f64>>],
@@ -314,7 +315,7 @@ pub fn plot_spatial_reconstruction_all_items(
     show_true_points: bool,
     x_padder: f64,
     y_padder: f64,
-) -> Result<(), Box<dyn Error>> {
+) -> Result<(), Box<dyn std::error::Error>> {
     // Switch to SVGBackend for lossless, scalable vector images
     let root = SVGBackend::new(output_path, (1200 * 2, 800)).into_drawing_area();
     root.fill(&TRANSPARENT)?;
@@ -369,50 +370,61 @@ pub fn plot_spatial_reconstruction_all_items(
         .label_style(("sans-serif", 20).into_font().color(&text_color))
         .draw()?;
 
-    // --- Color-Blind Friendly Okabe-Ito Palette ---
+    // Keep ground truth prominent
     let sky_blue = RGBColor(86, 180, 233);
+    let true_radius = 16; // Massively increased base size for ground truth
 
-    // Remaining distinguishable Okabe-Ito colors for the multiple reconstructed sets
-    let recon_palette = [
-        RGBColor(213, 94, 0),    // Vermilion
-        RGBColor(0, 158, 115),   // Bluish Green
-        RGBColor(204, 121, 167), // Reddish Purple
-        RGBColor(230, 159, 0),   // Orange
-        RGBColor(0, 114, 178),   // Blue
-        RGBColor(240, 228, 66),  // Yellow
-    ];
-
-    // 1. True Points Series (Fully Opaque)
+    // 1. True Points Series (Fully Opaque & Largest)
     if show_true_points && !true_coords.is_empty() {
         chart
             .draw_series(
                 true_coords
                     .iter()
-                    // Kept opaque (no `.mix()`) to make it immediately obvious
-                    .map(|x_y| Circle::new((x_y[0], x_y[1]), 8, sky_blue.filled())),
+                    .map(|x_y| Circle::new((x_y[0], x_y[1]), true_radius, sky_blue.filled())),
             )?
             .label("Ground Truth")
-            .legend(move |(x, y)| Circle::new((x, y), 6, sky_blue.filled()));
+            // Legend size capped so it doesn't blow out the layout
+            .legend(move |(x, y)| Circle::new((x, y), 8, sky_blue.filled()));
     }
 
-    // 2. Reconstructed Points Series
+    // 2. Reconstructed Points Series Setup
+    let num_recons = recon_coords.len();
+    let max_recon_radius = 12.0; // Largest reconstruction size (sits just under truth)
+    let min_recon_radius = 2.0; // Smallest size for the final iteration on top
+
     for (i, recon_set) in recon_coords.iter().enumerate() {
         if recon_set.is_empty() {
             continue;
         }
 
-        let base_color = recon_palette[i % recon_palette.len()];
+        // --- Decreasing Radius Logic ---
+        // As `i` increases (drawn later, so they appear "on top" of the visual stack),
+        // the radius shrinks continuously toward `min_recon_radius`.
+        let current_radius = if num_recons > 1 {
+            max_recon_radius
+                - (i as f64 / (num_recons - 1) as f64) * (max_recon_radius - min_recon_radius)
+        } else {
+            max_recon_radius
+        }
+        .round() as u32;
+
+        // --- Procedural Color Generation ---
+        let hue = (i as f64 * 0.618033988749895) % 1.0;
+        let lightness = match i % 3 {
+            0 => 0.45,
+            1 => 0.60,
+            _ => 0.75,
+        };
+        let base_color = HSLColor(hue, 0.85, lightness);
 
         chart
             .draw_series(recon_set.iter().map(|x_y| {
                 let (x, y) = (x_y[0], x_y[1]);
-
-                // Mix(0.5) adds transparency so overlapping scatter points remain visible
-                Circle::new((x, y), 4, base_color.mix(0.85).filled())
+                Circle::new((x, y), current_radius, base_color.mix(0.85).filled())
             }))?
             .label(format!("Reconstructed {}", i + 1))
-            // Legend icons kept opaque so users can cleanly see the target color
-            .legend(move |(x, y)| Circle::new((x, y), 4, base_color.filled()));
+            // Apply a minimum bound to the legend icon size so it remains clickable/readable
+            .legend(move |(x, y)| Circle::new((x, y), current_radius.max(3), base_color.filled()));
     }
 
     // 3. The Legend

@@ -18,6 +18,23 @@ module load singularity
 cd "$SLURM_SUBMIT_DIR"
 # ---------------------------------------
 
+ORTOOLS_DIR="/scratch/dblackle/ortools"
+echo "Setting up OR-Tools..."
+rm -rf "$ORTOOLS_DIR"
+mkdir -p "$ORTOOLS_DIR"
+cd "$ORTOOLS_DIR"
+
+wget -q https://github.com/google/or-tools/releases/download/v9.14/or-tools_amd64_debian-12_cpp_v9.14.6206.tar.gz
+tar -xf or-tools_amd64_debian-12_cpp_v9.14.6206.tar.gz --strip-components=1
+rm or-tools_amd64_debian-12_cpp_v9.14.6206.tar.gz
+
+cd "$SLURM_SUBMIT_DIR"
+# ---------------------------------------
+
+export SINGULARITYENV_ORTOOLS_PREFIX="$ORTOOLS_DIR"
+export SINGULARITYENV_LD_LIBRARY_PATH="$ORTOOLS_DIR/lib"
+export SINGULARITYENV_LIBRARY_PATH="$ORTOOLS_DIR/lib"
+
 # Enable Rust logging and backtraces
 export SINGULARITYENV_RUST_LOG="debug"
 export SINGULARITYENV_RUST_BACKTRACE="1"
@@ -56,8 +73,6 @@ rm clang+llvm-16.0.4-x86_64-linux-gnu-ubuntu-22.04.tar.xz
 
 cd "$SLURM_SUBMIT_DIR"
 # ---------------------------------------
-
-apt-get update && apt-get install -y protobuf-compiler libprotobuf-dev
 
 # Point Rust's bindgen tool directly to the downloaded libclang.so
 export SINGULARITYENV_LIBCLANG_PATH="$LLVM_DIR/lib"

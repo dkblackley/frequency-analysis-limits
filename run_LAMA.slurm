@@ -122,8 +122,8 @@ DATA_DIRS=(
      "$SLURM_SUBMIT_DIR/databases/25x25"
      "$SLURM_SUBMIT_DIR/databases/30x30")
 
-PROBS=("0.10" "0.15" "0.20" "0.25" "0.30")
-# PROBS=("1.0")
+# PROBS=("0.10" "0.15" "0.20" "0.25" "0.30")
+PROBS=("1.0")
 
 echo "Running canary"
 $SG_RUN ./target/release/frequency_analysis_limits \

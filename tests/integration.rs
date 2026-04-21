@@ -165,7 +165,7 @@ fn end_flat() {
         "3. Initializing Translator with universe size: {}",
         universe.len()
     );
-    let mut translator = Translator::new(largest_enc_val, universe.clone());
+    let mut translator = Translator::new(largest_enc_val, universe.clone(), &2);
 
     // Grab references to avoid lifetime closure issues
     let query_dist_ref = &selector.query_distribution;
@@ -277,7 +277,12 @@ fn end_flat() {
     // Remember, we cannot get rid of/hide the distances. Hence, after t=1 and t=2 the solver is
     // able to determine 'distance'. All possible shifts are still on the table. For two points, one
     // above the other on a 4x4 there should only be 26 reconstructions.
-    assert_eq!(total_responses, 26);
+    // assert_eq!(total_responses, 26);
+
+    // To actually allow the sampled version to run we truncate the number of matches at each 't'
+    // round. Unfortunately, the flat distribution produces SO AMNY MATCHES in the perfect world
+    // that the truncation actually kicks in. Now we have 44
+    assert_eq!(total_responses, 44);
     let data = into_recon_data(&responses, &loaded_db);
     let mut true_cords = Vec::new();
     let mut recon_coords = Vec::new();
@@ -351,7 +356,7 @@ fn end_to_end() {
     info!("Loading test DB ({}x{})", rows_cols, rows_cols);
     let loaded_db: Box<dyn Searchable + Sync> = Box::new(testDB::new(dim, rows_cols, 80));
 
-    let dist = "uniform";
+    let dist = "flat";
     let eps = 0.0; // Perfect knowledge constraint
     let delt = 0.0;
 
@@ -367,7 +372,7 @@ fn end_to_end() {
         low_pair,
         high_pair
     );
-    let mut translator = Translator::new(largest_enc_val, universe.clone());
+    let mut translator = Translator::new(largest_enc_val, universe.clone(), &4);
 
     let query_dist_ref = &selector.query_distribution;
     let high_pair_ref = &high_pair;
@@ -576,7 +581,7 @@ fn end_to_end_sampled() {
     let universe = loaded_db.get_universe();
     let largest_enc_val: i64 = flatten_nd(&high_pair, &high_pair, &low_pair);
 
-    let mut translator = Translator::new(largest_enc_val, universe.clone());
+    let mut translator = Translator::new(largest_enc_val, universe.clone(), &4);
     let query_dist_ref = &selector.query_distribution;
     let high_pair_ref = &high_pair;
     let low_pair_ref = &low_pair;

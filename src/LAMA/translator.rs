@@ -2,13 +2,13 @@ use crate::LAMA::ortools_wrap::{IntVar, PythonCpModel, TableConstraint};
 use indicatif::{ProgressBar, ProgressStyle};
 use itertools::Itertools;
 use log::{debug, info, trace, warn};
+use nalgebra::max;
 use rand::rngs::StdRng;
 use rand::seq::SliceRandom;
 use rand::SeedableRng;
 use rayon::prelude::*;
+use sha2::digest::typenum::Pow;
 use std::collections::{HashMap, HashSet};
-
-const TRUNC_AMOUNT: [i32; 4] = [10, 500, 1000, 1500];
 
 /// Translator: One Formula from All Matching Pairs.
 pub struct Translator {
@@ -18,10 +18,11 @@ pub struct Translator {
     proto_model: PythonCpModel, // Replaced CpModelProto
     pub t_assignment_archive: HashMap<usize, HashMap<Vec<i64>, Vec<Vec<i64>>>>,
     pub prev_t_assignments: HashMap<i64, Vec<Vec<i64>>>,
+    trunc_amount: Vec<i64>,
 }
 
 impl Translator {
-    pub fn new(largest_val: i64, mut encrypted_records: Vec<i64>) -> Self {
+    pub fn new(largest_val: i64, mut encrypted_records: Vec<i64>, max_t: &usize) -> Self {
         info!("Starting");
         let mut rng = StdRng::seed_from_u64(42);
         encrypted_records.shuffle(&mut rng);
@@ -29,6 +30,7 @@ impl Translator {
         let mut cp_model = PythonCpModel::new();
         let (var_index_map, enc_id_to_intvar) =
             Self::set_all_vars(&mut cp_model, largest_val, encrypted_records);
+        let trunc_amount = Self::get_trunc_amount(&largest_val, &max_t);
 
         Self {
             proto_model: cp_model,
@@ -37,7 +39,18 @@ impl Translator {
             var_index_map,
             t_assignment_archive: HashMap::new(),
             prev_t_assignments: HashMap::new(),
+            trunc_amount,
         }
+    }
+
+    fn get_trunc_amount(largest_val: &i64, max_t: &usize) -> Vec<i64> {
+        let mut trunc_amount = Vec::new();
+
+        for i in 1..(max_t + 1) {
+            let amount = largest_val.pow(i as u32);
+            trunc_amount.push(amount);
+        }
+        trunc_amount
     }
 
     pub fn get_var_index_map(&self) -> HashMap<IntVar, (i32, i64)> {
@@ -145,7 +158,7 @@ impl Translator {
                 let var = *self.enc_id_to_intvar.get(&enc_id).unwrap();
 
                 valid_plaintexts.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
-                valid_plaintexts.truncate(TRUNC_AMOUNT[0] as usize);
+                valid_plaintexts.truncate(self.trunc_amount[0] as usize);
                 let just_plaintexts: Vec<Vec<i64>> =
                     valid_plaintexts.iter().map(|(pt, _)| pt.clone()).collect();
 
@@ -201,6 +214,8 @@ impl Translator {
     where
         V: Fn(&[i64], &[i64]) -> (bool, f64) + Sync + Send,
     {
+        let trunc_amount = Self::get_trunc_amount(&largest_val, &t);
+
         info!("Processing t={} directly", t);
 
         let (var_index_map, enc_id_to_intvar) =
@@ -254,7 +269,7 @@ impl Translator {
                 .collect();
 
             valid_assignments.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
-            valid_assignments.truncate(*TRUNC_AMOUNT.get(t).unwrap_or(&4000) as usize);
+            valid_assignments.truncate(*trunc_amount.get(t).unwrap_or(&4000) as usize);
             let just_plaintexts: Vec<Vec<i64>> =
                 valid_assignments.iter().map(|(pt, _)| pt.clone()).collect();
 
@@ -353,7 +368,7 @@ impl Translator {
                 .collect();
 
             valid_assignments.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
-            valid_assignments.truncate(*TRUNC_AMOUNT.get(t).unwrap_or(&4000) as usize);
+            valid_assignments.truncate(*self.trunc_amount.get(t).unwrap_or(&4000) as usize);
             let just_plaintexts = valid_assignments.iter().map(|(pt, _)| pt.clone()).collect();
 
             // Pushing constraints into global proto_model

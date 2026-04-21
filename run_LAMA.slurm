@@ -101,19 +101,26 @@ NAMES=("spitz")
  #NAMES=("shopparis" "highway" "busstop" "drink" "spitz" "cali")
  # DISTS=("uniform" "gaussian" "beta" "flat")
 # DISTS=("flat")
-DATA_DIRS=(
-     "$SLURM_SUBMIT_DIR/databases/20x20"
-     "$SLURM_SUBMIT_DIR/databases/25x25"
-     "$SLURM_SUBMIT_DIR/databases/30x30"
-     "$SLURM_SUBMIT_DIR/databases/35x35"
-     "$SLURM_SUBMIT_DIR/databases/40x40"
-     "$SLURM_SUBMIT_DIR/databases/45x45"
-     "$SLURM_SUBMIT_DIR/databases/50x50"
- )
+#DATA_DIRS=(
+#     "$SLURM_SUBMIT_DIR/databases/20x20"
+#     "$SLURM_SUBMIT_DIR/databases/25x25"
+#     "$SLURM_SUBMIT_DIR/databases/30x30"
+#     "$SLURM_SUBMIT_DIR/databases/35x35"
+#     "$SLURM_SUBMIT_DIR/databases/40x40"
+#     "$SLURM_SUBMIT_DIR/databases/45x45"
+#     "$SLURM_SUBMIT_DIR/databases/50x50"
+# )
 
 #NAMES=("nh")
 #DISTS=("uniform" "gaussian" "beta")
 #DATA_DIRS=("$SLURM_SUBMIT_DIR/databases/16x16x14")
+
+# Flat dist is very heavy. We only run for 2d 20x20 to 30x30.
+DISTS=("flat")
+DATA_DIRS=(
+     "$SLURM_SUBMIT_DIR/databases/20x20"
+     "$SLURM_SUBMIT_DIR/databases/25x25"
+     "$SLURM_SUBMIT_DIR/databases/30x30")
 
 # PROBS=("0.05" "0.10" "0.15" "0.20")
 PROBS=("1.0")

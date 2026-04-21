@@ -506,8 +506,8 @@ fn end_to_end_sampled() {
     info!("Loading test DB ({}x{})", rows_cols, rows_cols);
     let loaded_db: Box<dyn Searchable + Sync> = Box::new(testDB::new(dim, rows_cols, 55));
 
-    let dist = "uniform";
-    let target_query_percentage = 0.25; // e.g., observe 5% of all possible queries
+    let dist = "gaussian";
+    let target_query_percentage = 0.1; // e.g., observe 5% of all possible queries
     let fixed_delta = 0.001; // 99.9% confidence that error <= epsilon
 
     // 1. Initialize a baseline selector to generate the distribution space

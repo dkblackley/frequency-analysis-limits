@@ -91,9 +91,9 @@ $SG_RUN cargo clean
 echo "Building project inside container..."
 $SG_RUN cargo rustc --bin frequency_analysis_limits --release -- -Clink-arg=-lprotobuf
 
-padding=5
+padding=0
 
-NAMES=("spitz")
+NAMES=("cali" "spitz")
 #DISTS=("uniform" "gaussian" "beta" "flat")
 #DATA_DIRS=("$SLURM_SUBMIT_DIR/databases/350x50" "$SLURM_SUBMIT_DIR/databases/175x25")
 
@@ -116,14 +116,14 @@ NAMES=("spitz")
 #DATA_DIRS=("$SLURM_SUBMIT_DIR/databases/16x16x14")
 
 # Flat dist is very heavy. We only run for 2d 20x20 to 30x30.
-DISTS=("flat")
+DISTS=("uniform")
 DATA_DIRS=(
      "$SLURM_SUBMIT_DIR/databases/20x20"
      "$SLURM_SUBMIT_DIR/databases/25x25"
      "$SLURM_SUBMIT_DIR/databases/30x30")
 
-# PROBS=("0.05" "0.10" "0.15" "0.20")
-PROBS=("1.0")
+PROBS=("0.10" "0.15" "0.20" "0.25" "0.30")
+# PROBS=("1.0")
 
 echo "Running canary"
 $SG_RUN ./target/release/frequency_analysis_limits \

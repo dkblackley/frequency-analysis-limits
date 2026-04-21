@@ -18,17 +18,10 @@ pub struct Translator {
     proto_model: PythonCpModel, // Replaced CpModelProto
     pub t_assignment_archive: HashMap<usize, HashMap<Vec<i64>, Vec<Vec<i64>>>>,
     pub prev_t_assignments: HashMap<i64, Vec<Vec<i64>>>,
-    upper_dom: Vec<i64>,
-    lower_dom: Vec<i64>,
 }
 
 impl Translator {
-    pub fn new(
-        largest_val: i64,
-        mut encrypted_records: Vec<i64>,
-        upper: &[i64],
-        lower: &[i64],
-    ) -> Self {
+    pub fn new(largest_val: i64, mut encrypted_records: Vec<i64>) -> Self {
         info!("Starting");
         let mut rng = StdRng::seed_from_u64(42);
         encrypted_records.shuffle(&mut rng);
@@ -44,8 +37,6 @@ impl Translator {
             var_index_map,
             t_assignment_archive: HashMap::new(),
             prev_t_assignments: HashMap::new(),
-            upper_dom: upper.to_vec(),
-            lower_dom: lower.to_vec(),
         }
     }
 
@@ -154,7 +145,7 @@ impl Translator {
                 let var = *self.enc_id_to_intvar.get(&enc_id).unwrap();
 
                 valid_plaintexts.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
-                valid_plaintexts.truncate(TRUNC_AMOUNT[1] as usize);
+                valid_plaintexts.truncate(TRUNC_AMOUNT[0] as usize);
                 let just_plaintexts: Vec<Vec<i64>> =
                     valid_plaintexts.iter().map(|(pt, _)| pt.clone()).collect();
 
@@ -389,8 +380,6 @@ impl Translator {
         );
 
         // This calls your wrapper instead of ffi::solve_with_parameters
-        self.proto_model
-            .validate(&self.var_index_map, &*self.lower_dom, &*self.upper_dom);
         let response = self.proto_model.solve(self.upper, false);
         solve_pb.finish_with_message(format!("Mini-Solver finished in {:?}", solve_pb.elapsed()));
 

@@ -57,7 +57,7 @@ rm clang+llvm-16.0.4-x86_64-linux-gnu-ubuntu-22.04.tar.xz
 cd "$SLURM_SUBMIT_DIR"
 # ---------------------------------------
 
-# apt-get update && apt-get install -y protobuf-compiler libprotobuf-dev
+apt-get update && apt-get install -y protobuf-compiler libprotobuf-dev
 
 # Point Rust's bindgen tool directly to the downloaded libclang.so
 export SINGULARITYENV_LIBCLANG_PATH="$LLVM_DIR/lib"

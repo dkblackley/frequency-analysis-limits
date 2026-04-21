@@ -307,7 +307,7 @@ fn end_flat() {
         &recon_coords,
         "figures/debug_flat.svg",
         true,
-        0.5,
+        0.0,
         0.0,
     )
     .expect("TODO: panic message");

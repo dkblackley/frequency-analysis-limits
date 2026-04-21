@@ -96,8 +96,11 @@ pub fn lama_attack(
 
     info!("Selector computing values");
 
-    let mut translator =
-        Translator::new(largest_possible_val, loaded_db.get_universe(), &(t ));
+    let mut translator = Translator::new(
+        largest_possible_val,
+        loaded_db.get_universe(),
+        &(t.clone() as usize),
+    );
 
     let query_dist_ref = &selector.query_distribution;
     let high_pair_ref = &high_pair;
@@ -233,4 +236,114 @@ pub fn lama_attack(
         return;
     }
 
-    let unique_name = format!("{db_name}_{dist}_
+    let unique_name = format!("{db_name}_{dist}_e{eps}_d{delta}");
+
+    let mut correct = 0;
+    let mut first_resp = HashMap::new();
+
+    for (key, val) in responses.clone() {
+        first_resp.insert(key, val[0]); // just pretend first resp is the correct one.
+        for i in 0..val.len() {
+            if key == val[i] {
+                correct += 1;
+            }
+        }
+    }
+
+    debug!("{correct} correct out of {} total", responses.len());
+    info!("Saving correct solutions to {full_datapath}/limits/{unique_name}_reconstruction.json");
+    save_reconstruction_data(
+        &responses,
+        &format!("{full_datapath}/limits"),
+        &unique_name,
+        &loaded_db,
+    );
+
+    info!(
+        "LAMa completely finished in {}",
+        end.duration_since(start).as_secs_f64()
+    );
+
+    let final_res = DbResult {
+        name: loaded_db.get_name().parse().unwrap(),
+        method: "LAMA".to_string(),
+        dims: loaded_db.get_dims() as u32,
+        mse: Some(0.0),
+        match_rate: Some(1.0),
+        chamfer: Some(0.0),
+        number_of_reconstructions: format!("{}", responses.len()),
+        time_taken: end.duration_since(start).as_secs_f64(),
+        total_db_size: loaded_db.get_universe().len() as u64,
+        percent_queries_used: *query_percent,
+        num_queries_used: num_queries as u64,
+        eps: Some(eps),
+        delt: Some(delta),
+    };
+
+    if let Err(e) = save_results(
+        final_res,
+        &format!("{full_datapath}/limits/results_{unique_name}.json"),
+    ) {
+        error!("failed writing to {full_datapath}/limits/results_{unique_name}.json: {e}");
+    }
+
+    info!("LAMA finished running on {db_name}");
+}
+fn save_results(result: DbResult, file_path: &str) -> Result<(), LAMAError> {
+    // Create the file and wrap it in a BufWriter for better performance
+    let file = File::create(file_path)?;
+    let writer = BufWriter::new(file);
+
+    serde_json::to_writer_pretty(writer, &result)?;
+    Ok(())
+}
+
+pub fn into_recon_data(
+    responses: &HashMap<i64, Vec<i64>>,
+    loaded_db: &Box<dyn Searchable + Sync>,
+) -> Vec<Vec<ReconstructionDataPoint>> {
+    let mut data: Vec<Vec<ReconstructionDataPoint>> = Vec::new();
+
+    // Iterate over the HashMap
+    for (&encrypted_true, encrypted_recons) in responses {
+        let true_vec = loaded_db.decrypt_point_f64(&encrypted_true);
+
+        // Iterate over the reconstructions and get their index
+        for (i, &encrypted_recon) in encrypted_recons.iter().enumerate() {
+            let recon_vec = loaded_db.decrypt_point_f64(&encrypted_recon);
+
+            let saved_point = ReconstructionDataPoint {
+                true_points: true_vec.clone(),
+                reconstructed_points: recon_vec,
+                unscaled_points: None,
+            };
+
+            // If we have more reconstructions for this point than we have
+            // outer arrays, we need to push a new empty Vec to hold them.
+            if data.len() <= i {
+                data.push(Vec::new());
+            }
+
+            // Push the saved point to the correct reconstruction index
+            data[i].push(saved_point);
+        }
+    }
+    data
+}
+
+fn save_reconstruction_data(
+    responses: &HashMap<i64, Vec<i64>>,
+    file_path: &str,
+    unique_name: &str,
+    loaded_db: &Box<dyn Searchable + Sync>,
+) {
+    let mut data: Vec<Vec<ReconstructionDataPoint>> = into_recon_data(responses, loaded_db);
+
+    fs::create_dir_all(file_path).unwrap();
+
+    // Create the file and wrap it in a BufWriter for better performance
+    let file = File::create(format!("{file_path}/{unique_name}_reconstruction.json")).unwrap();
+    let writer = BufWriter::new(file);
+
+    serde_json::to_writer_pretty(writer, &data).unwrap();
+}

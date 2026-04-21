@@ -307,123 +307,123 @@ pub fn just_points(
 
 // Plots arbitrary 2D points natively as an SVG with a transparent background.
 // Colors are updated to use a colorblind-friendly gradient (Okabe-Ito Palette).
-// pub fn plot_spatial_reconstruction_all_items(
-//     true_coords: &[Vec<f64>],
-//     recon_coords: &[Vec<Vec<f64>>],
-//     output_path: &str,
-//     show_true_points: bool,
-//     x_padder: f64,
-//     y_padder: f64,
-// ) -> Result<(), Box<dyn Error>> {
-//     // Switch to SVGBackend for lossless, scalable vector images
-//     let root = SVGBackend::new(output_path, (1200 * 2, 800)).into_drawing_area();
-//     root.fill(&TRANSPARENT)?;
-//
-//     let recon_is_empty = recon_coords.is_empty() || recon_coords.iter().all(|r| r.is_empty());
-//     if true_coords.is_empty() && recon_is_empty {
-//         return Ok(());
-//     }
-//
-//     let (mut min_x, mut max_x) = (f64::INFINITY, f64::NEG_INFINITY);
-//     let (mut min_y, mut max_y) = (f64::INFINITY, f64::NEG_INFINITY);
-//
-//     // Process bounds for ground truth
-//     for x_y in true_coords.iter() {
-//         let (x, y) = (x_y[0], x_y[1]);
-//         min_x = min_x.min(x);
-//         max_x = max_x.max(x);
-//         min_y = min_y.min(y);
-//         max_y = max_y.max(y);
-//     }
-//
-//     // Process bounds for all reconstruction sets
-//     for recon_set in recon_coords.iter() {
-//         for x_y in recon_set.iter() {
-//             let (x, y) = (x_y[0], x_y[1]);
-//             min_x = min_x.min(x);
-//             max_x = max_x.max(x);
-//             min_y = min_y.min(y);
-//             max_y = max_y.max(y);
-//         }
-//     }
-//
-//     let x_pad = (max_x - min_x) * x_padder;
-//     let y_pad = (max_y - min_y) * y_padder;
-//
-//     let mut chart = ChartBuilder::on(&root)
-//         .margin(30)
-//         .x_label_area_size(80)
-//         .y_label_area_size(90)
-//         .build_cartesian_2d(
-//             (min_x - x_pad)..(max_x + x_pad),
-//             (min_y - y_pad)..(max_y + y_pad),
-//         )?;
-//
-//     let text_color = BLACK;
-//     let mesh_color = RGBColor(220, 220, 220);
-//
-//     chart
-//         .configure_mesh()
-//         .bold_line_style(mesh_color)
-//         .axis_style(&text_color)
-//         .label_style(("sans-serif", 20).into_font().color(&text_color))
-//         .draw()?;
-//
-//     // --- Color-Blind Friendly Okabe-Ito Palette ---
-//     let sky_blue = RGBColor(86, 180, 233);
-//
-//     // Remaining distinguishable Okabe-Ito colors for the multiple reconstructed sets
-//     let recon_palette = [
-//         RGBColor(213, 94, 0),    // Vermilion
-//         RGBColor(0, 158, 115),   // Bluish Green
-//         RGBColor(204, 121, 167), // Reddish Purple
-//         RGBColor(230, 159, 0),   // Orange
-//         RGBColor(0, 114, 178),   // Blue
-//         RGBColor(240, 228, 66),  // Yellow
-//     ];
-//
-//     // 1. True Points Series (Fully Opaque)
-//     if show_true_points && !true_coords.is_empty() {
-//         chart
-//             .draw_series(
-//                 true_coords
-//                     .iter()
-//                     // Kept opaque (no `.mix()`) to make it immediately obvious
-//                     .map(|x_y| Circle::new((x_y[0], x_y[1]), 8, sky_blue.filled())),
-//             )?
-//             .label("Ground Truth")
-//             .legend(move |(x, y)| Circle::new((x, y), 6, sky_blue.filled()));
-//     }
-//
-//     // 2. Reconstructed Points Series
-//     for (i, recon_set) in recon_coords.iter().enumerate() {
-//         if recon_set.is_empty() {
-//             continue;
-//         }
-//
-//         let base_color = recon_palette[i % recon_palette.len()];
-//
-//         chart
-//             .draw_series(recon_set.iter().map(|x_y| {
-//                 let (x, y) = (x_y[0], x_y[1]);
-//
-//                 // Mix(0.5) adds transparency so overlapping scatter points remain visible
-//                 Circle::new((x, y), 4, base_color.mix(0.85).filled())
-//             }))?
-//             .label(format!("Reconstructed {}", i + 1))
-//             // Legend icons kept opaque so users can cleanly see the target color
-//             .legend(move |(x, y)| Circle::new((x, y), 4, base_color.filled()));
-//     }
-//
-//     // 3. The Legend
-//     // chart
-//     //     .configure_series_labels()
-//     //     .position(SeriesLabelPosition::UpperRight)
-//     //     .background_style(WHITE.mix(0.9).filled())
-//     //     .border_style(BLACK)
-//     //     .label_font(("sans-serif", 20).into_font().color(&text_color))
-//     //     .draw()?;
-//
-//     root.present()?;
-//     Ok(())
-// }
+pub fn plot_spatial_reconstruction_all_items(
+    true_coords: &[Vec<f64>],
+    recon_coords: &[Vec<Vec<f64>>],
+    output_path: &str,
+    show_true_points: bool,
+    x_padder: f64,
+    y_padder: f64,
+) -> Result<(), Box<dyn Error>> {
+    // Switch to SVGBackend for lossless, scalable vector images
+    let root = SVGBackend::new(output_path, (1200 * 2, 800)).into_drawing_area();
+    root.fill(&TRANSPARENT)?;
+
+    let recon_is_empty = recon_coords.is_empty() || recon_coords.iter().all(|r| r.is_empty());
+    if true_coords.is_empty() && recon_is_empty {
+        return Ok(());
+    }
+
+    let (mut min_x, mut max_x) = (f64::INFINITY, f64::NEG_INFINITY);
+    let (mut min_y, mut max_y) = (f64::INFINITY, f64::NEG_INFINITY);
+
+    // Process bounds for ground truth
+    for x_y in true_coords.iter() {
+        let (x, y) = (x_y[0], x_y[1]);
+        min_x = min_x.min(x);
+        max_x = max_x.max(x);
+        min_y = min_y.min(y);
+        max_y = max_y.max(y);
+    }
+
+    // Process bounds for all reconstruction sets
+    for recon_set in recon_coords.iter() {
+        for x_y in recon_set.iter() {
+            let (x, y) = (x_y[0], x_y[1]);
+            min_x = min_x.min(x);
+            max_x = max_x.max(x);
+            min_y = min_y.min(y);
+            max_y = max_y.max(y);
+        }
+    }
+
+    let x_pad = (max_x - min_x) * x_padder;
+    let y_pad = (max_y - min_y) * y_padder;
+
+    let mut chart = ChartBuilder::on(&root)
+        .margin(30)
+        .x_label_area_size(80)
+        .y_label_area_size(90)
+        .build_cartesian_2d(
+            (min_x - x_pad)..(max_x + x_pad),
+            (min_y - y_pad)..(max_y + y_pad),
+        )?;
+
+    let text_color = BLACK;
+    let mesh_color = RGBColor(220, 220, 220);
+
+    chart
+        .configure_mesh()
+        .bold_line_style(mesh_color)
+        .axis_style(&text_color)
+        .label_style(("sans-serif", 20).into_font().color(&text_color))
+        .draw()?;
+
+    // --- Color-Blind Friendly Okabe-Ito Palette ---
+    let sky_blue = RGBColor(86, 180, 233);
+
+    // Remaining distinguishable Okabe-Ito colors for the multiple reconstructed sets
+    let recon_palette = [
+        RGBColor(213, 94, 0),    // Vermilion
+        RGBColor(0, 158, 115),   // Bluish Green
+        RGBColor(204, 121, 167), // Reddish Purple
+        RGBColor(230, 159, 0),   // Orange
+        RGBColor(0, 114, 178),   // Blue
+        RGBColor(240, 228, 66),  // Yellow
+    ];
+
+    // 1. True Points Series (Fully Opaque)
+    if show_true_points && !true_coords.is_empty() {
+        chart
+            .draw_series(
+                true_coords
+                    .iter()
+                    // Kept opaque (no `.mix()`) to make it immediately obvious
+                    .map(|x_y| Circle::new((x_y[0], x_y[1]), 8, sky_blue.filled())),
+            )?
+            .label("Ground Truth")
+            .legend(move |(x, y)| Circle::new((x, y), 6, sky_blue.filled()));
+    }
+
+    // 2. Reconstructed Points Series
+    for (i, recon_set) in recon_coords.iter().enumerate() {
+        if recon_set.is_empty() {
+            continue;
+        }
+
+        let base_color = recon_palette[i % recon_palette.len()];
+
+        chart
+            .draw_series(recon_set.iter().map(|x_y| {
+                let (x, y) = (x_y[0], x_y[1]);
+
+                // Mix(0.5) adds transparency so overlapping scatter points remain visible
+                Circle::new((x, y), 4, base_color.mix(0.85).filled())
+            }))?
+            .label(format!("Reconstructed {}", i + 1))
+            // Legend icons kept opaque so users can cleanly see the target color
+            .legend(move |(x, y)| Circle::new((x, y), 4, base_color.filled()));
+    }
+
+    // 3. The Legend
+    // chart
+    //     .configure_series_labels()
+    //     .position(SeriesLabelPosition::UpperRight)
+    //     .background_style(WHITE.mix(0.9).filled())
+    //     .border_style(BLACK)
+    //     .label_font(("sans-serif", 20).into_font().color(&text_color))
+    //     .draw()?;
+
+    root.present()?;
+    Ok(())
+}

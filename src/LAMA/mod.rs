@@ -294,13 +294,10 @@ fn save_results(result: DbResult, file_path: &str) -> Result<(), LAMAError> {
     Ok(())
 }
 
-fn save_reconstruction_data(
+pub fn into_recon_data(
     responses: &HashMap<i64, Vec<i64>>,
-    file_path: &str,
-    unique_name: &str,
     loaded_db: &Box<dyn Searchable + Sync>,
-) {
-    // This will hold our "transposed" data.
+) -> Vec<Vec<ReconstructionDataPoint>> {
     let mut data: Vec<Vec<ReconstructionDataPoint>> = Vec::new();
 
     // Iterate over the HashMap
@@ -327,6 +324,16 @@ fn save_reconstruction_data(
             data[i].push(saved_point);
         }
     }
+    data
+}
+
+fn save_reconstruction_data(
+    responses: &HashMap<i64, Vec<i64>>,
+    file_path: &str,
+    unique_name: &str,
+    loaded_db: &Box<dyn Searchable + Sync>,
+) {
+    let mut data: Vec<Vec<ReconstructionDataPoint>> = into_recon_data(responses, loaded_db);
 
     fs::create_dir_all(file_path).unwrap();
 

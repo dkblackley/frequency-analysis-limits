@@ -4,6 +4,10 @@
 use frequency_analysis_limits::dataloader::tester::testDB;
 use frequency_analysis_limits::dataloader::two_d::{Location, TwoDMap};
 use frequency_analysis_limits::dataloader::{flatten_nd, unflatten_nd, Searchable};
+use frequency_analysis_limits::plotting::two_d::spatial_plot::{
+    plot_spatial_reconstruction, plot_spatial_reconstruction_all_items,
+};
+use frequency_analysis_limits::LAMA::into_recon_data;
 use frequency_analysis_limits::LAMA::ortools_wrap::PythonCpModel;
 use frequency_analysis_limits::LAMA::selector::Selector;
 use frequency_analysis_limits::LAMA::solver::CpSolverStatus::{Feasible, Optimal};
@@ -270,8 +274,38 @@ fn end_flat() {
 
     let total_responses = solver.num_sols;
     // Remember, we cannot get rid of/hide the distances. Hence, after t=1 and t=2 the solver is
-    // able to narrow down to the 4 items of equal distance.
-    assert_eq!(total_responses, 4);
+    // able to determine 'distance'. All possible shifts are still on the table. For two points, one
+    // above the other there should only be 26 reconstructions.
+    assert_eq!(total_responses, 26);
+    let data = into_recon_data(&responses, &loaded_db);
+    let mut true_cords = Vec::new();
+    let mut recon_coords = Vec::new();
+    let mut true_done = false;
+
+    for item in data {
+        let mut current_recon = Vec::new();
+
+        for i in item {
+            if !true_done {
+                true_cords.push(i.true_points);
+            } else {
+                current_recon.push(i.reconstructed_points);
+            }
+        }
+        recon_coords.push(current_recon);
+        true_done = true;
+    }
+
+    plot_spatial_reconstruction_all_items(
+        &true_cords,
+        &recon_coords,
+        "figures/debug_flat.svg",
+        true,
+        0.0,
+        0.0,
+    )
+    .expect("TODO: panic message");
+
     let mut found_truth = false;
 
     for i in 0..total_responses {

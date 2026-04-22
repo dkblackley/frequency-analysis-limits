@@ -1,12 +1,12 @@
 #!/bin/bash -l
-#SBATCH --job-name=LAMA
+#SBATCH --job-name=LAMA3d
 #SBATCH --partition=bigmem
-#SBATCH --output=LAMA.out
-#SBATCH --error=LAMA.err
+#SBATCH --output=LAMA3d.out
+#SBATCH --error=LAMA3d.err
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=64
-#SBATCH --mem=600G
+#SBATCH --mem=1000G
 #SBATCH --time=2-00:30:00
 
 cd "$SLURM_SUBMIT_DIR"
@@ -118,7 +118,7 @@ NAMES=("cali" "spitz" "shopparis" "highway" "busstop" "drink")
 # Flat dist is very heavy. We only run for 2d 20x20 to 30x30.
 DISTS=("flat")
 DATA_DIRS=(
-     "$SLURM_SUBMIT_DIR/databases/15x15"
+     #"$SLURM_SUBMIT_DIR/databases/15x15"
 )
 
 # PROBS=("0.10" "0.15" "0.20" "0.25" "0.30")
@@ -220,7 +220,7 @@ fi
  FAILED_RUNS=()
 
  # 1. Loop through dimensions 2, 3, 4, 5, and 6
- for dim in {2..5}; do
+ for dim in {2..6}; do
 
      # 2. Dynamically build the "10x10x..." string based on the dimension
      dim_str="6"

@@ -53,7 +53,12 @@ Parameters:
 
 ### Basic Example:
 
-To run the cali dataset located in the databases/20x20 directory, using a Gaussian distribution, a 20% query rate, a
+Note: LAMa requires a substantial amount of RAM to work. In the non-approximate setting we would recommend 100 GB of RAM
+for a 20x20 across all distributions. We have included 7 databases in our code. If you want to run the approximate/flat
+setting, you would require roughly 1TB of RAM. For most databases t=2 is enough. For uniform or flat, up to t=4 may
+help.
+
+To run the cali dataset located in the databases/20x20 directory, using a Uniform distribution, a 20% query rate, a
 threshold of 2, and padding enabled:
 
 ```bash
@@ -64,7 +69,6 @@ export PYTHON_EXEC="/home/.conda/envs/main/bin/python3"
 --dir-path "databases/20x20" \
 --name "cali" \
 --t "3" \
---dist "gaussian" \
---padding "1" \
+--dist "uniform" \
 --query-percent "0.20"
 ```

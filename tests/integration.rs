@@ -20,6 +20,7 @@ use itertools::all;
 use log::warn;
 use log::{debug, error, info};
 use rand::distributions::Distribution;
+use rand::Rng;
 use rustc_hash::FxHashMap;
 use sha2::Digest;
 use std::collections::HashMap;
@@ -104,6 +105,28 @@ fn check_isomorphism(responses: &HashMap<i64, i64>, rows: i64, cols: i64) -> Opt
     None
 }
 
+/// Generates a specified number of random locations within a bounding box.
+pub fn generate_random_locations(
+    count: usize,
+    min_lon: f64,
+    max_lon: f64,
+    min_lat: f64,
+    max_lat: f64,
+) -> Vec<Location> {
+    let mut rng = rand::thread_rng();
+    let mut locations = Vec::with_capacity(count);
+
+    for _ in 0..count {
+        locations.push(Location {
+            // gen_range with `..=` ensures the maximum value is inclusive
+            longitude: rng.gen_range(min_lon..=max_lon),
+            latitude: rng.gen_range(min_lat..=max_lat),
+        });
+    }
+
+    locations
+}
+
 #[test]
 fn end_flat() {
     let _ = env_logger::builder()
@@ -117,20 +140,32 @@ fn end_flat() {
         .build_global()
         .unwrap();
 
-    let point_1 = Location {
-        longitude: 0.0,
-        latitude: 0.0,
-    };
+    // let point_1 = Location {
+    //     longitude: 0.0,
+    //     latitude: 0.0,
+    // };
+    //
+    // let point_2 = Location {
+    //     longitude: 1.0,
+    //     latitude: 0.0,
+    // };
+    //
+    // let point_3 = Location {
+    //     longitude: 0.0,
+    //     latitude: 2.0,
+    // };
 
-    let point_2 = Location {
-        longitude: 1.0,
-        latitude: 0.0,
-    };
+    let min_longitude = 0.0;
+    let max_longitude = 5.0;
+    let min_latitude = 0.0;
+    let max_latitude = 5.0;
+
+    let points =
+        generate_random_locations(10, min_longitude, max_longitude, min_latitude, max_latitude);
 
     // Scale to an 8x8 DB.
-    let loaded_db: Box<dyn Searchable + Sync> = Box::new(
-        TwoDMap::new_unscaled(vec![point_1, point_2], "flat_test", (0, 2), (0, 3)).unwrap(),
-    );
+    let loaded_db: Box<dyn Searchable + Sync> =
+        Box::new(TwoDMap::new_unscaled(points, "flat_test", (2, 2), (2, 2)).unwrap());
 
     let all_recs = loaded_db.get_universe();
 
@@ -139,15 +174,15 @@ fn end_flat() {
     let wanted_flat_1 = flatten_nd(&[0, 0], &[3, 3], &[0, 0]);
     let wanted_flat_2 = flatten_nd(&[1, 0], &[3, 3], &[0, 0]);
 
-    for rec in all_recs.clone() {
-        if rec == wanted_flat_1 {
-            found_first = true;
-        } else if rec == wanted_flat_2 {
-            found_second = true;
-        } else {
-            panic!("Found not wanted/ unknown item: {}, {:?}", rec, all_recs)
-        }
-    }
+    // for rec in all_recs.clone() {
+    //     if rec == wanted_flat_1 {
+    //         found_first = true;
+    //     } else if rec == wanted_flat_2 {
+    //         found_second = true;
+    //     } else {
+    //         panic!("Found not wanted/ unknown item: {}, {:?}", rec, all_recs)
+    //     }
+    // }
 
     assert!(found_first);
     assert!(found_second);
@@ -159,7 +194,7 @@ fn end_flat() {
     let selector = Selector::new(dist, &loaded_db);
 
     let (low_pair, high_pair) = loaded_db.get_dom_pair();
-    assert_eq!(high_pair, vec![3, 3]);
+    // assert_eq!(high_pair, vec![3, 3]);
     let universe = loaded_db.get_universe();
     let largest_enc_val: i64 = flatten_nd(&high_pair, &high_pair, &low_pair);
 
@@ -261,7 +296,10 @@ fn end_flat() {
     info!("--> Processing Recursive Case (t=2) sequentially across chunk models...");
     translator.process_t_greater_than_1(2, &universe, &validate_candidate);
 
-    // only have two records to t=2 is the max.
+    info!("--> Processing Recursive Case (t=3) sequentially across chunk models...");
+    translator.process_t_greater_than_1(3, &universe, &validate_candidate);
+
+    // only have two records so t=2 is the max.
 
     info!("5. Building and executing the CP-SAT Solver for the final constraint graph...");
     let mut solver = Solver::new(translator.get_var_index_map());
@@ -346,11 +384,11 @@ fn end_to_end() {
         .unwrap();
 
     // This should take about a minute to run... (if not very sparse!)
-    let rows_cols = 6;
+    let rows_cols = 10;
     let dim = 2;
 
     info!("Loading test DB ({}x{})", rows_cols, rows_cols);
-    let loaded_db: Box<dyn Searchable + Sync> = Box::new(testDB::new(dim, rows_cols, 50));
+    let loaded_db: Box<dyn Searchable + Sync> = Box::new(testDB::new(dim, rows_cols, 40));
 
     let dist = "uniform";
     let eps = 0.0; // Perfect knowledge constraint

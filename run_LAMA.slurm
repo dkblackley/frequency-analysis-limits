@@ -178,7 +178,7 @@ for data_dir in "${DATA_DIRS[@]}"; do
                 $SG_RUN ./target/release/frequency_analysis_limits \
                         --dir-path "$data_dir" \
                         --name "$name" \
-                        --t 3 \
+                        --t 2 \
                         --dist "$dist" \
                         --padding "$padding" \
                         --query-percent "$prob"

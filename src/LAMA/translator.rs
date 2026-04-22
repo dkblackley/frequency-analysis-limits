@@ -49,7 +49,7 @@ impl Translator {
 
         let mut amount = largest_val.clone();
         for i in 1..(max_t + 1) {
-            let safety_cap = (largest_val.clone() * 15) * (i as i64);
+            let safety_cap = (largest_val.clone() * 20) * (i as i64);
             // amount = largest_val.pow(i as u32);
             trunc_amount.push(safety_cap);
         }

@@ -544,29 +544,6 @@ impl Translator {
         self.t_assignment_archive
             .insert(t, current_t_cache.expect("Failed..."));
     }
-
-    pub fn update_meta_for_t<V>(
-        &mut self,
-        t: usize,
-        _encrypted_records: &[i64],
-        validate_candidate: V,
-    ) where
-        V: Fn(&[i64], &[i64]) -> (bool, f64) + Sync + Send,
-    {
-        let prev_t_cache = &self
-            .t_assignment_archive
-            .get(&(t - 1))
-            .expect("Missing previous round cache!")
-            .clone();
-
-        let direct_map = Self::genereate_direct_mapping(prev_t_cache);
-
-        let current_t_cache =
-            self.process_cpsat_global(prev_t_cache, &direct_map, &validate_candidate);
-
-        self.t_assignment_archive
-            .insert(t, current_t_cache.expect("Failed..."));
-    }
 }
 
 #[test]

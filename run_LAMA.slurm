@@ -91,7 +91,7 @@ $SG_RUN cargo clean
 echo "Building project inside container..."
 $SG_RUN cargo rustc --bin frequency_analysis_limits --release -- -Clink-arg=-lprotobuf
 
-padding=1
+padding=2
 
 # NAMES=("cali" "spitz")
 #DISTS=("uniform" "gaussian" "beta" "flat")
@@ -99,7 +99,7 @@ padding=1
 
 
  #NAMES=("shopparis" "highway" "busstop" "drink" "spitz" "cali")
- NAMES=("drink" "spitz" "cali")
+ NAMES=("spitz")
  # DISTS=("uniform" "gaussian" "beta" "flat")
 #DATA_DIRS=(
 #     "$SLURM_SUBMIT_DIR/databases/20x20"

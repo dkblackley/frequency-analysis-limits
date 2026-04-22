@@ -220,7 +220,7 @@ fi
  FAILED_RUNS=()
 
  # 1. Loop through dimensions 2, 3, 4, 5, and 6
- for dim in {2..6}; do
+ for dim in {2..5}; do
 
      # 2. Dynamically build the "10x10x..." string based on the dimension
      dim_str="5"

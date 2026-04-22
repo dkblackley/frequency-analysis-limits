@@ -5,8 +5,8 @@
 #SBATCH --error=LAMA.err
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
-#SBATCH --cpus-per-task=128
-#SBATCH --mem=2000G
+#SBATCH --cpus-per-task=64
+#SBATCH --mem=400G
 #SBATCH --time=2-00:30:00
 
 cd "$SLURM_SUBMIT_DIR"
@@ -98,7 +98,7 @@ padding=0
 #DATA_DIRS=("$SLURM_SUBMIT_DIR/databases/350x50" "$SLURM_SUBMIT_DIR/databases/175x25")
 
 
- #NAMES=("shopparis" "highway" "busstop" "drink" "spitz" "cali")
+NAMES=("cali" "spitz" "shopparis" "highway" "busstop" "drink")
  # NAMES=("spitz")
  # DISTS=("uniform" "gaussian" "beta" "flat")
 #DATA_DIRS=(
@@ -116,11 +116,10 @@ padding=0
 #DATA_DIRS=("$SLURM_SUBMIT_DIR/databases/16x16x14")
 
 # Flat dist is very heavy. We only run for 2d 20x20 to 30x30.
-#DISTS=("flat")
+DISTS=("flat")
 DATA_DIRS=(
      "$SLURM_SUBMIT_DIR/databases/20x20"
-     "$SLURM_SUBMIT_DIR/databases/25x25"
-     "$SLURM_SUBMIT_DIR/databases/30x30")
+)
 
 # PROBS=("0.10" "0.15" "0.20" "0.25" "0.30")
 PROBS=("1.0")

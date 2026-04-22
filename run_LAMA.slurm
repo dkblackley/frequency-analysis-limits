@@ -6,7 +6,7 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=64
-#SBATCH --mem=400G
+#SBATCH --mem=600G
 #SBATCH --time=2-00:30:00
 
 cd "$SLURM_SUBMIT_DIR"
@@ -118,7 +118,7 @@ NAMES=("cali" "spitz" "shopparis" "highway" "busstop" "drink")
 # Flat dist is very heavy. We only run for 2d 20x20 to 30x30.
 DISTS=("flat")
 DATA_DIRS=(
-     "$SLURM_SUBMIT_DIR/databases/20x20"
+     "$SLURM_SUBMIT_DIR/databases/15x15"
 )
 
 # PROBS=("0.10" "0.15" "0.20" "0.25" "0.30")

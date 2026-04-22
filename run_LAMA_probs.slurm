@@ -5,8 +5,8 @@
 #SBATCH --error=prob_LAMA.err
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
-#SBATCH --cpus-per-task=128
-#SBATCH --mem=1500G
+#SBATCH --cpus-per-task=64
+#SBATCH --mem=600G
 #SBATCH --time=2-00:30:00
 
 cd "$SLURM_SUBMIT_DIR"
@@ -94,7 +94,7 @@ $SG_RUN cargo rustc --bin frequency_analysis_limits --release -- -Clink-arg=-lpr
 padding=0
 
 NAMES=("spitz" "cali" "shopparis" "highway" "busstop" "drink")
-#DISTS=("uniform" "gaussian" "beta" "flat")
+# DISTS=("uniform" "gaussian" "beta")
 #DATA_DIRS=("$SLURM_SUBMIT_DIR/databases/350x50" "$SLURM_SUBMIT_DIR/databases/175x25")
 
 
@@ -116,7 +116,7 @@ NAMES=("spitz" "cali" "shopparis" "highway" "busstop" "drink")
 #DATA_DIRS=("$SLURM_SUBMIT_DIR/databases/16x16x14")
 
 
-DISTS=("uniform" "gaussian")
+DISTS=("uniform" "gaussian" "beta")
 DATA_DIRS=(
      "$SLURM_SUBMIT_DIR/databases/20x20")
 

@@ -7,9 +7,16 @@ use rand::rngs::StdRng;
 use rand::seq::SliceRandom;
 use rand::SeedableRng;
 use rayon::prelude::*;
+use serde::{Deserialize, Serialize};
 use sha2::digest::typenum::Pow;
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::AtomicUsize;
+
+#[derive(Default, Deserialize, Serialize, Debug, Clone)]
+pub struct TranslatorMeta {
+    constraints_per_t: HashMap<usize, usize>,
+    recons_per_t: HashMap<usize, usize>,
+}
 
 /// Translator: One Formula from All Matching Pairs.
 pub struct Translator {
@@ -20,6 +27,7 @@ pub struct Translator {
     pub t_assignment_archive: HashMap<usize, HashMap<Vec<i64>, Vec<Vec<i64>>>>,
     pub prev_t_assignments: HashMap<i64, Vec<Vec<i64>>>,
     trunc_amount: Vec<i64>,
+    pub metadata: TranslatorMeta,
 }
 
 impl Translator {
@@ -41,6 +49,7 @@ impl Translator {
             t_assignment_archive: HashMap::new(),
             prev_t_assignments: HashMap::new(),
             trunc_amount,
+            metadata: TranslatorMeta::default(),
         }
     }
 
@@ -50,7 +59,7 @@ impl Translator {
         let mut amount = largest_val.clone();
         for i in 1..(max_t + 1) {
             // This may be too low for small databases
-            let safety_cap = (largest_val.clone() * 7) * (i as i64);
+            let safety_cap = (largest_val.clone() * 8) * (i as i64);
             // amount = largest_val.pow(i as u32);
             trunc_amount.push(safety_cap);
         }
@@ -191,6 +200,8 @@ impl Translator {
         self.t_assignment_archive.insert(1, t1_cache);
         debug!("Done with t1");
         info!("Added {} assignments in round t=1", constraint_count);
+        self.metadata.constraints_per_t.insert(1, constraint_count);
+        self.metadata.recons_per_t.insert(1, constraint_count);
     }
 
     fn genereate_direct_mapping(
@@ -447,6 +458,9 @@ impl Translator {
             "Finished mini-solve with {} possible reconstructions",
             all_global_solutions.len()
         );
+        self.metadata
+            .recons_per_t
+            .insert(t + 1, all_global_solutions.len());
 
         // ------------------------------------------------------------------------
         // PHASE 4: Extract and Filter
@@ -501,10 +515,37 @@ impl Translator {
             constrain_count.load(std::sync::atomic::Ordering::Relaxed),
             t + 1
         );
+        self.metadata.constraints_per_t.insert(
+            t + 1,
+            constrain_count.load(std::sync::atomic::Ordering::Relaxed),
+        );
         Some(updated_t_cache)
     }
 
     pub fn process_t_greater_than_1<V>(
+        &mut self,
+        t: usize,
+        _encrypted_records: &[i64],
+        validate_candidate: V,
+    ) where
+        V: Fn(&[i64], &[i64]) -> (bool, f64) + Sync + Send,
+    {
+        let prev_t_cache = &self
+            .t_assignment_archive
+            .get(&(t - 1))
+            .expect("Missing previous round cache!")
+            .clone();
+
+        let direct_map = Self::genereate_direct_mapping(prev_t_cache);
+
+        let current_t_cache =
+            self.process_cpsat_global(prev_t_cache, &direct_map, &validate_candidate);
+
+        self.t_assignment_archive
+            .insert(t, current_t_cache.expect("Failed..."));
+    }
+
+    pub fn update_meta_for_t<V>(
         &mut self,
         t: usize,
         _encrypted_records: &[i64],

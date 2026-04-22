@@ -93,7 +93,7 @@ $SG_RUN cargo rustc --bin frequency_analysis_limits --release -- -Clink-arg=-lpr
 
 padding=0
 
-NAMES=("spitz")
+NAMES=("spitz" "cali" "shopparis" "highway" "busstop" "drink")
 #DISTS=("uniform" "gaussian" "beta" "flat")
 #DATA_DIRS=("$SLURM_SUBMIT_DIR/databases/350x50" "$SLURM_SUBMIT_DIR/databases/175x25")
 
@@ -116,11 +116,11 @@ NAMES=("spitz")
 #DATA_DIRS=("$SLURM_SUBMIT_DIR/databases/16x16x14")
 
 
-DISTS=("uniform")
+DISTS=("uniform" "gaussian")
 DATA_DIRS=(
-     "$SLURM_SUBMIT_DIR/databases/25x25")
+     "$SLURM_SUBMIT_DIR/databases/20x20")
 
-PROBS=("0.3" "0.25" "0.20" "0.15")
+PROBS=("0.35" "0.25" "0.15")
 # PROBS=("1.0")
 
 echo "Running canary"

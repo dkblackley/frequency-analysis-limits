@@ -225,6 +225,7 @@ pub fn lama_attack(
 
     info!("Building and executing the CP-SAT Solver for the final constraint graph...");
     let mut solver = Solver::new(translator.get_var_index_map());
+    let translater_met = translator.metadata.clone();
 
     let mut model = translator.get_proto_model();
 
@@ -288,6 +289,7 @@ pub fn lama_attack(
         num_queries_used: num_queries as u64,
         eps: Some(eps),
         delt: Some(delta),
+        translator_meta: translater_met,
     };
 
     if let Err(e) = save_results(

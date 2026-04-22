@@ -3,6 +3,7 @@ use crate::plotting::two_d::debug_mse::plot_mse_frequency_histogram_split;
 use crate::plotting::two_d::mse_by_all_reconstructions::plot_histograms_of_all_reconstructions;
 use crate::plotting::two_d::mse_vs_grid_size::plot_grid_by_mse;
 use crate::plotting::two_d::spatial_plot::run_spatial_plots;
+use crate::LAMA::translator::TranslatorMeta;
 use log::{info, warn};
 use serde::{Deserialize, Serialize};
 use std::error::Error;
@@ -65,6 +66,7 @@ pub struct DbResult {
     pub num_queries_used: u64,
     pub eps: Option<f64>,
     pub delt: Option<f64>,
+    pub translator_meta: TranslatorMeta,
 }
 
 /// Loads a standard JSON file containing a flat Vec of reconstruction points.

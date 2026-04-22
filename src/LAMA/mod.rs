@@ -318,15 +318,14 @@ pub fn lama_attack(
         true_done = true;
     }
 
-    plot_spatial_reconstruction_all_items(
+    let _ = plot_spatial_reconstruction_all_items(
         &true_cords,
         &recon_coords,
         "figures/debug_last_run.svg",
         true,
         0.0,
         0.0,
-    )
-    .expect("TODO: panic message");
+    );
 }
 fn save_results(result: DbResult, file_path: &str) -> Result<(), LAMAError> {
     // Create the file and wrap it in a BufWriter for better performance

@@ -45,7 +45,7 @@ pub fn lama_attack(
     let full_datapath = format!("{0}/{1}", dir_path, db_name);
 
     if db_name == "grid" {
-        loaded_db = Box::new(testDB::new(*dim, 8, 65));
+        loaded_db = Box::new(testDB::new(*dim, 6, 55));
     } else if db_name == "nh" {
         info!("Starting LAMA attack using {} dataset", db_name);
         debug!("Loading data from {full_datapath}/{db_name}.json");

@@ -50,13 +50,13 @@ impl Translator {
         let mut amount = largest_val.clone();
         for i in 1..(max_t + 1) {
             // This may be too low for small databases
-            let safety_cap = (largest_val.clone() * 10) * (i as i64);
+            let safety_cap = (largest_val.clone() * 7) * (i as i64);
             // amount = largest_val.pow(i as u32);
             trunc_amount.push(safety_cap);
         }
-        // trunc_amount
+        trunc_amount
 
-        return vec![300, 4000, 8000];
+        //return vec![300, 4000, 8000];
     }
 
     pub fn get_var_index_map(&self) -> HashMap<IntVar, (i32, i64)> {

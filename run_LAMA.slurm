@@ -1,12 +1,12 @@
 #!/bin/bash -l
-#SBATCH --job-name=LAMA
+#SBATCH --job-name=LAMA_3d
 #SBATCH --partition=bigmem
-#SBATCH --output=LAMA.out
-#SBATCH --error=LAMA.err
+#SBATCH --output=LAMA3d.out
+#SBATCH --error=LAMA3d.err
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=128
-#SBATCH --mem=1500G
+#SBATCH --mem=200G
 #SBATCH --time=2-00:30:00
 
 cd "$SLURM_SUBMIT_DIR"
@@ -91,7 +91,7 @@ $SG_RUN cargo clean
 echo "Building project inside container..."
 $SG_RUN cargo rustc --bin frequency_analysis_limits --release -- -Clink-arg=-lprotobuf
 
-padding=2
+padding=0
 
 # NAMES=("cali" "spitz")
 #DISTS=("uniform" "gaussian" "beta" "flat")
@@ -99,7 +99,7 @@ padding=2
 
 
  #NAMES=("shopparis" "highway" "busstop" "drink" "spitz" "cali")
- NAMES=("spitz")
+ # NAMES=("spitz")
  # DISTS=("uniform" "gaussian" "beta" "flat")
 #DATA_DIRS=(
 #     "$SLURM_SUBMIT_DIR/databases/20x20"
@@ -111,16 +111,16 @@ padding=2
 #     "$SLURM_SUBMIT_DIR/databases/50x50"
 # )
 
-#NAMES=("nh")
-#DISTS=("uniform" "gaussian" "beta")
-#DATA_DIRS=("$SLURM_SUBMIT_DIR/databases/16x16x14")
+NAMES=("nh")
+DISTS=("uniform" "gaussian" "beta")
+DATA_DIRS=("$SLURM_SUBMIT_DIR/databases/16x16x14")
 
 # Flat dist is very heavy. We only run for 2d 20x20 to 30x30.
-DISTS=("flat")
-DATA_DIRS=(
-     "$SLURM_SUBMIT_DIR/databases/20x20"
-     "$SLURM_SUBMIT_DIR/databases/25x25"
-     "$SLURM_SUBMIT_DIR/databases/30x30")
+#DISTS=("flat")
+#DATA_DIRS=(
+#     "$SLURM_SUBMIT_DIR/databases/20x20"
+#     "$SLURM_SUBMIT_DIR/databases/25x25"
+#     "$SLURM_SUBMIT_DIR/databases/30x30")
 
 # PROBS=("0.10" "0.15" "0.20" "0.25" "0.30")
 PROBS=("1.0")

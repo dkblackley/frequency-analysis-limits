@@ -247,7 +247,7 @@ fi
 
          # Determine initial 't' value based on distribution type
          if [ "$dist" == "uniform" ]; then
-             t_val=3
+             t_val=2
          else
              t_val=2
          fi

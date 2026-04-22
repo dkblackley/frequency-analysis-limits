@@ -54,7 +54,9 @@ impl Translator {
             // amount = largest_val.pow(i as u32);
             trunc_amount.push(safety_cap);
         }
-        trunc_amount
+        // trunc_amount
+
+        return vec![300, 4000, 8000];
     }
 
     pub fn get_var_index_map(&self) -> HashMap<IntVar, (i32, i64)> {
@@ -279,7 +281,7 @@ impl Translator {
                 .collect();
 
             valid_assignments.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
-            valid_assignments.truncate(*trunc_amount.get(t).unwrap_or(&4000) as usize);
+            valid_assignments.truncate(*trunc_amount.get(t).unwrap_or(&10000) as usize);
             let just_plaintexts: Vec<Vec<i64>> =
                 valid_assignments.iter().map(|(pt, _)| pt.clone()).collect();
 

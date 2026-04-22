@@ -38,10 +38,6 @@ pub struct Args {
     #[arg(long)]
     plot: bool,
 
-    // TODO: Maybe remove this? Or have it override eps, delta bounds/reverse engineer eps/delta
-    #[arg(long, default_value = "100.0")]
-    percent: f64,
-
     #[arg(long, default_value = "5")]
     dim: usize,
 
@@ -92,7 +88,10 @@ fn main() {
         let dir = &args.dir_path;
         let remin_path = format!("{dir}/{0}/remin", args.name,);
         let less_path = format!("{dir}/{0}/even_less", args.name,);
-        let unique_name = format!("{0}_prob{1}.0_{2}", args.name, args.percent, args.dist);
+        let unique_name = format!(
+            "{0}_prob{1}.0_{2}",
+            args.name, args.query_percent, args.dist
+        );
 
         export_to_geo_and_align(
             dir,

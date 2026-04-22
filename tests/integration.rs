@@ -503,14 +503,14 @@ fn end_to_end_sampled() {
         .build_global()
         .unwrap();
 
-    let rows_cols = 10;
+    let rows_cols = 8;
     let dim = 2;
 
     info!("Loading test DB ({}x{})", rows_cols, rows_cols);
     let loaded_db: Box<dyn Searchable + Sync> = Box::new(testDB::new(dim, rows_cols, 50));
 
-    let dist = "uniform";
-    let target_query_percentage = 0.15; // e.g., observe 5% of all possible queries
+    let dist = "gaussian";
+    let target_query_percentage = 0.2; // e.g., observe 20% of all possible queries
     let fixed_delta = 0.001; // 99.9% confidence that error <= epsilon
 
     // 1. Initialize a baseline selector to generate the distribution space
@@ -664,10 +664,24 @@ fn end_to_end_sampled() {
     // info!("--> Processing Recursive Case (t=3) sequentially across chunk models...");
     // translator.process_t_greater_than_1(3, &universe, &validate_candidate);
 
-    info!("5. Building and executing the CP-SAT Solver for the final constraint graph...");
-    let mut solver = Solver::new(translator.get_var_index_map());
-
+    let index_map = translator.get_var_index_map();
     let mut model = translator.get_proto_model();
+
+    // brute force instead!
+
+    // let mut model = PythonCpModel::new();
+    //
+    // info!("--> Brute force up to (t=3)");
+    // let (mut model, index_map) = Translator::process_t_brute_force(
+    //     3,
+    //     largest_enc_val,
+    //     &*universe.clone(),
+    //     model,
+    //     &validate_candidate,
+    // );
+
+    info!("5. Building and executing the CP-SAT Solver for the final constraint graph...");
+    let mut solver = Solver::new(index_map);
 
     // NOTE: The only change in the test is passing largest_enc_val here
     let responses = solver.solve(&mut model, largest_enc_val, false);
@@ -682,6 +696,35 @@ fn end_to_end_sampled() {
         error!("Solver Status: {:?}", solver.solution_stat);
         panic!("Solver did not return a full assignment.");
     }
+
+    let data = into_recon_data(&responses, &loaded_db);
+    let mut true_cords = Vec::new();
+    let mut recon_coords = Vec::new();
+    let mut true_done = false;
+
+    for item in data {
+        let mut current_recon = Vec::new();
+
+        for i in item {
+            if !true_done {
+                true_cords.push(i.true_points);
+            } else {
+                current_recon.push(i.reconstructed_points);
+            }
+        }
+        recon_coords.push(current_recon);
+        true_done = true;
+    }
+
+    plot_spatial_reconstruction_all_items(
+        &true_cords,
+        &recon_coords,
+        "figures/debug_sampled.svg",
+        true,
+        0.0,
+        0.0,
+    )
+    .expect("TODO: panic message");
 
     let mut correct = 0;
     let mut incorrect = 0;

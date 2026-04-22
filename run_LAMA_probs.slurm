@@ -93,7 +93,7 @@ $SG_RUN cargo rustc --bin frequency_analysis_limits --release -- -Clink-arg=-lpr
 
 padding=0
 
-NAMES=("cali" "spitz")
+NAMES=("spitz")
 #DISTS=("uniform" "gaussian" "beta" "flat")
 #DATA_DIRS=("$SLURM_SUBMIT_DIR/databases/350x50" "$SLURM_SUBMIT_DIR/databases/175x25")
 
@@ -118,9 +118,7 @@ NAMES=("cali" "spitz")
 
 DISTS=("uniform")
 DATA_DIRS=(
-     "$SLURM_SUBMIT_DIR/databases/20x20"
-     "$SLURM_SUBMIT_DIR/databases/25x25"
-     "$SLURM_SUBMIT_DIR/databases/30x30")
+     "$SLURM_SUBMIT_DIR/databases/25x25")
 
 PROBS=("0.3" "0.25" "0.20" "0.15")
 # PROBS=("1.0")
@@ -177,8 +175,8 @@ for data_dir in "${DATA_DIRS[@]}"; do
                 # Retry one more time with t=4
                 $SG_RUN ./target/release/frequency_analysis_limits \
                         --dir-path "$data_dir" \
-                        --name "$name" \
-                        --t 3 \
+                        --name "albert" \
+                        --t 2 \
                         --dist "$dist" \
                         --padding "$padding" \
                         --query-percent "$prob"

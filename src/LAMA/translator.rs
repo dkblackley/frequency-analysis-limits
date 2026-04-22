@@ -173,8 +173,9 @@ impl Translator {
             if !valid_plaintexts.is_empty() {
                 let var = *self.enc_id_to_intvar.get(&enc_id).unwrap();
 
-                valid_plaintexts.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
-                valid_plaintexts.truncate(self.trunc_amount[0] as usize);
+                // Don't truncate t=1!
+                // valid_plaintexts.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
+                // valid_plaintexts.truncate(self.trunc_amount[0] as usize);
                 let just_plaintexts: Vec<Vec<i64>> =
                     valid_plaintexts.iter().map(|(pt, _)| pt.clone()).collect();
                 constraint_count += valid_plaintexts.len();

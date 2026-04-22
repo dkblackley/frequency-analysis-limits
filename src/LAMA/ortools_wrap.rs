@@ -116,8 +116,6 @@ impl PythonCpModel {
 
         info!("Using python: {:?}", python_exe);
 
-        //let temp = "/home/yelnat/miniconda3/envs/main/bin/python";
-
         let output = Command::new(python_exe)
             .arg("src/LAMA/solver.py")
             .arg(self.num_vars.to_string())

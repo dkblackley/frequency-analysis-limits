@@ -2,6 +2,7 @@ use crate::dataloader::tester::testDB;
 use crate::dataloader::three_d::ThreeDMap;
 use crate::dataloader::two_d::TwoDMap;
 use crate::dataloader::{flatten_nd, unflatten_nd, Searchable};
+use crate::plotting::two_d::spatial_plot::plot_spatial_reconstruction_all_items;
 use crate::plotting::{DbResult, ReconstructionDataPoint};
 use crate::LAMA::error::LAMAError;
 use crate::LAMA::query::QueryDistribution;
@@ -108,7 +109,6 @@ pub fn lama_attack(
     let high_pair_ref = &high_pair;
     let low_pair_ref = &low_pair;
 
-    // 2. Expected (true) probability of proposed plaintexts
     let get_expected_prob = |plaintexts: &[i64]| -> f64 {
         let pt_records: Vec<Record> = plaintexts
             .iter()
@@ -126,6 +126,7 @@ pub fn lama_attack(
     let get_observed_prob: Box<dyn Sync + Send + Fn(&[i64]) -> f64>;
 
     if *query_percent != 1.0 {
+        // we're going to sample.
         let (observed_queries, responses, epsil) = selector.sample_percent_responses(
             *query_percent,
             delta,
@@ -196,9 +197,6 @@ pub fn lama_attack(
     let validate_candidate = |enc_tuple: &[i64], proposed_plaintexts: &[i64]| -> (bool, f64) {
         let obs_prob = get_observed_prob(enc_tuple);
         let exp_prob = get_expected_prob(proposed_plaintexts);
-        // if obs_prob == 0.0 && exp_prob != 0.0 {
-        //     warn!("There was a tuple that was never observed! LAMa cannot continue!");
-        // }
 
         (
             (obs_prob - exp_prob).abs() <= active_eps,
@@ -300,6 +298,35 @@ pub fn lama_attack(
     }
 
     info!("LAMA finished running on {db_name}");
+
+    let data = into_recon_data(&responses, &loaded_db);
+    let mut true_cords = Vec::new();
+    let mut recon_coords = Vec::new();
+    let mut true_done = false;
+
+    for item in data {
+        let mut current_recon = Vec::new();
+
+        for i in item {
+            if !true_done {
+                true_cords.push(i.true_points);
+            } else {
+                current_recon.push(i.reconstructed_points);
+            }
+        }
+        recon_coords.push(current_recon);
+        true_done = true;
+    }
+
+    plot_spatial_reconstruction_all_items(
+        &true_cords,
+        &recon_coords,
+        "figures/debug_last_run.svg",
+        true,
+        0.0,
+        0.0,
+    )
+    .expect("TODO: panic message");
 }
 fn save_results(result: DbResult, file_path: &str) -> Result<(), LAMAError> {
     // Create the file and wrap it in a BufWriter for better performance

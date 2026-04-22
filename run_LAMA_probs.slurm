@@ -115,7 +115,7 @@ NAMES=("cali" "spitz")
 #DISTS=("uniform" "gaussian" "beta")
 #DATA_DIRS=("$SLURM_SUBMIT_DIR/databases/16x16x14")
 
-# Flat dist is very heavy. We only run for 2d 20x20 to 30x30.
+
 DISTS=("uniform")
 DATA_DIRS=(
      "$SLURM_SUBMIT_DIR/databases/20x20"

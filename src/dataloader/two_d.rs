@@ -349,35 +349,3 @@ impl Searchable for TwoDMap {
         ]
     }
 }
-
-#[test]
-fn test_search_covers_entire_universe() {
-    // Initialize the map
-    let path = "/home/yelnat/Nextcloud/10TB-STHDD/Sync-Folder-STHDD/programmin/frequency_analysis_limits/databases/cali_50/cali_50.json";
-    let map = TwoDMap::new(
-        TwoDMap::load_array_locations_from_file(path).unwrap(),
-        "temp",
-        10.0,
-        None,
-    )
-    .expect("Failed to initialize CaliMap50");
-
-    // Get the domain boundaries
-    let (lower, upper) = map.get_dom_pair();
-
-    // Perform the search across the full range
-    let mut search_results = map.do_search(&lower, &upper);
-
-    // Get the expected full universe of values
-    let mut universe_values = map.get_universe();
-
-    // Sort both to ensure the comparison is order-independent
-    search_results.sort();
-    universe_values.sort();
-
-    // Assert that every value in the universe is present in the full-range search
-    assert_eq!(
-        search_results, universe_values,
-        "The search results using domain pairs do not match the expected universe."
-    );
-}

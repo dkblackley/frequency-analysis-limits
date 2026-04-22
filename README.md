@@ -15,6 +15,8 @@ To build and run this project, you must have the following development tools and
 
 - Rust & Cargo: Install the latest stable toolchain via rustup.
 
+- The coinor-libcbc-dev library
+
 ### Usage
 
 The primary executable is built to the ./target/release/ directory.

@@ -261,8 +261,7 @@ fn end_flat() {
     info!("--> Processing Recursive Case (t=2) sequentially across chunk models...");
     translator.process_t_greater_than_1(2, &universe, &validate_candidate);
 
-    info!("--> Processing Recursive Case (t=3) sequentially across chunk models...");
-    translator.process_t_greater_than_1(3, &universe, &validate_candidate);
+    // only have two records to t=2 is the max.
 
     info!("5. Building and executing the CP-SAT Solver for the final constraint graph...");
     let mut solver = Solver::new(translator.get_var_index_map());

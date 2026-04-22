@@ -118,7 +118,7 @@ NAMES=("spitz" "cali" "shopparis" "highway" "busstop" "drink")
 
 DISTS=("uniform" "gaussian" "beta")
 DATA_DIRS=(
-     "$SLURM_SUBMIT_DIR/databases/20x20")
+     "$SLURM_SUBMIT_DIR/databases/15x15")
 
 PROBS=("0.35" "0.25" "0.15")
 # PROBS=("1.0")

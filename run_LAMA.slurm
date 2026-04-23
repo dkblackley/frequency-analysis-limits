@@ -98,7 +98,7 @@ padding=2
 #DATA_DIRS=("$SLURM_SUBMIT_DIR/databases/350x50" "$SLURM_SUBMIT_DIR/databases/175x25")
 
 
-NAMES=("cali" "shopparis" "highway" "busstop" "drink" "spitz")
+NAMES=("shopparis" "highway" "busstop" "drink" "cali" "spitz" )
  # NAMES=("spitz")
  # DISTS=("uniform" "gaussian" "beta" "flat")
 #DATA_DIRS=(
@@ -116,7 +116,7 @@ NAMES=("cali" "shopparis" "highway" "busstop" "drink" "spitz")
 #DATA_DIRS=("$SLURM_SUBMIT_DIR/databases/16x16x14")
 
 # Flat dist is very heavy. We only run for 2d 20x20 to 30x30.
-DISTS=("flat")
+DISTS=("flat" "gaussian" "beta" "uniform")
 DATA_DIRS=(
      "$SLURM_SUBMIT_DIR/databases/15x15"
 )

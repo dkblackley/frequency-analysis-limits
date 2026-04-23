@@ -116,7 +116,7 @@ padding=0
 #DATA_DIRS=("$SLURM_SUBMIT_DIR/databases/16x16x14")
 
 
-DISTS=("uniform" "gaussian" "beta")
+DISTS=("gaussian" "beta" "uniform")
 DATA_DIRS=(
      "$SLURM_SUBMIT_DIR/databases/15x15")
 
@@ -246,7 +246,7 @@ fi
 
          # Determine initial 't' value based on distribution type
          if [ "$dist" == "uniform" ]; then
-             t_val=3
+             t_val=2
          else
              t_val=2
          fi

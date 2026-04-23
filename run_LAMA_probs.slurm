@@ -6,7 +6,7 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=64
-#SBATCH --mem=600G
+#SBATCH --mem=750G
 #SBATCH --time=2-00:30:00
 
 cd "$SLURM_SUBMIT_DIR"

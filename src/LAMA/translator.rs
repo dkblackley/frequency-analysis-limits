@@ -59,7 +59,7 @@ impl Translator {
         let mut amount = largest_val.clone();
         for i in 1..(max_t + 1) {
             // This may be too low for small databases
-            let safety_cap = (largest_val.clone() * 8) * (i as i64);
+            let safety_cap = (largest_val.clone() * 12) * (i as i64);
             // amount = largest_val.pow(i as u32);
             trunc_amount.push(safety_cap);
         }
@@ -292,8 +292,8 @@ impl Translator {
                 .map(|rec| *enc_id_to_intvar.get(rec).unwrap())
                 .collect();
 
-            // valid_assignments.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
-            // valid_assignments.truncate(*trunc_amount.get(t).unwrap_or(&10000) as usize);
+            valid_assignments.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
+            valid_assignments.truncate(*trunc_amount.get(t).unwrap_or(&10000) as usize);
             let just_plaintexts: Vec<Vec<i64>> =
                 valid_assignments.iter().map(|(pt, _)| pt.clone()).collect();
 
@@ -415,9 +415,9 @@ impl Translator {
                 .map(|rec| *self.enc_id_to_intvar.get(rec).unwrap())
                 .collect();
 
-            // let trunk_amount = *self.trunc_amount.get(t).unwrap_or(&4000) as usize;
-            // valid_assignments.par_sort_unstable_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
-            // valid_assignments.truncate(trunk_amount);
+            let trunk_amount = *self.trunc_amount.get(t).unwrap_or(&10000) as usize;
+            valid_assignments.par_sort_unstable_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
+            valid_assignments.truncate(trunk_amount);
             let just_plaintexts: Vec<Vec<i64>> =
                 valid_assignments.iter().map(|(pt, _)| pt.clone()).collect();
             constrain_count.fetch_add(just_plaintexts.len(), std::sync::atomic::Ordering::Relaxed);

@@ -98,7 +98,7 @@ padding=0
 #DATA_DIRS=("$SLURM_SUBMIT_DIR/databases/350x50" "$SLURM_SUBMIT_DIR/databases/175x25")
 
 
- NAMES=("shopparis" "highway" "busstop" "drink" "spitz" "cali")
+ NAMES=("shopparis" "highway" "busstop" "drink" "cali" "spitz")
  # DISTS=("uniform" "gaussian" "beta" "flat")
 # DISTS=("flat")
 #DATA_DIRS=(
@@ -118,7 +118,7 @@ padding=0
 
 DISTS=("gaussian" "beta" "uniform")
 DATA_DIRS=(
-     "$SLURM_SUBMIT_DIR/databases/50x50")
+     "$SLURM_SUBMIT_DIR/databases/15x15")
 
 PROBS=("0.35" "0.25" "0.15")
 # PROBS=("1.0")

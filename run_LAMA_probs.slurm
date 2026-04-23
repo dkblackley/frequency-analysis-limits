@@ -118,7 +118,7 @@ padding=0
 
 DISTS=("gaussian" "beta" "uniform")
 DATA_DIRS=(
-     "$SLURM_SUBMIT_DIR/databases/15x15")
+     "$SLURM_SUBMIT_DIR/databases/50x50")
 
 PROBS=("0.35" "0.25" "0.15")
 # PROBS=("1.0")

@@ -219,7 +219,7 @@ impl Translator {
 
                 let costs: Vec<i64> = valid_plaintexts
                     .iter()
-                    .map(|(_, prob)| (*prob * 1_000_000_000.0).round() as i64)
+                    .map(|(_, prob)| (*prob * 1_000_000.0).round() as i64)
                     .collect();
 
                 Self::add_allowed_assignments(
@@ -353,7 +353,7 @@ impl Translator {
 
             let costs: Vec<i64> = valid_assignments
                 .iter()
-                .map(|(_, prob)| (*prob * 1_000_000_000.0).round() as i64)
+                .map(|(_, prob)| (*prob * 1_000_000.0).round() as i64)
                 .collect();
 
             Self::add_allowed_assignments(
@@ -525,7 +525,7 @@ impl Translator {
 
             let costs: Vec<i64> = valid_assignments
                 .iter()
-                .map(|(_, prob)| (*prob * 1_000_000_000.0).round() as i64)
+                .map(|(_, prob)| (*prob * 1_000_000.0).round() as i64)
                 .collect();
 
             Self::add_allowed_assignments(
@@ -606,7 +606,7 @@ impl Translator {
                 if !is_valid {
                     panic!("Solver broken! Returned invalid assignment.");
                 }
-                costs.push((prob * 1_000_000_000.0).round() as i64);
+                costs.push((prob * 1_000_000.0).round() as i64);
             }
 
             // 3. Add to global model

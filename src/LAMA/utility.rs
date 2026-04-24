@@ -90,20 +90,49 @@ pub fn get_mbq(t_tup: &[Record]) -> DomPair {
     (minima, maxima)
 }
 
-pub fn find_valid_solution(responses: &HashMap<i64, Vec<i64>>, total_responses: &i32) -> i32 {
-    let valid_universe = (0..total_responses.clone()).find(|&i| {
-        responses
-            .iter()
-            .all(|(key, val)| val.get(i as usize) == Some(key))
-    });
+pub fn find_valid_solution(
+    responses: &HashMap<i64, Vec<i64>>,
+    total_responses: &i32,
+) -> (i32, usize) {
+    let mut best_universe = -1;
+    let mut max_matches = 0;
 
-    if let Some(universe_index) = valid_universe {
-        debug!("Found a consistent universe at index: {}", universe_index);
-        universe_index
+    // The maximum possible score is having a match for every key in the HashMap
+    let target_matches = responses.len();
+
+    for i in 0..*total_responses {
+        let mut current_matches = 0;
+
+        for (key, val) in responses.iter() {
+            if val.get(i as usize) == Some(key) {
+                current_matches += 1;
+            }
+        }
+
+        // Update our leaderboard if this universe scored higher
+        if current_matches > max_matches {
+            max_matches = current_matches;
+            best_universe = i;
+        }
+
+        // Early exit: if we hit a perfect match, no need to check the remaining universes
+        if max_matches == target_matches {
+            break;
+        }
+    }
+
+    if max_matches == target_matches && target_matches > 0 {
+        debug!("Found a consistent universe at index: {}", best_universe);
+    } else if best_universe != -1 {
+        debug!(
+            "No perfectly consistent universe found. Closest was index: {} with {} matches",
+            best_universe, max_matches
+        );
     } else {
         debug!("No consistent universe found.");
-        -1
     }
+
+    (best_universe, max_matches)
 }
 
 pub fn check_isomorphism(

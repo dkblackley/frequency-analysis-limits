@@ -69,7 +69,8 @@ impl Translator {
         let mut amount = largest_val.clone();
         for i in 1..(max_t + 1) {
             // This may be too low for small databases
-            let safety_cap = (largest_val.clone() * 25) * (i as i64);
+            // let safety_cap = (largest_val.clone() * 25) * (i as i64);
+            let safety_cap = 25;
             // amount = largest_val.pow(i as u32);
             trunc_amount.push(safety_cap);
         }
@@ -199,13 +200,16 @@ impl Translator {
                     valid_plaintexts.iter().map(|(pt, _)| pt.clone()).collect();
                 constraint_count += valid_plaintexts.len();
 
-                for plaint in &just_plaintexts {
-                    if !plaint.contains(&enc_id) && self.found_map.get(&enc_id).unwrap().0 {
+                for enc in &enc_tuple {
+                    let true_assignment_survived =
+                        just_plaintexts.iter().any(|plaint| plaint.contains(&enc));
+
+                    if !true_assignment_survived && self.found_map.get(&enc).unwrap().0 {
                         error!(
-                            "ERROR, the TRUE ASSIGNMENT GOT TRUNCATED! It's value was {} and error was: {}",
-                            enc_id,
-                            self.found_map.get(&enc_id).unwrap().1
-                        )
+                "ERROR, the TRUE ASSIGNMENT GOT TRUNCATED IN T=1! It's value was {} and error was: {}",
+                enc,
+                self.found_map.get(&enc).unwrap().1
+                );
                     }
                 }
 
@@ -336,7 +340,7 @@ impl Translator {
                 .collect();
 
             valid_assignments.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
-            //valid_assignments.truncate(*trunc_amount.get(t).unwrap_or(&10000) as usize);
+            valid_assignments.truncate(*trunc_amount.get(t).unwrap_or(&10000) as usize);
             let just_plaintexts: Vec<Vec<i64>> =
                 valid_assignments.iter().map(|(pt, _)| pt.clone()).collect();
 
@@ -476,9 +480,15 @@ impl Translator {
                 .map(|rec| *self.enc_id_to_intvar.get(rec).unwrap())
                 .collect();
 
-            let trunk_amount = *self.trunc_amount.get(t).unwrap_or(&10000) as usize;
+            let trunk_percent = *self.trunc_amount.get(t).unwrap_or(&10) as f64;
+
+            // 2. Calculate the number of items that percentage represents based on the current length.
+            let keep_count =
+                ((valid_assignments.len() as f64) * (trunk_percent / 100.0)).round() as usize;
+
+            // 3. Sort and truncate using the calculated count.
             valid_assignments.par_sort_unstable_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
-            //valid_assignments.truncate(trunk_amount);
+            valid_assignments.truncate(keep_count);
 
             let just_plaintexts: Vec<Vec<i64>> =
                 valid_assignments.iter().map(|(pt, _)| pt.clone()).collect();
@@ -487,11 +497,14 @@ impl Translator {
                 let true_assignment_survived =
                     just_plaintexts.iter().any(|plaint| plaint.contains(&enc));
 
-                if !true_assignment_survived && self.found_map.get(&enc).unwrap().0 {
+                let found_val = self.found_map.get(&enc).unwrap();
+
+                if !true_assignment_survived && found_val.0 {
                     error!(
-                "ERROR, the TRUE ASSIGNMENT GOT TRUNCATED! It's value was {} and error was: {}",
+                "ERROR, the TRUE ASSIGNMENT GOT TRUNCATED IN T={}! It's value was {} and error was: {}",
+                        t,
                 enc,
-                self.found_map.get(&enc).unwrap().1
+                found_val.1
                 );
                 }
             }

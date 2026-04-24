@@ -1,7 +1,7 @@
 use crate::LAMA::ortools_wrap::{IntVar, PythonCpModel, TableConstraint};
 use indicatif::{ProgressBar, ProgressStyle};
 use itertools::Itertools;
-use log::{debug, info, trace, warn};
+use log::{debug, error, info, trace, warn};
 use nalgebra::max;
 use rand::rngs::StdRng;
 use rand::seq::SliceRandom;
@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 use sha2::digest::typenum::Pow;
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::AtomicUsize;
+use std::sync::Mutex;
 
 #[derive(Default, Deserialize, Serialize, Debug, Clone)]
 pub struct TranslatorMeta {
@@ -21,13 +22,14 @@ pub struct TranslatorMeta {
 /// Translator: One Formula from All Matching Pairs.
 pub struct Translator {
     upper: i64,
-    enc_id_to_intvar: HashMap<i64, IntVar>,
-    var_index_map: HashMap<IntVar, (i32, i64)>,
+    pub enc_id_to_intvar: HashMap<i64, IntVar>,
+    pub var_index_map: HashMap<IntVar, (i32, i64)>,
     proto_model: PythonCpModel, // Replaced CpModelProto
     pub t_assignment_archive: HashMap<usize, HashMap<Vec<i64>, Vec<Vec<i64>>>>,
     pub prev_t_assignments: HashMap<i64, Vec<Vec<i64>>>,
     trunc_amount: Vec<i64>,
     pub metadata: TranslatorMeta,
+    found_map: HashMap<i64, (bool, f64)>,
 }
 
 impl Translator {
@@ -41,6 +43,12 @@ impl Translator {
             Self::set_all_vars(&mut cp_model, largest_val, encrypted_records);
         let trunc_amount = Self::get_trunc_amount(&largest_val, &max_t);
 
+        let mut debug = HashMap::new();
+
+        for (k, v) in &var_index_map {
+            debug.insert(v.1, (false, 0.0));
+        }
+
         Self {
             proto_model: cp_model,
             upper: largest_val,
@@ -50,6 +58,8 @@ impl Translator {
             prev_t_assignments: HashMap::new(),
             trunc_amount,
             metadata: TranslatorMeta::default(),
+
+            found_map: debug,
         }
     }
 
@@ -119,6 +129,12 @@ impl Translator {
         return (var_index_map, enc_id_to_intvar);
     }
 
+    fn reset_debug(&mut self) {
+        for (k, _) in self.found_map.clone() {
+            self.found_map.insert(k, (false, 0.0));
+        }
+    }
+
     fn add_allowed_assignments(
         model: &mut PythonCpModel,
         vars: &Vec<IntVar>,
@@ -166,19 +182,34 @@ impl Translator {
                 let pt_tuple = vec![pt];
                 let (valid, prob) = validate_candidate(&enc_tuple, &pt_tuple);
                 if valid {
+                    if pt_tuple == enc_tuple {
+                        self.found_map.insert(enc_id, (true, prob));
+                    }
                     valid_plaintexts.push((pt_tuple, prob));
                 }
             }
 
             if !valid_plaintexts.is_empty() {
-                let var = *self.enc_id_to_intvar.get(&enc_id).unwrap();
-
                 // Don't truncate t=1!
-                // valid_plaintexts.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
+
+                valid_plaintexts.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
                 // valid_plaintexts.truncate(self.trunc_amount[0] as usize);
+
                 let just_plaintexts: Vec<Vec<i64>> =
                     valid_plaintexts.iter().map(|(pt, _)| pt.clone()).collect();
                 constraint_count += valid_plaintexts.len();
+
+                for plaint in &just_plaintexts {
+                    if !plaint.contains(&enc_id) && self.found_map.get(&enc_id).unwrap().0 {
+                        error!(
+                            "ERROR, the TRUE ASSIGNMENT GOT TRUNCATED! It's value was {} and error was: {}",
+                            enc_id,
+                            self.found_map.get(&enc_id).unwrap().1
+                        )
+                    }
+                }
+
+                let var = *self.enc_id_to_intvar.get(&enc_id).unwrap();
 
                 // Exactly matches your logic: modifying global proto_model
                 Self::add_allowed_assignments(
@@ -203,6 +234,9 @@ impl Translator {
         info!("Added {} assignments in round t=1", constraint_count);
         self.metadata.constraints_per_t.insert(1, constraint_count);
         self.metadata.recons_per_t.insert(1, constraint_count);
+
+        self.do_debug();
+        self.reset_debug();
     }
 
     fn genereate_direct_mapping(
@@ -221,6 +255,15 @@ impl Translator {
             }
         }
         direct_map
+    }
+
+    fn do_debug(&self) {
+        debug!("About to debug translator");
+        for (k, v) in &self.found_map {
+            if !v.0 {
+                error!("ERROR!! {:?} was NOT FOUND! If it has been tuncated then other debug will not complain!!", k);
+            }
+        }
     }
 
     /// Pure brute-force n-choose-t evaluation.
@@ -293,7 +336,7 @@ impl Translator {
                 .collect();
 
             valid_assignments.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
-            // valid_assignments.truncate(*trunc_amount.get(t).unwrap_or(&10000) as usize);
+            //valid_assignments.truncate(*trunc_amount.get(t).unwrap_or(&10000) as usize);
             let just_plaintexts: Vec<Vec<i64>> =
                 valid_assignments.iter().map(|(pt, _)| pt.clone()).collect();
 
@@ -340,6 +383,8 @@ impl Translator {
             t = random_key.len();
         }
 
+        let temp_found = Mutex::new(Vec::new());
+
         let table_constraints: Vec<(Vec<i64>, Vec<(Vec<i64>, f64)>)> = t_minus_1_assignments
             .clone()
             .par_iter()
@@ -348,8 +393,6 @@ impl Translator {
                 pb.inc(1);
 
                 for (&single_var, single_assigns) in single_assignments.iter() {
-                    // FIX 1: Enforce strictly ascending order to prevent [B, A] permutations.
-                    // This replaces your `contains` check.
                     if let Some(&last_val) = t_minus_1_tuple.last() {
                         if single_var <= last_val {
                             continue;
@@ -376,6 +419,20 @@ impl Translator {
                             let (valid, prob) = validate_candidate(&t_tuple, &candidate);
 
                             if valid {
+                                let mut all_vali = true;
+                                for enc in &t_tuple {
+                                    if !candidate.contains(&enc) {
+                                        all_vali = false;
+                                        break;
+                                    }
+                                }
+
+                                if all_vali {
+                                    for enc in &t_tuple {
+                                        temp_found.lock().unwrap().push((*enc, (true, prob)));
+                                    }
+                                }
+
                                 mini_constrain_count.fetch_add(
                                     candidate.len(),
                                     std::sync::atomic::Ordering::Relaxed,
@@ -393,6 +450,10 @@ impl Translator {
                 local_constraints
             })
             .collect();
+
+        for (key, val) in temp_found.into_inner().unwrap() {
+            self.found_map.insert(key, val);
+        }
 
         if table_constraints.is_empty() {
             return None;
@@ -417,9 +478,24 @@ impl Translator {
 
             let trunk_amount = *self.trunc_amount.get(t).unwrap_or(&10000) as usize;
             valid_assignments.par_sort_unstable_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
-            //  valid_assignments.truncate(trunk_amount);
+            valid_assignments.truncate(trunk_amount);
+
             let just_plaintexts: Vec<Vec<i64>> =
                 valid_assignments.iter().map(|(pt, _)| pt.clone()).collect();
+
+            for enc in &enc_t_tuple {
+                let true_assignment_survived =
+                    just_plaintexts.iter().any(|plaint| plaint.contains(&enc));
+
+                if !true_assignment_survived && self.found_map.get(&enc).unwrap().0 {
+                    error!(
+                "ERROR, the TRUE ASSIGNMENT GOT TRUNCATED! It's value was {} and error was: {}",
+                enc,
+                self.found_map.get(&enc).unwrap().1
+                );
+                }
+            }
+
             constrain_count.fetch_add(just_plaintexts.len(), std::sync::atomic::Ordering::Relaxed);
             // Pushing constraints into LOCAL mini model
             Self::add_allowed_assignments(
@@ -520,6 +596,10 @@ impl Translator {
             t + 1,
             constrain_count.load(std::sync::atomic::Ordering::Relaxed),
         );
+
+        self.do_debug();
+        self.reset_debug();
+
         Some(updated_t_cache)
     }
 

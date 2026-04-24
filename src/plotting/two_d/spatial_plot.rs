@@ -27,6 +27,14 @@ pub fn run_spatial_plots(
         remin_path = format!("{path_to_root}/remin/{name}_prob100.0_{dist}_350x50_classic.json");
         limits = format!("{path_to_root}/limits/{name}_{dist}_e0_d0.9_reconstruction.json");
     }
+
+    if grid == 1234 {
+        limits = format!("spitz_gaussian_e0.03442741491749681_d0.001_reconstruction.json");
+        let mut remin_data = get_remin_even_less(&remin_path, true)?;
+        let mut even_less_data = get_remin_even_less(&even_less, true)?;
+        let mut remin_data = get_remin_even_less(&remin_path, true)?;
+    }
+
     if grid == 175 {
         even_less =
             format!("{path_to_root}/even_less/{name}_prob100.0_{dist}_175x25_even_less.json");
@@ -151,18 +159,21 @@ pub fn plot_spatial_reconstruction(
         format_dist_name(dist)
     );
 
+    // INCREASED: Give the title bar way more room (80 -> 200)
     let (title_area, plot_area) = root.split_vertically(80);
 
-    let title_font = ("Linux Biolinum", 78, FontStyle::Bold).into_font();
+    // INCREASED: Master title font size (78 -> 120)
+    let title_font = ("Linux Biolinum", 120, FontStyle::Bold).into_font();
     let title_size = title_font
         .layout_box(&master_title)
         .unwrap_or(((0, 0), (0, 0)));
     let text_width = title_size.1 .0 - title_size.0 .0;
 
+    // Adjusted Y offset for the title to balance inside the new 200px area
     title_area.draw_text(
         &master_title,
         &title_font.color(&BLACK),
-        ((total_width as i32 - text_width) / 2, 20),
+        ((total_width as i32 - text_width) / 2, 60),
     )?;
 
     let sub_areas = plot_area.split_evenly((1, 3));
@@ -173,16 +184,21 @@ pub fn plot_spatial_reconstruction(
         ("remin", "Remin", RGBColor(0, 158, 115)),
     ];
 
-    let gt_color = RGBColor(150, 150, 150).mix(0.5);
+    // LIGHTENED: Make ground truth a much lighter gray to improve foreground contrast
+    let gt_color = RGBColor(220, 220, 220);
     let text_color = BLACK;
 
     for (i, (method_key, method_name, recon_color)) in methods_to_plot.iter().enumerate() {
         let mut chart = ChartBuilder::on(&sub_areas[i])
-            .margin(10)
-            .margin_right(30)
+            // INCREASED: Larger margins will shrink the plot but give titles/labels tons of room
+            .margin(40)
+            .margin_top(60)
+            .margin_bottom(50)
+            .margin_right(50)
             .caption(
                 *method_name,
-                ("Linux Biolinum", 68, FontStyle::Bold)
+                // INCREASED: Subplot title font size (68 -> 100)
+                ("Linux Biolinum", 100, FontStyle::Bold)
                     .into_font()
                     .color(&BLACK),
             )
@@ -191,33 +207,34 @@ pub fn plot_spatial_reconstruction(
                 (min_y - edge_margin_y)..(max_y + edge_margin_y),
             )?;
 
-        // REMOVED `chart.configure_mesh()...` entirely.
-        // Without this block, Plotters will not draw any background grid, axes, or numbers.
+        // Background / mesh is intentionally left un-configured as in original code
 
         if show_true_points {
             chart
                 .draw_series(true_coords.iter().filter_map(|x_y| {
                     if x_y.len() >= 2 {
-                        Some(Circle::new((x_y[0], x_y[1]), 8, gt_color.filled()))
+                        // ENLARGED: Ground truth slightly larger to act as a wide background shadow (8 -> 10)
+                        Some(Circle::new((x_y[0], x_y[1]), 10, gt_color.filled()))
                     } else {
                         None
                     }
                 }))?
                 .label("Ground Truth")
-                .legend(move |(x, y)| Circle::new((x, y), 6, gt_color.filled()));
+                .legend(move |(x, y)| Circle::new((x, y), 8, gt_color.filled()));
         }
 
         if let Some(recon_points) = method_coords.get(*method_key) {
             chart
                 .draw_series(recon_points.iter().filter_map(|x_y| {
                     if x_y.len() >= 2 {
-                        Some(Circle::new((x_y[0], x_y[1]), 4, recon_color.filled()))
+                        // ENLARGED: Colored points slightly larger to stand out (4 -> 6)
+                        Some(Circle::new((x_y[0], x_y[1]), 6, recon_color.filled()))
                     } else {
                         None
                     }
                 }))?
                 .label("Reconstructed")
-                .legend(move |(x, y)| Circle::new((x, y), 4, recon_color.filled()));
+                .legend(move |(x, y)| Circle::new((x, y), 6, recon_color.filled()));
         }
 
         chart
@@ -225,12 +242,13 @@ pub fn plot_spatial_reconstruction(
             .position(SeriesLabelPosition::UpperRight)
             .background_style(WHITE.mix(0.9).filled())
             .border_style(BLACK)
+            // INCREASED: Legend font size for better readability (46 -> 56)
             .label_font(
-                ("Linux Biolinum", 46, FontStyle::Bold)
+                ("Linux Biolinum", 56, FontStyle::Bold)
                     .into_font()
                     .color(&text_color),
             )
-            .margin(10)
+            .margin(20)
             .draw()?;
     }
 

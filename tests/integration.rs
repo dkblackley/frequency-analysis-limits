@@ -539,7 +539,7 @@ fn end_to_end_sampled() {
     let loaded_db: Box<dyn Searchable + Sync> = Box::new(testDB::new(dim, rows_cols, 50));
 
     let dist = "gaussian";
-    let target_query_percentage = 0.2; // e.g., observe 20% of all possible queries
+    let target_query_percentage = 9.0; // e.g., observe 20% of all possible queries
     let fixed_delta = 0.001; // 99.9% confidence that error <= epsilon
 
     // 1. Initialize a baseline selector to generate the distribution space

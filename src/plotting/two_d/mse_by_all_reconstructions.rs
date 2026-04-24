@@ -1,8 +1,10 @@
 use crate::plotting::post::{calculate_mse, procrustes_align};
+use crate::plotting::two_d::spatial_plot::plot_spatial_reconstruction_all_items;
 use crate::plotting::two_d::{format_db_name, format_dist_name};
 use crate::plotting::ReconstructionDataPoint;
+use crate::LAMA::into_recon_data;
 use indicatif::ParallelProgressIterator;
-use itertools::iproduct;
+use itertools::{all, iproduct};
 use log::debug;
 use plotters::prelude::*;
 use plotters::style::FontStyle;
@@ -19,10 +21,6 @@ pub fn plot_histograms_of_all_reconstructions(
 ) -> Result<(), Box<dyn Error>> {
     let grid = format!("{}x{}", domain.0, domain.1);
     let path_to_root = format!("databases/{grid}/{name}");
-
-    // let shift_step = 5.0;
-    // let scale_step = 5.0;
-    // let rotate = 45.0;
 
     let shift_step = 1.0;
     let scale_step = 1.0;
@@ -58,6 +56,7 @@ pub fn plot_histograms_of_all_reconstructions(
     );
 
     let path = format!("{path_to_root}/limits/{name}_{dist}_e0_d0.9_reconstruction.json");
+    let path = format!("/home/yelnat/Nextcloud/10TB-STHDD/Sync-Folder-STHDD/programmin/frequency_analysis_limits/databases/20x20/spitz/limits/spitz_gaussian_e0.03442741491749681_d0.001_reconstruction.json");
     debug!("About to load data from {}", &path);
     let content = fs::read_to_string(&path)?;
     let all_data: Vec<Vec<ReconstructionDataPoint>> = serde_json::from_str(&content)?;
@@ -357,7 +356,7 @@ pub fn plot_mse_frequency_histogram_split(
 ) -> Result<(), Box<dyn Error>> {
     let num_plots = mse_data.len().max(1);
 
-    let root = SVGBackend::new(output_path, (800 * num_plots as u32, 600)).into_drawing_area();
+    let root = SVGBackend::new(output_path, (600 * num_plots as u32, 400)).into_drawing_area();
     root.fill(&WHITE)?;
 
     if mse_data.is_empty() {
@@ -365,17 +364,17 @@ pub fn plot_mse_frequency_histogram_split(
     }
 
     // 1. Vertical Split for Super Title
-    let (title_area, plot_area) = root.split_vertically(10);
+    let (title_area, plot_area) = root.split_vertically(0);
 
     let text_color = BLACK;
     let font_family = "Linux Biolinum";
-    let super_title_font = (font_family, 76, FontStyle::Bold)
+    let super_title_font = (font_family, 46, FontStyle::Bold)
         .into_font()
         .color(&text_color);
 
     ChartBuilder::on(&title_area)
         .caption(
-            format!("{} - {} Distribution", database_name, dist_name),
+            format!("{} - {} Dist.", database_name, dist_name),
             super_title_font,
         )
         .build_cartesian_2d(0f32..1f32, 0f32..1f32)?;
@@ -383,11 +382,11 @@ pub fn plot_mse_frequency_histogram_split(
     let num_bins = 8;
 
     // Typography
-    let label_font = (font_family, 66).into_font().color(&text_color);
-    let axis_font = (font_family, 56, FontStyle::Bold)
+    let label_font = (font_family, 42).into_font().color(&text_color);
+    let axis_font = (font_family, 46, FontStyle::Bold)
         .into_font()
         .color(&text_color);
-    let title_font = (font_family, 72, FontStyle::Bold)
+    let title_font = (font_family, 46, FontStyle::Bold)
         .into_font()
         .color(&text_color);
 
@@ -457,16 +456,16 @@ pub fn plot_mse_frequency_histogram_split(
         let max_y = ((local_max_freq as f64 * 1.1).ceil() as usize).max(1);
 
         // Expanded label area to fix Y-axis overlap
-        let y_label_area = if *method == "LAMa" { 90 } else { 140 };
+        let y_label_area = if *method == "LAMa" { 90 } else { 120 };
 
         // Render Chart
         let mut chart = ChartBuilder::on(panel)
-            .margin_top(70)
+            .margin_top(50)
             .margin_bottom(0)
-            .margin_left(50)
-            .margin_right(50)
+            .margin_left(80)
+            .margin_right(45)
             .caption(*method, title_font.clone())
-            .x_label_area_size(110)
+            .x_label_area_size(90)
             .y_label_area_size(y_label_area)
             // THE FIX: Fake the X-axis domain to be perfectly 0.0 to 8.0
             // Plotters will effortlessly align ticks to exactly 0, 1, 2, etc.
@@ -475,10 +474,10 @@ pub fn plot_mse_frequency_histogram_split(
         chart
             .configure_mesh()
             .disable_x_mesh()
-            .x_labels(num_bins)
+            .x_labels(5)
             .y_labels(6)
-            .y_desc("Number of Solutions")
-            .x_desc("Mean Squared Error (MSE)")
+            .y_desc("# of Solutions")
+            .x_desc("MSE")
             .x_label_formatter(&|x| {
                 // THE FIX: Reverse the 0.0-8.0 normalization to display the true MSE scale
                 let real_x = min_mse + (*x * bin_width);

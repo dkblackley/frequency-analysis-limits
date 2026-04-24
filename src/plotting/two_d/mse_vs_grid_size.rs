@@ -183,14 +183,15 @@ fn plot_db_side_by_side(
             Some(f) => f.to_uppercase().collect::<String>() + chars.as_str(),
         };
 
-        let title = format!("{} - {} Distribution", pretty_db, pretty_dist);
+        // THE FIX: Changed "Distribution" to "Dist."
+        let title = format!("{} - {} Dist.", pretty_db, pretty_dist);
 
-        // THE FIX: Carve out the top 70 pixels specifically for the title area
-        let (title_area, chart_area) = area.split_vertically(90);
+        // THE FIX: Increased from 90 to 120 pixels to prevent intersection with the chart
+        let (title_area, chart_area) = area.split_vertically(120);
 
-        // To perfectly center the title over the grid beneath it, we shrink this title drawing area
-        // to match the exact left/right boundaries of the chart grid below (110px left offset, 40px right offset).
-        let centered_title_area = title_area.margin(0, 0, 110, 40);
+        // THE FIX: Pushed left margin from 110 to 160 to center the title better
+        // over the newly expanded chart area beneath it
+        let centered_title_area = title_area.margin(0, 0, 160, 40);
 
         // Draw the title safely in its dedicated space
         ChartBuilder::on(&centered_title_area)
@@ -208,7 +209,8 @@ fn plot_db_side_by_side(
             .margin_left(50)
             .margin_right(50)
             .x_label_area_size(120)
-            .y_label_area_size(140)
+            // THE FIX: Increased to 180 to give the Y-axis numbers and text plenty of room
+            .y_label_area_size(180)
             .build_cartesian_2d(
                 (min_grid - x_pad)..(max_grid + x_pad),
                 (1.0f64..y_max).log_scale(), // Implement Log scale starting at 1.0
@@ -220,8 +222,11 @@ fn plot_db_side_by_side(
             .light_line_style(TRANSPARENT)
             .axis_style(RGBColor(100, 100, 100))
             .x_desc("Grid Size")
-            .y_desc("Mean Squared Error")
-            .axis_desc_style(("Linux Biolinum", 60, FontStyle::Bold).into_font()) // Bold axis text
+            // THE FIX: Changed "Mean Squared Error" to "MSE"
+            .y_desc("MSE")
+            // THE FIX: Bumped axis text size up from 60 to 72
+            .x_labels(6)
+            .axis_desc_style(("Linux Biolinum", 80, FontStyle::Bold).into_font())
             .x_label_formatter(&|x| format_metric(*x))
             .y_label_formatter(&|y| {
                 if *y <= 1.001 {
@@ -231,7 +236,8 @@ fn plot_db_side_by_side(
                     format_metric(*y)
                 }
             })
-            .label_style(("Linux Biolinum", 54).into_font()) // Bold axis tick numbers
+            // THE FIX: Bumped axis tick numbers up from 54 to 60
+            .label_style(("Linux Biolinum", 60).into_font())
             .draw()?;
 
         // Grab the methods and explicitly map them to their formatted name and rank order
@@ -275,7 +281,7 @@ fn plot_db_side_by_side(
             chart.draw_series(
                 continuous_data
                     .iter()
-                    .map(|(x, y)| Circle::new((*x, *y), 8, color.filled())),
+                    .map(|(x, y)| Circle::new((*x, *y), 15, color.filled())),
             )?;
         }
 

@@ -84,6 +84,7 @@ fn load_limits_method(path: &str) -> Result<Vec<Vec<ReconstructionDataPoint>>, B
 }
 
 pub fn do_plotting() {
+    plot_histograms_of_all_reconstructions("spitz", (50, 50), (60, 60), "uniform").unwrap();
     // Hardcoded vectors for easy modification
     // let grid_sizes = vec![(20, "20x20"), (25, "25x25"), (50, "50x50")];
     // let grid_sizes = vec![(25, "25x25"), (50, "50x50")];

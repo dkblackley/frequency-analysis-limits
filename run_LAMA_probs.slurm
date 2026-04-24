@@ -1,8 +1,8 @@
 #!/bin/bash -l
-#SBATCH --job-name=LAMA_probs_notrunc
+#SBATCH --job-name=LAMA_prob
 #SBATCH --partition=bigmem
-#SBATCH --output=prob_LAMAnot.out
-#SBATCH --error=prob_LAMAnot.err
+#SBATCH --output=prob_LAMA.out
+#SBATCH --error=prob_LAMA.err
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=64

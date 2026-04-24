@@ -24,8 +24,9 @@ pub struct PythonCpModel {
 
 #[derive(Clone, Debug)]
 pub struct TableConstraint {
-    pub vars: Vec<usize>,      // The indices of the variables
-    pub values: Vec<Vec<i64>>, // The allowed assignments
+    pub vars: Vec<usize>,
+    pub values: Vec<Vec<i64>>,
+    pub costs: Vec<i64>, // NEW FIELD
 }
 
 #[derive(Serialize)]
@@ -81,17 +82,17 @@ impl PythonCpModel {
         let mut binary_data: Vec<i64> = Vec::new();
         let mut metadata = Vec::new();
 
-        // Pack the mixed t=1, t=2, t=n constraints into the binary format
         for tc in &self.table_constraints {
             let start_idx = binary_data.len();
-            for tuple in &tc.values {
+            for (idx, tuple) in tc.values.iter().enumerate() {
                 binary_data.extend_from_slice(tuple);
+                binary_data.push(tc.costs[idx]); // Add cost immediately after the tuple plaintexts
             }
             metadata.push(ConstraintMeta {
                 var_ids: tc.vars.clone(),
                 start_idx,
-                length: tc.values.len() * tc.vars.len(),
-                tuple_size: tc.vars.len(),
+                length: tc.values.len() * (tc.vars.len() + 1), // Account for cost element
+                tuple_size: tc.vars.len() + 1,                 // Account for cost element
             });
         }
 
@@ -167,6 +168,7 @@ mod tests {
         model.table_constraints.push(TableConstraint {
             vars: vec![0, 1, 2],
             values: vec![vec![0, 1, 2], vec![2, 1, 0]],
+            costs: vec![0, 0],
         });
 
         // Run Python: largest_val = 2, get_one = false
@@ -195,10 +197,12 @@ mod tests {
         model.table_constraints.push(TableConstraint {
             vars: vec![0], // var_0 MUST be 5
             values: vec![vec![5]],
+            costs: vec![0],
         });
         model.table_constraints.push(TableConstraint {
             vars: vec![1], // var_1 MUST be 6
             values: vec![vec![6]],
+            costs: vec![0],
         });
 
         // t=2 constraints: The "obvious" links
@@ -208,6 +212,7 @@ mod tests {
                 vec![5, 9], // Valid because var_0 is 5
                 vec![4, 8], // Invalid: var_0 cannot be 4 based on t=1
             ],
+            costs: vec![0, 0],
         });
 
         model.table_constraints.push(TableConstraint {
@@ -216,6 +221,7 @@ mod tests {
                 vec![6, 2], // Valid because var_1 is 6
                 vec![7, 3], // Invalid: var_1 cannot be 7 based on t=1
             ],
+            costs: vec![0, 0],
         });
 
         // Run Python: largest_val = 10, get_one = false

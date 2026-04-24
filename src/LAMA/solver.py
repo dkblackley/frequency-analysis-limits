@@ -18,13 +18,8 @@ class SolutionCollector(cp_model.CpSolverSolutionCallback):
 
 def main():
     current_user = os.getenv('USER', os.getenv('USERNAME', ''))
+    proj_root = "/home/yelnat/Nextcloud/10TB-STHDD/Sync-Folder-STHDD/programmin/frequency_analysis_limits/" if current_user == 'yelnat' else "/scratch/dblackle/frequency-analysis-limits/"
 
-    if current_user == 'yelnat':
-        # Local machine path
-        proj_root = "/home/yelnat/Nextcloud/10TB-STHDD/Sync-Folder-STHDD/programmin/frequency_analysis_limits/"
-    else:
-        # External server path (fallback)
-        proj_root = "/scratch/dblackle/frequency-analysis-limits/"
     num_variables = int(sys.argv[1])
     largest_val = int(sys.argv[2])
     get_one = sys.argv[3].lower() == "true"
@@ -37,55 +32,77 @@ def main():
     model = cp_model.CpModel()
     variables = [model.NewIntVar(0, largest_val, f"var_{i}") for i in range(num_variables)]
 
-    # Apply all accumulated constraints (t=1, t=2, etc.)
+    objective_terms = []
+
+    # Apply all accumulated constraints
     for meta in metadata:
         var_ids = meta["var_ids"]
         start = meta["start_idx"]
         length = meta["length"]
+        # Tuple size is now var_ids.len() + 1 (the last item is the cost)
         tuple_size = meta["tuple_size"]
 
         slice_data = flat_data[start: start + length]
-        allowed_tuples = slice_data.reshape(-1, tuple_size)
+        allowed_tuples_with_costs = slice_data.reshape(-1, tuple_size)
 
         constraint_vars = [variables[i] for i in var_ids]
-        model.AddAllowedAssignments(constraint_vars, allowed_tuples.tolist())
+
+        # Create a boolean variable for every possible tuple in this constraint block
+        tuple_bools = [model.NewBoolVar(f"tuple_{start}_{i}") for i in range(len(allowed_tuples_with_costs))]
+
+        # We MUST pick exactly ONE valid tuple from this block
+        model.AddExactlyOne(tuple_bools)
+
+        for i, row in enumerate(allowed_tuples_with_costs):
+            t_val = row[:-1]  # The variable assignments
+            cost = int(row[-1])  # The cost we passed from Rust
+
+            # Enforce the assignment ONLY IF this boolean is chosen by the solver
+            for var, val in zip(constraint_vars, t_val):
+                model.Add(var == int(val)).OnlyEnforceIf(tuple_bools[i])
+
+            # Accumulate the cost
+            if cost != 0:
+                objective_terms.append(tuple_bools[i] * cost)
 
     model.AddAllDifferent(variables)
 
-    solver = cp_model.CpSolver()
+    # ---------------------------------------------------------
+    # PASS 1: Minimize the total cost to find the optimal score
+    # ---------------------------------------------------------
+    if objective_terms:
+        model.Minimize(sum(objective_terms))
 
+    solver = cp_model.CpSolver()
     solver.parameters.num_search_workers = 128
-    solver.parameters.stop_after_first_solution = True
 
     status = solver.Solve(model)
 
     if status in (cp_model.OPTIMAL, cp_model.FEASIBLE):
-        print(f"At least one solution found. Status: {status}")
-    else:
-        print("Could not find a single solution...")
-        sys.exit(1)
+        print(f"Optimal solution found with cost: {solver.ObjectiveValue()}")
 
-    solver.parameters.stop_after_first_solution = False
-    solver.parameters.num_search_workers = 0
-
-    solver.parameters.enumerate_all_solutions = True
-    solver.parameters.keep_all_feasible_solutions_in_presolve = True
-
-    collector = SolutionCollector(variables)
-    status = solver.Solve(model, collector)
-
-    if status in (cp_model.OPTIMAL, cp_model.FEASIBLE) or len(collector.solutions) > 0:
-        # If get_one is true, return just the primary solution wrapped in an array
-        print(f"Solution found. Status: {status}")
-        if get_one and len(collector.solutions) == 0:
+        if get_one:
             single_sol = [[solver.Value(v) for v in variables]]
             with open("solutions.json", "w") as f:
                 json.dump(single_sol, f)
         else:
+            solver.parameters.num_search_workers = 0
+            # ---------------------------------------------------------
+            # PASS 2: Enumerate all solutions that match the best cost
+            # ---------------------------------------------------------
+            if objective_terms:
+                best_cost = int(solver.ObjectiveValue())
+                model.ClearObjective()  # <-- The new, official API method
+                model.Add(sum(objective_terms) == best_cost)  # Lock in the best score
+
+            solver.parameters.enumerate_all_solutions = True
+            collector = SolutionCollector(variables)
+            status = solver.Solve(model, collector)
+
             with open("solutions.json", "w") as f:
                 json.dump(collector.solutions, f)
     else:
-        print(f"No solution found. Status: {status}")
+        print("Could not find a single solution...")
         sys.exit(1)
 
 

@@ -1,5 +1,6 @@
 use crate::{Coord, DomPair, Record};
 use itertools::Itertools;
+use log::{debug, info};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::str::FromStr;
@@ -87,6 +88,22 @@ pub fn get_mbq(t_tup: &[Record]) -> DomPair {
         }
     }
     (minima, maxima)
+}
+
+pub fn find_valid_solution(responses: &HashMap<i64, Vec<i64>>, total_responses: &i32) -> i32 {
+    let valid_universe = (0..total_responses.clone()).find(|&i| {
+        responses
+            .iter()
+            .all(|(key, val)| val.get(i as usize) == Some(key))
+    });
+
+    if let Some(universe_index) = valid_universe {
+        debug!("Found a consistent universe at index: {}", universe_index);
+        universe_index
+    } else {
+        debug!("No consistent universe found.");
+        -1
+    }
 }
 
 pub fn check_isomorphism(

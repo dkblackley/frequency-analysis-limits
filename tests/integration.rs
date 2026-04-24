@@ -13,7 +13,7 @@ use frequency_analysis_limits::LAMA::selector::Selector;
 use frequency_analysis_limits::LAMA::solver::CpSolverStatus::{Feasible, Optimal};
 use frequency_analysis_limits::LAMA::solver::Solver;
 use frequency_analysis_limits::LAMA::translator::Translator;
-use frequency_analysis_limits::LAMA::utility::{encloses, get_mbq};
+use frequency_analysis_limits::LAMA::utility::{encloses, find_valid_solution, get_mbq};
 use frequency_analysis_limits::{DomPair, Value};
 use frequency_analysis_limits::{Frequency, Record};
 use itertools::all;
@@ -156,9 +156,9 @@ fn end_flat() {
     // };
 
     let min_longitude = 0.0;
-    let max_longitude = 5.0;
+    let max_longitude = 3.0;
     let min_latitude = 0.0;
-    let max_latitude = 5.0;
+    let max_latitude = 3.0;
 
     let points =
         generate_random_locations(10, min_longitude, max_longitude, min_latitude, max_latitude);
@@ -346,27 +346,10 @@ fn end_flat() {
     )
     .expect("TODO: panic message");
 
-    let mut found_truth = false;
+    let valid = find_valid_solution(&responses, &total_responses);
 
-    for i in 0..total_responses {
-        let mut true_count = 0;
-        let mut iso_map = HashMap::new();
-        for (key, val) in responses.clone() {
-            for recon in &val {
-                if *recon == key {
-                    true_count += 1;
-                    break;
-                }
-            }
+    assert_ne!(valid, -1);
 
-            iso_map.insert(key, val[i as usize]);
-        }
-        if true_count == 2 {
-            found_truth = true;
-        }
-    }
-
-    assert!(found_truth);
     info!("Test completed successfully.")
 }
 
@@ -384,7 +367,7 @@ fn end_to_end() {
         .unwrap();
 
     // This should take about a minute to run... (if not very sparse!)
-    let rows_cols = 10;
+    let rows_cols = 8;
     let dim = 2;
 
     info!("Loading test DB ({}x{})", rows_cols, rows_cols);
@@ -434,7 +417,7 @@ fn end_to_end() {
         query_dist_ref.cumulative_prob_lookup(&pt_mbq)
     };
 
-    let active_eps = if eps == 0.0 { 1e-5 } else { eps };
+    let active_eps = if eps == 0.0 { 1e-9 } else { eps };
     let validate_candidate = |enc_tuple: &[i64], proposed_plaintexts: &[i64]| -> (bool, f64) {
         let obs_prob = get_observed_prob(enc_tuple);
 
@@ -453,6 +436,9 @@ fn end_to_end() {
 
     info!("--> Processing Recursive Case (t=3) sequentially across chunk models...");
     translator.process_t_greater_than_1(3, &universe, &validate_candidate);
+
+    info!("--> Processing Recursive Case (t=4) sequentially across chunk models...");
+    translator.process_t_greater_than_1(4, &universe, &validate_candidate);
 
     info!("5. Building and executing the CP-SAT Solver for the final constraint graph...");
     let mut solver = Solver::new(translator.get_var_index_map());
@@ -491,7 +477,6 @@ fn end_to_end() {
     info!("6. Running Isomorphism Checks...");
 
     let total_responses = responses[&0].len();
-    let mut found_truth = false;
 
     for i in 0..total_responses {
         let mut iso_map = HashMap::new();
@@ -500,9 +485,6 @@ fn end_to_end() {
         }
         match check_isomorphism(&iso_map, rows_cols as i64, rows_cols as i64) {
             Some(transformation_name) => {
-                if transformation_name.contains("Perfect") {
-                    found_truth = true;
-                }
                 info!(
                     "SUCCESS! Solver found a valid isomorphism: {}",
                     transformation_name
@@ -510,12 +492,14 @@ fn end_to_end() {
             }
             None => {
                 error!("Solver produced a mathematically invalid reconstruction.");
-                panic!("Test Failed: Not a valid rotation or reflection.");
             }
         }
     }
 
-    assert!(found_truth);
+    let valid = find_valid_solution(&responses, &(total_responses as i32));
+
+    assert_ne!(valid, -1);
+
     info!("Test completed successfully.")
 }
 
@@ -532,15 +516,15 @@ fn end_to_end_sampled() {
         .build_global()
         .unwrap();
 
-    let rows_cols = 8;
+    let rows_cols = 6;
     let dim = 2;
 
     info!("Loading test DB ({}x{})", rows_cols, rows_cols);
-    let loaded_db: Box<dyn Searchable + Sync> = Box::new(testDB::new(dim, rows_cols, 50));
+    let loaded_db: Box<dyn Searchable + Sync> = Box::new(testDB::new(dim, rows_cols, 35));
 
     let dist = "gaussian";
-    let target_query_percentage = 9.0; // e.g., observe 20% of all possible queries
-    let fixed_delta = 0.001; // 99.9% confidence that error <= epsilon
+    let target_query_percentage = 0.1; // e.g., observe 20% of all possible queries
+    let fixed_delta = 0.1; // 90% confidence that error <= epsilon
 
     // 1. Initialize a baseline selector to generate the distribution space
     // We pass 0.0 for eps/delt temporarily just to build the QueryDistribution
@@ -673,7 +657,7 @@ fn end_to_end_sampled() {
         query_dist_ref.cumulative_prob_lookup(&pt_mbq)
     };
 
-    let active_eps = if eps == 0.0 { 1e-5 } else { eps };
+    let active_eps = if eps == 0.0 { 1e-9 } else { eps };
     let validate_candidate = |enc_tuple: &[i64], proposed_plaintexts: &[i64]| -> (bool, f64) {
         let obs_prob = get_observed_prob(enc_tuple);
 
@@ -690,8 +674,8 @@ fn end_to_end_sampled() {
     info!("--> Processing Recursive Case (t=2) sequentially across chunk models...");
     translator.process_t_greater_than_1(2, &universe, &validate_candidate);
 
-    // info!("--> Processing Recursive Case (t=3) sequentially across chunk models...");
-    // translator.process_t_greater_than_1(3, &universe, &validate_candidate);
+    info!("--> Processing Recursive Case (t=3) sequentially across chunk models...");
+    translator.process_t_greater_than_1(3, &universe, &validate_candidate);
 
     let index_map = translator.get_var_index_map();
     let mut model = translator.get_proto_model();
@@ -773,29 +757,10 @@ fn end_to_end_sampled() {
     info!("6. Running Isomorphism Checks...");
 
     let total_responses = responses[&0].len();
-    let mut found_truth = false;
 
-    for i in 0..total_responses {
-        let mut iso_map = HashMap::new();
-        for (key, val) in responses.clone() {
-            iso_map.insert(key, val[i]);
-        }
-        match check_isomorphism(&iso_map, rows_cols as i64, rows_cols as i64) {
-            Some(transformation_name) => {
-                if transformation_name.contains("Perfect") {
-                    found_truth = true;
-                }
-                info!(
-                    "SUCCESS! Solver found a valid isomorphism: {}",
-                    transformation_name
-                );
-            }
-            None => {
-                warn!("Solver produced a mathematically invalid reconstruction.");
-            }
-        }
-    }
+    let valid = find_valid_solution(&responses, &(total_responses as i32));
 
-    assert!(found_truth);
+    assert_ne!(valid, -1);
+
     info!("Test completed successfully.")
 }

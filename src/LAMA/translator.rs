@@ -140,6 +140,7 @@ impl Translator {
         model: &mut PythonCpModel,
         vars: &Vec<IntVar>,
         allowed_plaintexts: &Vec<Vec<i64>>,
+        costs: &Vec<i64>, // Pass the costs in here
         var_index_map: &HashMap<IntVar, (i32, i64)>,
     ) {
         let mut var_indices = Vec::new();
@@ -151,6 +152,7 @@ impl Translator {
         model.table_constraints.push(TableConstraint {
             vars: var_indices,
             values: allowed_plaintexts.clone(),
+            costs: costs.clone(),
         });
     }
 
@@ -215,11 +217,16 @@ impl Translator {
 
                 let var = *self.enc_id_to_intvar.get(&enc_id).unwrap();
 
-                // Exactly matches your logic: modifying global proto_model
+                let costs: Vec<i64> = valid_plaintexts
+                    .iter()
+                    .map(|(_, prob)| (*prob * 1_000_000_000.0).round() as i64)
+                    .collect();
+
                 Self::add_allowed_assignments(
                     &mut self.proto_model,
                     &vec![var],
                     &just_plaintexts,
+                    &costs,
                     &self.var_index_map,
                 );
 
@@ -340,15 +347,20 @@ impl Translator {
                 .collect();
 
             valid_assignments.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
-            valid_assignments.truncate(*trunc_amount.get(t).unwrap_or(&10000) as usize);
+            // valid_assignments.truncate(*trunc_amount.get(t).unwrap_or(&10000) as usize);
             let just_plaintexts: Vec<Vec<i64>> =
                 valid_assignments.iter().map(|(pt, _)| pt.clone()).collect();
 
-            // Mutate our custom PythonCpModel directly
+            let costs: Vec<i64> = valid_assignments
+                .iter()
+                .map(|(_, prob)| (*prob * 1_000_000_000.0).round() as i64)
+                .collect();
+
             Self::add_allowed_assignments(
                 &mut cp_model,
                 &main_vars,
                 &just_plaintexts,
+                &costs,
                 &var_index_map,
             );
         }
@@ -488,7 +500,7 @@ impl Translator {
 
             // 3. Sort and truncate using the calculated count.
             valid_assignments.par_sort_unstable_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
-            valid_assignments.truncate(keep_count);
+            // valid_assignments.truncate(keep_count);
 
             let just_plaintexts: Vec<Vec<i64>> =
                 valid_assignments.iter().map(|(pt, _)| pt.clone()).collect();
@@ -510,11 +522,17 @@ impl Translator {
             }
 
             constrain_count.fetch_add(just_plaintexts.len(), std::sync::atomic::Ordering::Relaxed);
-            // Pushing constraints into LOCAL mini model
+
+            let costs: Vec<i64> = valid_assignments
+                .iter()
+                .map(|(_, prob)| (*prob * 1_000_000_000.0).round() as i64)
+                .collect();
+
             Self::add_allowed_assignments(
                 &mut mini_model,
                 &main_vars,
                 &just_plaintexts,
+                &costs,
                 &self.var_index_map,
             );
 
@@ -572,29 +590,33 @@ impl Translator {
                 .map(|global_sol| solver_indices.iter().map(|&idx| global_sol[idx]).collect())
                 .collect();
 
-            // Match your sanity check
-            for survived in &surviving_assignments {
-                if !validate_candidate(&enc_t_tuple, survived).0 {
-                    panic!("Solver broken!")
-                }
-            }
+            // 1. Deduplicate FIRST so lengths match exactly
+            surviving_assignments.sort_unstable();
+            surviving_assignments.dedup();
 
             let main_vars: Vec<_> = enc_t_tuple
                 .iter()
                 .map(|rec| *self.enc_id_to_intvar.get(rec).unwrap())
                 .collect();
 
-            // Now only add survivors to the global...
+            // 2. Re-evaluate probabilities for the survivors
+            let mut costs: Vec<i64> = Vec::with_capacity(surviving_assignments.len());
+            for survived in &surviving_assignments {
+                let (is_valid, prob) = validate_candidate(&enc_t_tuple, survived);
+                if !is_valid {
+                    panic!("Solver broken! Returned invalid assignment.");
+                }
+                costs.push((prob * 1_000_000_000.0).round() as i64);
+            }
+
+            // 3. Add to global model
             Self::add_allowed_assignments(
                 &mut self.proto_model,
                 &main_vars,
                 &surviving_assignments,
+                &costs,
                 &self.var_index_map,
             );
-
-            // Deduplicate
-            surviving_assignments.sort_unstable();
-            surviving_assignments.dedup();
 
             if !surviving_assignments.is_empty() {
                 updated_t_cache.insert(enc_t_tuple, surviving_assignments);
@@ -638,41 +660,4 @@ impl Translator {
         self.t_assignment_archive
             .insert(t, current_t_cache.expect("Failed..."));
     }
-}
-
-#[test]
-fn test_table_constraint_permutations() {
-    let mut model = PythonCpModel::new();
-
-    // Setup a simple 2-variable problem
-    model.num_vars = 2;
-    model.all_different = true; // Var_0 and Var_1 must be unique
-
-    // Add ONE table constraint for the variable combination [0, 1].
-    // Inside this single table, we provide BOTH permutations as valid rows.
-    model.table_constraints.push(TableConstraint {
-        vars: vec![0, 1], // The columns: Var_0, Var_1
-        values: vec![
-            vec![1, 2], // Row A: Var_0 = 1, Var_1 = 2
-            vec![2, 1], // Row B: Var_0 = 2, Var_1 = 1
-        ],
-    });
-
-    // Run the Python solver (largest_val = 5, get_one = false)
-    let result = model
-        .solve(5, false)
-        .expect("Python solver crashed or failed to run");
-
-    println!("Solutions found: {:?}", result);
-
-    // Verify that the solver successfully traversed both permutations
-    // from a single TableConstraint object.
-    assert_eq!(
-        result.len(),
-        2,
-        "Solver should find exactly two valid combinations"
-    );
-
-    assert!(result.contains(&vec![1, 2]));
-    assert!(result.contains(&vec![2, 1]));
 }

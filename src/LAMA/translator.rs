@@ -478,7 +478,7 @@ impl Translator {
 
             let trunk_amount = *self.trunc_amount.get(t).unwrap_or(&10000) as usize;
             valid_assignments.par_sort_unstable_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
-            valid_assignments.truncate(trunk_amount);
+            //valid_assignments.truncate(trunk_amount);
 
             let just_plaintexts: Vec<Vec<i64>> =
                 valid_assignments.iter().map(|(pt, _)| pt.clone()).collect();

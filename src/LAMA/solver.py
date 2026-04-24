@@ -39,7 +39,6 @@ def main():
         var_ids = meta["var_ids"]
         start = meta["start_idx"]
         length = meta["length"]
-        # Tuple size is now var_ids.len() + 1 (the last item is the cost)
         tuple_size = meta["tuple_size"]
 
         slice_data = flat_data[start: start + length]
@@ -47,23 +46,25 @@ def main():
 
         constraint_vars = [variables[i] for i in var_ids]
 
-        # Create a boolean variable for every possible tuple in this constraint block
-        tuple_bools = [model.NewBoolVar(f"tuple_{start}_{i}") for i in range(len(allowed_tuples_with_costs))]
+        # 1. Find the min and max cost in this block to bound our cost variable
+        costs = allowed_tuples_with_costs[:, -1]
+        min_cost = int(np.min(costs))
+        max_cost = int(np.max(costs))
 
-        # We MUST pick exactly ONE valid tuple from this block
-        model.AddExactlyOne(tuple_bools)
+        # 2. Create a single variable to hold the cost for this specific constraint block
+        block_cost_var = model.NewIntVar(min_cost, max_cost, f"cost_{start}")
 
-        for i, row in enumerate(allowed_tuples_with_costs):
-            t_val = row[:-1]  # The variable assignments
-            cost = int(row[-1])  # The cost we passed from Rust
+        # 3. Append the cost variable to our list of constrained variables
+        block_vars = constraint_vars + [block_cost_var]
 
-            # Enforce the assignment ONLY IF this boolean is chosen by the solver
-            for var, val in zip(constraint_vars, t_val):
-                model.Add(var == int(val)).OnlyEnforceIf(tuple_bools[i])
+        # 4. Convert numpy array to native python list of lists (required by OR-Tools)
+        tuples_as_lists = allowed_tuples_with_costs.tolist()
 
-            # Accumulate the cost
-            if cost != 0:
-                objective_terms.append(tuple_bools[i] * cost)
+        # 5. Let the C++ backend handle the heavy lifting
+        model.AddAllowedAssignments(block_vars, tuples_as_lists)
+
+        # Accumulate the cost variable for the objective
+        objective_terms.append(block_cost_var)
 
     model.AddAllDifferent(variables)
 

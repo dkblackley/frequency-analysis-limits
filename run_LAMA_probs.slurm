@@ -1,8 +1,8 @@
 #!/bin/bash -l
-#SBATCH --job-name=LAMA_probs
+#SBATCH --job-name=LAMA_probs_trunc
 #SBATCH --partition=bigmem
-#SBATCH --output=prob_LAMA.out
-#SBATCH --error=prob_LAMA.err
+#SBATCH --output=prob_LAMAt.out
+#SBATCH --error=prob_LAMAt.err
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=64
@@ -116,7 +116,7 @@ padding=0
 #DATA_DIRS=("$SLURM_SUBMIT_DIR/databases/16x16x14")
 
 
-DISTS=("gaussian" "beta" "uniform")
+DISTS=("uniform" "gaussian" "beta" )
 DATA_DIRS=(
      "$SLURM_SUBMIT_DIR/databases/15x15")
 

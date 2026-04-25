@@ -63,17 +63,17 @@ def main():
     get_one = sys.argv[3].lower() == "true"
     probabilistic = sys.argv[4].lower() == "true"
 
-    # NEW: A flag to run purely in debugging/verification mode
-    verify_only = len(sys.argv) > 5 and sys.argv[5].lower() == "true"
+    run_id = sys.argv[5]
 
-    with open(f"{proj_root}meta.json", "r") as f:
+    with open(f"{proj_root}meta_{run_id}.json", "r") as f:
         metadata = json.load(f)
 
-    flat_data = np.fromfile(f"{proj_root}allowed.bin", dtype=np.int64)
+    flat_data = np.fromfile(f"{proj_root}allowed_{run_id}.bin", dtype=np.int64)
 
+    true_solution_path = f"true_solution_{run_id}.json"
     true_solution = None
-    if os.path.exists("true_solution.json"):
-        with open("true_solution.json", "r") as f:
+    if os.path.exists(true_solution_path):
+        with open(true_solution_path, "r") as f:
             true_solution = json.load(f)
 
     # ---------------------------------------------------------
@@ -129,7 +129,7 @@ def main():
         print("True solution was NOT found in the noise (cut off by limits). Injecting it.", flush=True)
         clean_solutions.append(true_solution)
 
-    with open("solutions.json", "w") as f:
+    with open(f"solutions_{run_id}.json", "w") as f:
         json.dump(clean_solutions, f)
 
     sys.exit(0)

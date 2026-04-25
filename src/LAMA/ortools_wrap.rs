@@ -22,6 +22,7 @@ pub struct PythonCpModel {
     pub num_vars: usize,
     pub all_different: bool,
     pub table_constraints: Vec<TableConstraint>,
+    run_id: String,
 }
 
 #[derive(Clone, Debug)]
@@ -41,7 +42,17 @@ pub struct ConstraintMeta {
 
 impl PythonCpModel {
     pub fn new() -> Self {
-        Self::default()
+        // Generate a unique ID using the system clock (no extra crates needed)
+        let id = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+            .to_string();
+
+        Self {
+            run_id: id,
+            ..Default::default()
+        }
     }
 
     fn write_model_files(&self) {
@@ -137,8 +148,8 @@ impl PythonCpModel {
             true_assignment[*idx as usize] = *val;
         }
 
-        let true_sol_file =
-            File::create("true_solution.json").expect("Failed to create true solution file");
+        let filename = format!("true_solution_{}.json", self.run_id);
+        let true_sol_file = File::create(&filename).expect("Failed to create true solution file");
         serde_json::to_writer(true_sol_file, &true_assignment)
             .expect("Failed to write true solution data");
     }
@@ -162,7 +173,11 @@ impl PythonCpModel {
             });
         }
 
-        let mut bin_file = File::create("allowed.bin").expect("Failed to create bin file");
+        let bin_name = format!("allowed_{}.bin", self.run_id);
+        let meta_name = format!("meta_{}.json", self.run_id);
+        let sol_name = format!("solutions_{}.json", self.run_id);
+
+        let mut bin_file = File::create(&bin_name).expect("Failed to create bin file");
         let byte_slice = unsafe {
             std::slice::from_raw_parts(
                 binary_data.as_ptr() as *const u8,
@@ -173,7 +188,7 @@ impl PythonCpModel {
             .write_all(byte_slice)
             .expect("Failed to write binary data");
 
-        let meta_file = File::create("meta.json").expect("Failed to create meta file");
+        let meta_file = File::create(&meta_name).expect("Failed to create meta file");
         serde_json::to_writer(meta_file, &metadata).expect("Failed to write metadata");
 
         drop(bin_file);
@@ -192,6 +207,7 @@ impl PythonCpModel {
             //.arg(get_one.to_string())
             .arg(get_one.to_string())
             .arg(true.to_string())
+            .arg(&self.run_id)
             // 2. Pipe the streams instead of inheriting them
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -244,9 +260,10 @@ impl PythonCpModel {
             std::fs::read_to_string("solutions.json").unwrap_or_else(|_| "[]".to_string());
         let all_solutions: Vec<Vec<i64>> = serde_json::from_str(&sol_str).unwrap_or_default();
 
-        std::fs::remove_file("allowed.bin").ok();
-        std::fs::remove_file("meta.json").ok();
-        std::fs::remove_file("solutions.json").ok();
+        std::fs::remove_file(&bin_name).ok();
+        std::fs::remove_file(&meta_name).ok();
+        std::fs::remove_file(&sol_name).ok();
+        std::fs::remove_file(format!("true_solution_{}.json", self.run_id)).ok(); // Clean up true solution too
 
         if all_solutions.is_empty() {
             None

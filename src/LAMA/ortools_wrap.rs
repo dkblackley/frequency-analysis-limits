@@ -256,8 +256,7 @@ impl PythonCpModel {
         //     return None;
         // }
 
-        let sol_str =
-            std::fs::read_to_string("solutions.json").unwrap_or_else(|_| "[]".to_string());
+        let sol_str = std::fs::read_to_string(&sol_name).unwrap_or_else(|_| "[]".to_string());
         let all_solutions: Vec<Vec<i64>> = serde_json::from_str(&sol_str).unwrap_or_default();
 
         std::fs::remove_file(&bin_name).ok();

@@ -516,15 +516,15 @@ fn end_to_end_sampled() {
         .build_global()
         .unwrap();
 
-    let rows_cols = 6;
+    let rows_cols = 4;
     let dim = 2;
 
     info!("Loading test DB ({}x{})", rows_cols, rows_cols);
     let loaded_db: Box<dyn Searchable + Sync> = Box::new(testDB::new(dim, rows_cols, 50));
 
-    let dist = "uniform";
-    let target_query_percentage = 0.15; // e.g., observe 10% of all possible queries
-    let fixed_delta = 0.99; // 90% confidence that error <= epsilon
+    let dist = "gaussian";
+    let target_query_percentage = 0.5; // e.g., observe 10% of all possible queries
+    let fixed_delta = 0.3; // 90% confidence that error <= epsilon
 
     // 1. Initialize a baseline selector to generate the distribution space
     // We pass 0.0 for eps/delt temporarily just to build the QueryDistribution
@@ -625,8 +625,8 @@ fn end_to_end_sampled() {
     info!("--> Processing Recursive Case (t=2) sequentially across chunk models...");
     translator.process_t_greater_than_1(2, &universe, &validate_candidate);
 
-    // info!("--> Processing Recursive Case (t=3) sequentially across chunk models...");
-    // translator.process_t_greater_than_1(3, &universe, &validate_candidate);
+    info!("--> Processing Recursive Case (t=3) sequentially across chunk models...");
+    translator.process_t_greater_than_1(3, &universe, &validate_candidate);
 
     let index_map = translator.get_var_index_map();
     let mut model = translator.get_proto_model();

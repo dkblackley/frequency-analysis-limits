@@ -7,7 +7,9 @@ use std::env;
 use std::env::var;
 use std::fs::File;
 use std::io::Write;
-use std::process::Command;
+use std::io::{BufRead, BufReader};
+use std::process::{Command, Stdio};
+use std::thread;
 
 /// A mock for the original cp_sat IntVar
 #[derive(Hash, Eq, PartialEq, Clone, Copy, Debug)]
@@ -117,24 +119,61 @@ impl PythonCpModel {
 
         info!("Using python: {:?}", python_exe);
 
-        let output = Command::new(python_exe)
+        let mut child = Command::new(python_exe)
+            // 1. Force Python to flush output immediately
+            .env("PYTHONUNBUFFERED", "1")
             .arg("src/LAMA/solver.py")
             .arg(self.num_vars.to_string())
             .arg(largest_val.to_string())
-            .arg(get_one.to_string())
-            .output()
+            //.arg(get_one.to_string())
+            .arg(false.to_string())
+            // 2. Pipe the streams instead of inheriting them
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            // 3. Spawn the process instead of waiting for output()
+            .spawn()
             .expect("Failed to execute python solver");
 
-        if !output.status.success() {
-            // Print exactly what Python is complaining about
-            eprintln!("Python failed with status: {}", output.status);
-            eprintln!("Python stderr: {}", String::from_utf8_lossy(&output.stderr));
-            eprintln!("Python stdout: {}", String::from_utf8_lossy(&output.stdout));
-            std::fs::remove_file("allowed.bin").ok();
-            std::fs::remove_file("meta.json").ok();
-            std::fs::remove_file("solutions.json").ok();
-            return None;
-        }
+        // Extract the handles so we can read from them
+        let stdout = child.stdout.take().expect("Failed to grab stdout");
+        let stderr = child.stderr.take().expect("Failed to grab stderr");
+
+        // Spawn a thread to read stdout in real-time
+        let stdout_thread = thread::spawn(move || {
+            let reader = BufReader::new(stdout);
+            for line in reader.lines() {
+                if let Ok(line) = line {
+                    debug!("Python stdout: {}", line);
+                }
+            }
+        });
+
+        // Spawn a thread to read stderr in real-time
+        let stderr_thread = thread::spawn(move || {
+            let reader = BufReader::new(stderr);
+            for line in reader.lines() {
+                if let Ok(line) = line {
+                    debug!("Python stderr: {}", line);
+                }
+            }
+        });
+
+        // Wait for the python process to completely finish
+        let status = child.wait().expect("Failed to wait on child");
+
+        // Ensure all output has been processed before moving on
+        stdout_thread.join().expect("Stdout thread panicked");
+        stderr_thread.join().expect("Stderr thread panicked");
+
+        debug!("Python solver finished with: {}", status);
+
+        // if !output.status.success() {
+        //     debug!("Python failed with status: {}", output.status);
+        //     std::fs::remove_file("allowed.bin").ok();
+        //     std::fs::remove_file("meta.json").ok();
+        //     std::fs::remove_file("solutions.json").ok();
+        //     return None;
+        // }
 
         let sol_str =
             std::fs::read_to_string("solutions.json").unwrap_or_else(|_| "[]".to_string());

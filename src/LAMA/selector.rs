@@ -358,30 +358,17 @@ impl<'a> Selector<'a> {
         // 3. Calculate Empirical VC Dimension (Fixing Issue A)
         let responses = self.get_responses_from_queries(observed_queries.clone());
         // let emp_vc_dim = self.get_emp_vc_sukp_bound(responses.clone(), all_possible_responses);
-        let emp_vc_dim = 100.0;
 
         // A simple bound as per corollary 2
         let vc_dim =
             Selector::simple_bound_corollary2(&responses, &self.encrypted_db.get_universe());
 
-        let eps_empr = Selector::calculate_epsilon_emp_vc(
-            emp_vc_dim, // Pass the EVC
-            num_queries_to_observe,
-            delta,
-        );
-
         let eps_reg = Selector::calculate_epsilon_real_vc(vc_dim, num_queries_to_observe, delta);
 
-        let eps = eps_reg.min(eps_empr);
+        let eps = eps_reg;
 
-        info!(
-            "VC Dimension: {}, Empirical VC Dimension: {}",
-            vc_dim, emp_vc_dim
-        );
-        info!(
-            "Empirical Epsilon Bound: {}, Regular Epsilon Bound: {}",
-            eps_empr, eps_reg
-        );
+        info!("VC Dimension: {}", vc_dim);
+        info!("Epsilon Bound: {}", eps_reg);
         info!("---------------------------");
 
         info!("Using {} for epsilon", eps);

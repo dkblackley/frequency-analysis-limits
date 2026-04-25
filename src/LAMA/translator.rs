@@ -67,10 +67,11 @@ impl Translator {
         let mut trunc_amount = Vec::new();
 
         let mut amount = largest_val.clone();
-        for i in 1..(max_t + 1) {
+        trunc_amount.push(100);
+        for i in 2..(max_t + 1) {
             // This may be too low for small databases
             // let safety_cap = (largest_val.clone() * 25) * (i as i64);
-            let safety_cap = 25;
+            let safety_cap = 90;
             // amount = largest_val.pow(i as u32);
             trunc_amount.push(safety_cap);
         }
@@ -222,6 +223,9 @@ impl Translator {
                     .map(|(_, prob)| (*prob * 1_000_000.0).round() as i64)
                     .collect();
 
+                valid_plaintexts.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
+                // let costs: Vec<i64> = (0..valid_plaintexts.len() as i64).collect();
+
                 Self::add_allowed_assignments(
                     &mut self.proto_model,
                     &vec![var],
@@ -340,21 +344,32 @@ impl Translator {
             .collect();
 
         // 4. Append all surviving valid permutations into the model state
-        for (enc_t_tuple, mut valid_assignments) in t_table_constraints {
+        for (enc_t_tuple, mut valid_plaintexts) in t_table_constraints {
             let main_vars: Vec<_> = enc_t_tuple
                 .iter()
                 .map(|rec| *enc_id_to_intvar.get(rec).unwrap())
                 .collect();
 
-            valid_assignments.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
-            // valid_assignments.truncate(*trunc_amount.get(t).unwrap_or(&10000) as usize);
-            let just_plaintexts: Vec<Vec<i64>> =
-                valid_assignments.iter().map(|(pt, _)| pt.clone()).collect();
+            let trunk_percent = *trunc_amount.get(t).unwrap_or(&10) as f64;
 
-            let costs: Vec<i64> = valid_assignments
+            // 2. Calculate the number of items that percentage represents based on the current length.
+            let keep_count =
+                ((valid_plaintexts.len() as f64) * (trunk_percent / 100.0)).round() as usize;
+
+            // 3. Sort and truncate using the calculated count.
+            valid_plaintexts.par_sort_unstable_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
+            //valid_assignments.truncate(keep_count);
+
+            let just_plaintexts: Vec<Vec<i64>> =
+                valid_plaintexts.iter().map(|(pt, _)| pt.clone()).collect();
+
+            let costs: Vec<i64> = valid_plaintexts
                 .iter()
                 .map(|(_, prob)| (*prob * 1_000_000.0).round() as i64)
                 .collect();
+
+            valid_plaintexts.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
+            // let costs: Vec<i64> = (0..valid_plaintexts.len() as i64).collect();
 
             Self::add_allowed_assignments(
                 &mut cp_model,
@@ -486,7 +501,7 @@ impl Translator {
             mini_constrain_count.load(std::sync::atomic::Ordering::Relaxed)
         );
 
-        for (enc_t_tuple, mut valid_assignments) in table_constraints.clone() {
+        for (enc_t_tuple, mut valid_plaintexts) in table_constraints.clone() {
             let main_vars: Vec<_> = enc_t_tuple
                 .iter()
                 .map(|rec| *self.enc_id_to_intvar.get(rec).unwrap())
@@ -496,14 +511,14 @@ impl Translator {
 
             // 2. Calculate the number of items that percentage represents based on the current length.
             let keep_count =
-                ((valid_assignments.len() as f64) * (trunk_percent / 100.0)).round() as usize;
+                ((valid_plaintexts.len() as f64) * (trunk_percent / 100.0)).round() as usize;
 
             // 3. Sort and truncate using the calculated count.
-            valid_assignments.par_sort_unstable_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
-            // valid_assignments.truncate(keep_count);
+            valid_plaintexts.par_sort_unstable_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
+            // valid_plaintexts.truncate(keep_count);
 
             let just_plaintexts: Vec<Vec<i64>> =
-                valid_assignments.iter().map(|(pt, _)| pt.clone()).collect();
+                valid_plaintexts.iter().map(|(pt, _)| pt.clone()).collect();
 
             for enc in &enc_t_tuple {
                 let true_assignment_survived =
@@ -523,10 +538,13 @@ impl Translator {
 
             constrain_count.fetch_add(just_plaintexts.len(), std::sync::atomic::Ordering::Relaxed);
 
-            let costs: Vec<i64> = valid_assignments
+            let costs: Vec<i64> = valid_plaintexts
                 .iter()
                 .map(|(_, prob)| (*prob * 1_000_000.0).round() as i64)
                 .collect();
+
+            valid_plaintexts.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
+            // let costs: Vec<i64> = (0..valid_plaintexts.len() as i64).collect();
 
             Self::add_allowed_assignments(
                 &mut mini_model,
@@ -536,7 +554,7 @@ impl Translator {
                 &self.var_index_map,
             );
 
-            current_t_cache.insert(enc_t_tuple, valid_assignments);
+            current_t_cache.insert(enc_t_tuple, valid_plaintexts);
         }
 
         // ------------------------------------------------------------------------
@@ -607,6 +625,8 @@ impl Translator {
                     panic!("Solver broken! Returned invalid assignment.");
                 }
                 costs.push((prob * 1_000_000.0).round() as i64);
+                // valid_plaintexts.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
+                // let costs: Vec<i64> = (0..valid_plaintexts.len() as i64).collect();
             }
 
             // 3. Add to global model

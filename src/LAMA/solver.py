@@ -7,13 +7,29 @@ from ortools.sat.python import cp_model
 
 
 class SolutionCollector(cp_model.CpSolverSolutionCallback):
-    def __init__(self, variables):
+    # Add objective_terms to the init
+    def __init__(self, variables, objective_terms, limit=100):
         cp_model.CpSolverSolutionCallback.__init__(self)
+        self.limit = limit
+        self.num_solutions = 0
         self.variables = variables
+        self.objective_terms = objective_terms
         self.solutions = []
 
     def OnSolutionCallback(self):
-        self.solutions.append([self.Value(v) for v in self.variables])
+        self.num_solutions += 1
+
+        # Calculate the actual cost of this specific solution
+        current_cost = sum(self.Value(term) for term in self.objective_terms)
+
+        # Store a dictionary so you know the cost associated with the variables
+        self.solutions.append({
+            "cost": current_cost,
+            "variables": [self.Value(v) for v in self.variables]
+        })
+
+        if self.num_solutions >= self.limit:
+            self.StopSearch()
 
 
 def main():
@@ -75,33 +91,78 @@ def main():
         model.Minimize(sum(objective_terms))
 
     solver = cp_model.CpSolver()
-    solver.parameters.num_search_workers = 128
+    solver.parameters.num_search_workers = 10
+    # solver.parameters.log_search_progress = True
+    solver.parameters.linearization_level = 2
+    solver.parameters.optimize_with_core = True
 
     status = solver.Solve(model)
 
     if status in (cp_model.OPTIMAL, cp_model.FEASIBLE):
         print(f"Optimal solution found with cost: {solver.ObjectiveValue()}")
 
+        # NEW: Save the exact variable assignments from Pass 1
+        pass_1_values = [solver.Value(v) for v in variables]
+
         if get_one:
-            single_sol = [[solver.Value(v) for v in variables]]
+            single_sol = [pass_1_values]
             with open("solutions.json", "w") as f:
                 json.dump(single_sol, f)
         else:
-            solver.parameters.num_search_workers = 0
+
             # ---------------------------------------------------------
             # PASS 2: Enumerate all solutions that match the best cost
             # ---------------------------------------------------------
+            # PASS 2: "Forbid and Loop" Strategy
             if objective_terms:
                 best_cost = int(solver.ObjectiveValue())
-                model.ClearObjective()  # <-- The new, official API method
-                model.Add(sum(objective_terms) == best_cost)  # Lock in the best score
+                model.ClearObjective()
+
+                # model.Minimize(sum(objective_terms))
+                target_max_cost = int(best_cost * 1.1)
+                model.Add(sum(objective_terms) <= target_max_cost)
 
             solver.parameters.enumerate_all_solutions = True
-            collector = SolutionCollector(variables)
+
+            collector = SolutionCollector(variables, objective_terms)
             status = solver.Solve(model, collector)
 
+            # Sort the collected solutions from lowest cost to highest cost
+            collector.solutions.sort(key=lambda x: x["cost"])
+
+            clean_solutions = [sol["variables"] for sol in collector.solutions]
+
+            # Keep all 10 workers and aggressive heuristics ON
+            # solver.parameters.num_search_workers = 10
+
+            # DO NOT set enumerate_all_solutions = True
+
+            # clean_solutions = []
+            # target_number_of_solutions = 25
+            #
+            # for _ in tqdm(range(target_number_of_solutions)):
+            #     status = solver.Solve(model)
+            #
+            #     if status in (cp_model.OPTIMAL, cp_model.FEASIBLE):
+            #         # 1. Save the solution
+            #         current_sol = [solver.Value(v) for v in variables]
+            #         clean_solutions.append(current_sol)
+            #
+            #         # 2. Forbid this exact combination from ever being found again
+            #         # This forces the 10 workers to find a NEW optimal solution on the next loop
+            #         model.AddForbiddenAssignments(variables, [current_sol])
+            #
+            #         # print(f"Optimal solution found with cost: {solver.ObjectiveValue()}")
+            #
+            #         model.ClearHints()
+            #         for var, val in zip(variables, current_sol):
+            #             model.AddHint(var, val)
+            #     else:
+            #         print("Exhausted all possible solutions!")
+            #         break
+
             with open("solutions.json", "w") as f:
-                json.dump(collector.solutions, f)
+                json.dump(clean_solutions, f)
     else:
         print("Could not find a single solution...")
         sys.exit(1)

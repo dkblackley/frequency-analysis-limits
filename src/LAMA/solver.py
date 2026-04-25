@@ -140,7 +140,7 @@ def main():
             # DO NOT set enumerate_all_solutions = True
 
             clean_solutions = []
-            target_number_of_solutions = 1000000
+            target_number_of_solutions = 10000
 
             for _ in range(target_number_of_solutions):
                 status = solver.Solve(model)

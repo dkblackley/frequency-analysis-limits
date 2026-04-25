@@ -95,7 +95,7 @@ def main():
         model.Minimize(sum(objective_terms))
 
     solver = cp_model.CpSolver()
-    solver.parameters.num_search_workers = 64
+    solver.parameters.num_search_workers = 128
     # solver.parameters.log_search_progress = True
 
     status = solver.Solve(model)
@@ -120,48 +120,47 @@ def main():
                 best_cost = int(solver.ObjectiveValue())
                 model.ClearObjective()
 
-                # model.Minimize(sum(objective_terms))
-                target_max_cost = int(best_cost)
-                model.Add(sum(objective_terms) <= int(target_max_cost * 2))
+                model.Minimize(sum(objective_terms))
+                # target_max_cost = int(best_cost)
+                # model.Add(sum(objective_terms) <= int(target_max_cost * 2))
 
-            solver.parameters.enumerate_all_solutions = True
-            solver.parameters.num_search_workers = 1
-            collector = SolutionCollector(variables, objective_terms)
-            status = solver.Solve(model, collector)
-
-            # Sort the collected solutions from lowest cost to highest cost
-            collector.solutions.sort(key=lambda x: x["cost"])
-
-            clean_solutions = [sol["variables"] for sol in collector.solutions]
+            # solver.parameters.enumerate_all_solutions = True
+            # solver.parameters.num_search_workers = 1
+            # collector = SolutionCollector(variables, objective_terms)
+            # status = solver.Solve(model, collector)
+            #
+            # # Sort the collected solutions from lowest cost to highest cost
+            # collector.solutions.sort(key=lambda x: x["cost"])
+            #
+            # clean_solutions = [sol["variables"] for sol in collector.solutions]
 
             # Keep all 10 workers and aggressive heuristics ON
             # solver.parameters.num_search_workers = 10
 
             # DO NOT set enumerate_all_solutions = True
 
-            # clean_solutions = []
-            # target_number_of_solutions = 1000000
-            #
-            # for _ in range(target_number_of_solutions):
-            #     status = solver.Solve(model)
-            #
-            #     if status in (cp_model.OPTIMAL, cp_model.FEASIBLE):
-            #         # 1. Save the solution
-            #         current_sol = [solver.Value(v) for v in variables]
-            #         clean_solutions.append(current_sol)
-            #
-            #         # 2. Forbid this exact combination from ever being found again
-            #         # This forces the 10 workers to find a NEW optimal solution on the next loop
-            #         model.AddForbiddenAssignments(variables, [current_sol])
-            #
-            #         # print(f"Optimal solution found with cost: {solver.ObjectiveValue()}")
-            #         print("FOUND!!")
-            #         model.ClearHints()
-            #         for var, val in zip(variables, current_sol):
-            #             model.AddHint(var, val)
-            #     else:
-            #         print("Exhausted all possible solutions!")
-            #         break
+            clean_solutions = []
+            target_number_of_solutions = 1000000
+
+            for _ in range(target_number_of_solutions):
+                status = solver.Solve(model)
+
+                if status in (cp_model.OPTIMAL, cp_model.FEASIBLE):
+                    # 1. Save the solution
+                    current_sol = [solver.Value(v) for v in variables]
+                    clean_solutions.append(current_sol)
+
+                    # 2. Forbid this exact combination from ever being found again
+                    # This forces the 10 workers to find a NEW optimal solution on the next loop
+                    model.AddForbiddenAssignments(variables, [current_sol])
+
+                    print(f"Optimal solution found with cost: {solver.ObjectiveValue()}")
+                    model.ClearHints()
+                    for var, val in zip(variables, current_sol):
+                        model.AddHint(var, val)
+                else:
+                    print("Exhausted all possible solutions!")
+                    break
 
             with open("solutions.json", "w") as f:
                 json.dump(clean_solutions, f)

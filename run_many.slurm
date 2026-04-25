@@ -80,7 +80,7 @@ prob=${PROBS[$prob_idx]}
 dist=${DISTS[$dist_idx]}
 name=${NAMES[$name_idx]}
 data_dir=${DATA_DIRS[$dir_idx]}
-padding=3
+padding=0
 
 echo "========================================"
 echo "Array Task ID: $SLURM_ARRAY_TASK_ID"
@@ -123,6 +123,7 @@ if [ $? -ne 0 ]; then
         echo "Error: Retry failed. Exiting with failure code."
         exit 1
     fi
+    echo "Retry worked!"
 fi
 
 echo "Job completed successfully."

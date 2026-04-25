@@ -187,11 +187,11 @@ fn plot_db_side_by_side(
         let title = format!("{} - {} Dist.", pretty_db, pretty_dist);
 
         // THE FIX: Increased from 90 to 120 pixels to prevent intersection with the chart
-        let (title_area, chart_area) = area.split_vertically(120);
+        let (title_area, chart_area) = area.split_vertically(100);
 
         // THE FIX: Pushed left margin from 110 to 160 to center the title better
         // over the newly expanded chart area beneath it
-        let centered_title_area = title_area.margin(0, 0, 160, 40);
+        let centered_title_area = title_area.margin(0, 0, 180, 20);
 
         // Draw the title safely in its dedicated space
         ChartBuilder::on(&centered_title_area)
@@ -274,7 +274,7 @@ fn plot_db_side_by_side(
                 ))?
                 .label(pretty_name) // Use the nice label
                 .legend(move |(x, y)| {
-                    PathElement::new(vec![(x, y), (x + 25, y)], color.stroke_width(6))
+                    Rectangle::new([(x, y - 14), (x + 25, y + 10)], color.filled())
                 });
 
             // Draw smooth solid dots
@@ -287,13 +287,11 @@ fn plot_db_side_by_side(
 
         chart
             .configure_series_labels()
-            // Change UpperRight to MiddleRight
             .position(SeriesLabelPosition::LowerRight)
-            // I've added the solid background back here, but you can leave it TRANSPARENT if you prefer!
             .background_style(RGBColor(255, 255, 255).mix(0.9))
             .border_style(RGBColor(200, 200, 200))
-            .label_font(("Linux Biolinum", 40, FontStyle::Bold).into_font())
-            .margin(10)
+            .label_font(("Linux Biolinum", 44, FontStyle::Bold).into_font())
+            .margin(14)
             .draw()?;
     }
 

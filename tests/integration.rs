@@ -516,14 +516,14 @@ fn end_to_end_sampled() {
         .build_global()
         .unwrap();
 
-    let rows_cols = 4;
+    let rows_cols = 8;
     let dim = 2;
 
     info!("Loading test DB ({}x{})", rows_cols, rows_cols);
-    let loaded_db: Box<dyn Searchable + Sync> = Box::new(testDB::new(dim, rows_cols, 50));
+    let loaded_db: Box<dyn Searchable + Sync> = Box::new(testDB::new(dim, rows_cols, 75));
 
     let dist = "uniform";
-    let target_query_percentage = 0.25; // e.g., observe 10% of all possible queries
+    let target_query_percentage = 0.7; // e.g., observe 10% of all possible queries
     let fixed_delta = 0.3; // 90% confidence that error <= epsilon
 
     // 1. Initialize a baseline selector to generate the distribution space

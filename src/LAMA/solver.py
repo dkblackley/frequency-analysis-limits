@@ -95,7 +95,7 @@ def main():
         model.Minimize(sum(objective_terms))
 
     solver = cp_model.CpSolver()
-    solver.parameters.num_search_workers = 6
+    solver.parameters.num_search_workers = 64
     # solver.parameters.log_search_progress = True
 
     status = solver.Solve(model)

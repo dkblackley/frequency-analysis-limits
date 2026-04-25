@@ -1,5 +1,6 @@
 use crate::plotting::post::{calculate_mse, scale_to_absolute_range};
 use crate::plotting::two_d::debug_mse::plot_mse_frequency_histogram_split;
+use crate::plotting::two_d::flat_dist_hist::plot_lama_distributions;
 use crate::plotting::two_d::mse_by_all_reconstructions::plot_histograms_of_all_reconstructions;
 use crate::plotting::two_d::mse_vs_grid_size::plot_grid_by_mse;
 use crate::plotting::two_d::spatial_plot::run_spatial_plots;
@@ -84,7 +85,7 @@ fn load_limits_method(path: &str) -> Result<Vec<Vec<ReconstructionDataPoint>>, B
 }
 
 pub fn do_plotting() {
-    plot_histograms_of_all_reconstructions("spitz", (50, 50), (60, 60), "uniform").unwrap();
+    // plot_histograms_of_all_reconstructions("spitz", (50, 50), (60, 60), "uniform").unwrap();
     // Hardcoded vectors for easy modification
     // let grid_sizes = vec![(20, "20x20"), (25, "25x25"), (50, "50x50")];
     // let grid_sizes = vec![(25, "25x25"), (50, "50x50")];
@@ -109,12 +110,22 @@ pub fn do_plotting() {
     // domain. This is a little arbitrary, but just give these methods some more room to get the
     // truly best result.
 
+    // for name in datasets.clone() {
+    //     let res = plot_histograms_of_all_reconstructions(name, (50, 50), (60, 60), "uniform");
+    //     match res {
+    //         Ok(_) => {}
+    //         Err(e) => {
+    //             warn!("{name} hustogram of all recons 50x50 failed:  {e}")
+    //         }
+    //     }
+    // }
+
     for name in datasets.clone() {
-        let res = plot_histograms_of_all_reconstructions(name, (50, 50), (60, 60), "uniform");
+        let res = plot_lama_distributions(name);
         match res {
             Ok(_) => {}
             Err(e) => {
-                warn!("{name} hustogram of all recons 50x50 failed:  {e}")
+                warn!("{name} LAMa 15x15 distribution histogram failed: {e}")
             }
         }
     }

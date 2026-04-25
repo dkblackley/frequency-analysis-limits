@@ -1,12 +1,14 @@
 #!/bin/bash -l
 #SBATCH --job-name=LAMA
-#SBATCH --partition=bigmem
+#SBATCH --partition=normal
+#SBATCH --nodelist=amd051
+#SBATCH --reservation=dblackle_288
 #SBATCH --output=LAMA.out
 #SBATCH --error=LAMA.err
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=64
-#SBATCH --mem=1200G
+#SBATCH --mem=450G
 #SBATCH --time=2-00:30:00
 
 cd "$SLURM_SUBMIT_DIR"
@@ -91,14 +93,14 @@ $SG_RUN cargo clean
 echo "Building project inside container..."
 $SG_RUN cargo rustc --bin frequency_analysis_limits --release -- -Clink-arg=-lprotobuf
 
-padding=2
+padding=3
 
 # NAMES=("cali" "spitz")
 #DISTS=("uniform" "gaussian" "beta" "flat")
 #DATA_DIRS=("$SLURM_SUBMIT_DIR/databases/350x50" "$SLURM_SUBMIT_DIR/databases/175x25")
 
 
-NAMES=( "highway" "busstop" "shopparis" )
+NAMES=( "highway" "busstop" "shopparis" "cali" "spitz" )
  # NAMES=("spitz")
  # DISTS=("uniform" "gaussian" "beta" "flat")
 #DATA_DIRS=(

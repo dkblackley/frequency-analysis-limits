@@ -11,8 +11,8 @@
 #SBATCH --array=0-19
 
 # NEW: GMU best practice for array logging (%A = Master Array ID, %a = Task ID)
-#SBATCH --output=/scratch/%u/LAMA_%A_%a.out
-#SBATCH --error=/scratch/%u/LAMA_%A_%a.err
+#SBATCH --output=logs/LAMA_%A_%a.out
+#SBATCH --error=logs/LAMA_%A_%a.err
 
 cd "$SLURM_SUBMIT_DIR"
 

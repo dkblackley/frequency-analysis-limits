@@ -358,7 +358,7 @@ impl Translator {
 
             // 3. Sort and truncate using the calculated count.
             valid_plaintexts.par_sort_unstable_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
-            //valid_assignments.truncate(keep_count);
+            valid_plaintexts.truncate(keep_count);
 
             let just_plaintexts: Vec<Vec<i64>> =
                 valid_plaintexts.iter().map(|(pt, _)| pt.clone()).collect();
@@ -515,7 +515,7 @@ impl Translator {
 
             // 3. Sort and truncate using the calculated count.
             valid_plaintexts.par_sort_unstable_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
-            // valid_plaintexts.truncate(keep_count);
+            valid_plaintexts.truncate(keep_count);
 
             let just_plaintexts: Vec<Vec<i64>> =
                 valid_plaintexts.iter().map(|(pt, _)| pt.clone()).collect();

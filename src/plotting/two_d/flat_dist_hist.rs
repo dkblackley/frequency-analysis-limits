@@ -78,10 +78,9 @@ pub fn plot_lama_distributions(name: &str) -> Result<(), Box<dyn Error>> {
 
     // 2. Setup the Canvas
     let num_plots = distributions.len().max(1);
-    let output_path =
-        format!("figures/histogram_mse_sol_num/mse_histogram_{name}_lama_dists_{grid}.svg");
+    let output_path = format!("figures/histogram_flat/histogram_{name}_lama_flat.svg");
 
-    let root = SVGBackend::new(&output_path, (600 * num_plots as u32, 400)).into_drawing_area();
+    let root = SVGBackend::new(&output_path, (450 * num_plots as u32, 400)).into_drawing_area();
     root.fill(&WHITE)?;
 
     // 3. Vertical Split for Super Title
@@ -89,25 +88,22 @@ pub fn plot_lama_distributions(name: &str) -> Result<(), Box<dyn Error>> {
 
     let text_color = BLACK;
     let font_family = "Linux Biolinum";
-    let super_title_font = (font_family, 46, FontStyle::Bold)
+    let super_title_font = (font_family, 50, FontStyle::Bold)
         .into_font()
         .color(&text_color);
 
     ChartBuilder::on(&title_area)
-        .caption(
-            format!("{} - LAMa ({})", format_db_name(name), grid),
-            super_title_font,
-        )
+        .caption(format!("{}", format_db_name(name)), super_title_font)
         .build_cartesian_2d(0f32..1f32, 0f32..1f32)?;
 
     let num_bins = 8;
 
     // Typography
     let label_font = (font_family, 42).into_font().color(&text_color);
-    let axis_font = (font_family, 46, FontStyle::Bold)
+    let axis_font = (font_family, 50, FontStyle::Bold)
         .into_font()
         .color(&text_color);
-    let title_font = (font_family, 46, FontStyle::Bold)
+    let title_font = (font_family, 50, FontStyle::Bold)
         .into_font()
         .color(&text_color);
 
@@ -155,11 +151,11 @@ pub fn plot_lama_distributions(name: &str) -> Result<(), Box<dyn Error>> {
         let mut chart = ChartBuilder::on(panel)
             .margin_top(50)
             .margin_bottom(0)
-            .margin_left(80)
-            .margin_right(45)
+            .margin_left(25)
+            .margin_right(25)
             .caption(format_dist_name(dist), title_font.clone())
             .x_label_area_size(90)
-            .y_label_area_size(120) // Standardized gap
+            .y_label_area_size(100) // Standardized gap
             .build_cartesian_2d(0.0f64..(num_bins as f64), 0..max_y)?;
 
         chart

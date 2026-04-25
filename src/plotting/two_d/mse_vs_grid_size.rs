@@ -270,11 +270,11 @@ fn plot_db_side_by_side(
             chart
                 .draw_series(LineSeries::new(
                     continuous_data.clone(),
-                    color.stroke_width(4),
+                    color.stroke_width(6),
                 ))?
                 .label(pretty_name) // Use the nice label
                 .legend(move |(x, y)| {
-                    PathElement::new(vec![(x, y), (x + 25, y)], color.stroke_width(4))
+                    PathElement::new(vec![(x, y), (x + 25, y)], color.stroke_width(6))
                 });
 
             // Draw smooth solid dots

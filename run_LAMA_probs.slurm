@@ -1,6 +1,5 @@
 #!/bin/bash -l
 #SBATCH --job-name=LAMA_prob
-#SBATCH --partition=normal
 #SBATCH --nodelist=amd051
 #SBATCH --reservation=dblackle_288
 #SBATCH --output=prob_LAMA.out

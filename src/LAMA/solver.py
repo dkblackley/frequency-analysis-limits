@@ -19,7 +19,6 @@ class SolutionCollector(cp_model.CpSolverSolutionCallback):
         self.solutions.append({
             "variables": [self.Value(v) for v in self.variables]
         })
-        print(f"Found: {self.num_solutions}")
         if self.num_solutions % 1000 == 0:
             print(f"Found: {self.num_solutions}")
 
@@ -62,7 +61,6 @@ def main():
     largest_val = int(sys.argv[2])
     get_one = sys.argv[3].lower() == "true"
     probabilistic = sys.argv[4].lower() == "true"
-
     run_id = sys.argv[5]
 
     with open(f"{proj_root}meta_{run_id}.json", "r") as f:
@@ -131,8 +129,6 @@ def main():
 
     with open(f"solutions_{run_id}.json", "w") as f:
         json.dump(clean_solutions, f)
-
-    sys.exit(0)
 
 
 if __name__ == "__main__":

@@ -1,7 +1,7 @@
 #!/bin/bash -l
 #SBATCH --job-name=LAMA_prob
+#SBATCH --partition=normal
 #SBATCH --nodelist=amd051
-#SBATCH --partition=contrib
 #SBATCH --reservation=dblackle_288
 #SBATCH --output=prob_LAMA.out
 #SBATCH --error=prob_LAMA.err
@@ -10,6 +10,7 @@
 #SBATCH --cpus-per-task=64
 #SBATCH --mem=490G
 #SBATCH --time=2-00:30:00
+
 
 cd "$SLURM_SUBMIT_DIR"
 

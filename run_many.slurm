@@ -3,7 +3,7 @@
 #SBATCH --partition=normal
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
-#SBATCH --mem=350G
+#SBATCH --mem=210G
 #SBATCH --time=2-00:30:00
 
 # NEW: GMU Array syntax.

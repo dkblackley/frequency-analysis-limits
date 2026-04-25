@@ -1,8 +1,8 @@
 #!/bin/bash -l
-#SBATCH --job-name=LAMA_prob
+#SBATCH --job-name=LAMA_prob2
 #SBATCH --partition=bigmem
-#SBATCH --output=prob_LAMA.out
-#SBATCH --error=prob_LAMA.err
+#SBATCH --output=prob_LAMA2.out
+#SBATCH --error=prob_LAMA2.err
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=128

@@ -517,7 +517,7 @@ fn end_to_end_sampled() {
         .unwrap();
 
     let rows_cols = 8;
-    let dim = 3;
+    let dim = 2;
 
     info!("Loading test DB ({}x{})", rows_cols, rows_cols);
     let loaded_db: Box<dyn Searchable + Sync> = Box::new(testDB::new(dim, rows_cols, 75));

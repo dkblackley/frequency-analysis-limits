@@ -20,7 +20,7 @@ class SolutionCollector(cp_model.CpSolverSolutionCallback):
             "variables": [self.Value(v) for v in self.variables]
         })
 
-        if self.num_solutions % 10000 == 0:
+        if self.num_solutions % 1000 == 0:
             print(f"Found: {self.num_solutions}")
 
         if self.num_solutions >= self.limit:
@@ -111,7 +111,7 @@ def main():
     solver.parameters.enumerate_all_solutions = True
     solver.parameters.num_search_workers = 1
 
-    limit = 100001 if probabilistic else 100000000000
+    limit = 10000 if probabilistic else 100000000000
     if get_one:
         limit = 1
 

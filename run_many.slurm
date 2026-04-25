@@ -16,11 +16,38 @@
 
 cd "$SLURM_SUBMIT_DIR"
 
+# 1. Load System Modules
 module --quiet purge
 module load hosts/hopper
 module load singularity
 
-# ... [Keep ALL your setup code here: OR-Tools, Cmake, LLVM, Cargo build] ...
+# 2. Re-declare Directory Paths (DO NOT run rm, mkdir, wget, or tar here)
+ORTOOLS_DIR="/scratch/dblackle/ortools"
+CMAKE_DIR="/scratch/dblackle/cmake_portable"
+LLVM_DIR="/scratch/dblackle/llvm_portable"
+CONTAINER="/scratch/dblackle/rust_env.sif"
+
+# 3. Export Singularity Runtime Variables
+# (CRITICAL: OR-Tools is dynamically linked, so Rust needs LD_LIBRARY_PATH to find the .so files during execution)
+export SINGULARITYENV_ORTOOLS_PREFIX="$ORTOOLS_DIR"
+export SINGULARITYENV_LD_LIBRARY_PATH="$ORTOOLS_DIR/lib"
+export SINGULARITYENV_LIBRARY_PATH="$ORTOOLS_DIR/lib"
+
+# Export Rust and Performance Variables
+export SINGULARITYENV_RUST_LOG="debug"
+export SINGULARITYENV_RUST_BACKTRACE="1"
+export SINGULARITYENV_PREPEND_PATH="$CMAKE_DIR/bin"
+export SINGULARITYENV_LIBCLANG_PATH="$LLVM_DIR/lib"
+export SINGULARITYENV_RAYON_NUM_THREADS=$SLURM_CPUS_PER_TASK
+
+# 4. Activate Python Environment
+# (CRITICAL: Your Rust code spawns a subprocess using $PYTHON_EXEC to run solver.py)
+source /home/dblackle/miniconda3/etc/profile.d/conda.sh
+conda activate main
+export PYTHON_EXEC="/home/dblackle/.conda/envs/main/bin/python3.10"
+
+# 5. Define the execution command
+SG_RUN="singularity exec --bind /scratch/dblackle --bind /scratch/dblackle/cargo:/usr/local/cargo $CONTAINER"
 
 # Define your parameter arrays
 NAMES=("drink" "busstop" "shopparis" "cali" "spitz" )

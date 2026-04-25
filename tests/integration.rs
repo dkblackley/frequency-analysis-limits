@@ -522,8 +522,8 @@ fn end_to_end_sampled() {
     info!("Loading test DB ({}x{})", rows_cols, rows_cols);
     let loaded_db: Box<dyn Searchable + Sync> = Box::new(testDB::new(dim, rows_cols, 50));
 
-    let dist = "gaussian";
-    let target_query_percentage = 0.5; // e.g., observe 10% of all possible queries
+    let dist = "uniform";
+    let target_query_percentage = 0.25; // e.g., observe 10% of all possible queries
     let fixed_delta = 0.3; // 90% confidence that error <= epsilon
 
     // 1. Initialize a baseline selector to generate the distribution space
@@ -643,6 +643,7 @@ fn end_to_end_sampled() {
     //     model,
     //     &validate_candidate,
     // );
+    // model.validate(&index_map);
 
     info!("5. Building and executing the CP-SAT Solver for the final constraint graph...");
     let mut solver = Solver::new(index_map);

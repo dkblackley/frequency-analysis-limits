@@ -28,8 +28,10 @@ class SolutionCollector(cp_model.CpSolverSolutionCallback):
             "variables": [self.Value(v) for v in self.variables]
         })
 
-        if self.num_solutions >= self.limit:
-            self.StopSearch()
+        # print(f"Found solution with cost {current_cost}")
+
+        # if self.num_solutions >= self.limit:
+        #     self.StopSearch()
 
 
 def main():
@@ -49,6 +51,8 @@ def main():
     variables = [model.NewIntVar(0, largest_val, f"var_{i}") for i in range(num_variables)]
 
     objective_terms = []
+
+    print("Starting python solver!")
 
     # Apply all accumulated constraints
     for meta in metadata:
@@ -91,10 +95,8 @@ def main():
         model.Minimize(sum(objective_terms))
 
     solver = cp_model.CpSolver()
-    solver.parameters.num_search_workers = 10
+    solver.parameters.num_search_workers = 6
     # solver.parameters.log_search_progress = True
-    solver.parameters.linearization_level = 2
-    solver.parameters.optimize_with_core = True
 
     status = solver.Solve(model)
 
@@ -119,11 +121,11 @@ def main():
                 model.ClearObjective()
 
                 # model.Minimize(sum(objective_terms))
-                target_max_cost = int(best_cost * 1.1)
-                model.Add(sum(objective_terms) <= target_max_cost)
+                target_max_cost = int(best_cost)
+                model.Add(sum(objective_terms) <= int(target_max_cost * 2))
 
             solver.parameters.enumerate_all_solutions = True
-
+            solver.parameters.num_search_workers = 1
             collector = SolutionCollector(variables, objective_terms)
             status = solver.Solve(model, collector)
 
@@ -138,9 +140,9 @@ def main():
             # DO NOT set enumerate_all_solutions = True
 
             # clean_solutions = []
-            # target_number_of_solutions = 25
+            # target_number_of_solutions = 1000000
             #
-            # for _ in tqdm(range(target_number_of_solutions)):
+            # for _ in range(target_number_of_solutions):
             #     status = solver.Solve(model)
             #
             #     if status in (cp_model.OPTIMAL, cp_model.FEASIBLE):
@@ -153,7 +155,7 @@ def main():
             #         model.AddForbiddenAssignments(variables, [current_sol])
             #
             #         # print(f"Optimal solution found with cost: {solver.ObjectiveValue()}")
-            #
+            #         print("FOUND!!")
             #         model.ClearHints()
             #         for var, val in zip(variables, current_sol):
             #             model.AddHint(var, val)

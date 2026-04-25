@@ -220,7 +220,7 @@ impl Translator {
 
                 let costs: Vec<i64> = valid_plaintexts
                     .iter()
-                    .map(|(_, prob)| (*prob * 1_000_000.0).round() as i64)
+                    .map(|(_, prob)| (prob.powf(2.0) * 1_000_00.0).round() as i64)
                     .collect();
 
                 valid_plaintexts.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
@@ -365,7 +365,7 @@ impl Translator {
 
             let costs: Vec<i64> = valid_plaintexts
                 .iter()
-                .map(|(_, prob)| (*prob * 1_000_000.0).round() as i64)
+                .map(|(_, prob)| (prob.powf(2.0) * 1_000_00.0).round() as i64)
                 .collect();
 
             valid_plaintexts.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
@@ -529,7 +529,7 @@ impl Translator {
                 if !true_assignment_survived && found_val.0 {
                     error!(
                 "ERROR, the TRUE ASSIGNMENT GOT TRUNCATED IN T={}! It's value was {} and error was: {}",
-                        t,
+                        t+1,
                 enc,
                 found_val.1
                 );
@@ -540,7 +540,7 @@ impl Translator {
 
             let costs: Vec<i64> = valid_plaintexts
                 .iter()
-                .map(|(_, prob)| (*prob * 1_000_000.0).round() as i64)
+                .map(|(_, prob)| (prob.powf(2.0) * 1_000_00.0).round() as i64)
                 .collect();
 
             valid_plaintexts.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
@@ -624,7 +624,7 @@ impl Translator {
                 if !is_valid {
                     panic!("Solver broken! Returned invalid assignment.");
                 }
-                costs.push((prob * 1_000_000.0).round() as i64);
+                costs.push((prob.powf(2.0) * 1_000_00.0).round() as i64);
                 // valid_plaintexts.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
                 // let costs: Vec<i64> = (0..valid_plaintexts.len() as i64).collect();
             }

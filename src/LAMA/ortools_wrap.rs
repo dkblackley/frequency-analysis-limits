@@ -47,7 +47,9 @@ impl PythonCpModel {
     pub fn validate(&self, var_index_map: &HashMap<IntVar, (i32, i64)>) {
         let mut found_tracker = HashMap::new();
         let mut found_all = true;
+        let mut optimal_cost = 0;
 
+        // Initialize the tracker
         for tc in &self.table_constraints {
             for vars in tc.vars.iter() {
                 let orig_val = var_index_map.get(&(IntVar(vars.clone()))).unwrap().1;
@@ -55,28 +57,56 @@ impl PythonCpModel {
             }
         }
 
+        // Validate cohesive rows and calculate true cost
         for tc in &self.table_constraints {
-            for i in 0..tc.vars.len() {
-                let orig_val = var_index_map.get(&(IntVar(tc.vars[i].clone()))).unwrap().1;
+            // Build the "true" target tuple we are looking for in this constraint
+            let mut target_tuple = Vec::with_capacity(tc.vars.len());
+            for var_idx in &tc.vars {
+                let orig_val = var_index_map.get(&(IntVar(*var_idx))).unwrap().1;
+                target_tuple.push(orig_val);
+            }
 
-                // Search down the entire column 'i' across all valid assignment rows
-                for assignment in &tc.values {
-                    if assignment[i] == orig_val {
-                        found_tracker.insert(orig_val, true);
-                        break;
+            let mut found_matching_row = false;
+
+            // Search for the exact matching row
+            for (row_idx, assignment) in tc.values.iter().enumerate() {
+                if assignment == &target_tuple {
+                    // We found the exact row!
+                    found_matching_row = true;
+
+                    // Add the cost of this specific row EXACTLY ONCE
+                    optimal_cost += tc.costs[row_idx];
+
+                    // Mark all these variables as found
+                    for val in assignment {
+                        found_tracker.insert(*val, true);
                     }
+
+                    // We found the true assignment for this constraint, move to the next constraint
+                    break;
                 }
             }
+
+            if !found_matching_row {
+                warn!(
+                    "Table constraint for vars {:?} does not contain the true assignment {:?}",
+                    tc.vars, target_tuple
+                );
+            }
         }
+
         for (k, v) in &found_tracker {
             if !v {
                 found_all = false;
                 warn!("There is no valid assignment for {k}!! Solver is VERY LIKELY to crash.");
             }
         }
+
         if found_all {
             debug!("Every variable has at least 1 valid constraint! (They may still contradict...)")
         }
+
+        debug!("Value for optimal cost was: {}!!", optimal_cost);
     }
 
     /// Mirrors the CP-SAT solve_with_parameters logic

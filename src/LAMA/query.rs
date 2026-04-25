@@ -1,6 +1,8 @@
-use crate::dataloader::{flatten_dompair, flatten_nd, unflatten_nd, Searchable};
-use crate::LAMA::utility::{get_mbq, DistributionType};
 // Adjust imports as necessary for DomPair
+use crate::dataloader::tester::testDB;
+use crate::dataloader::{flatten_dompair, flatten_nd, unflatten_nd, Searchable};
+use crate::LAMA::selector::Selector;
+use crate::LAMA::utility::{encloses, get_mbq, DistributionType};
 use crate::{Coord, DomPair, Probability, Record, Value};
 use indicatif::{ParallelProgressIterator, ProgressBar};
 use itertools::Itertools;
@@ -734,4 +736,65 @@ mod tests {
         )
         .expect("Failed to plot the probability heatmap");
     }
+}
+
+#[test]
+fn test_exact_probability_matching_uniform() {
+    let _ = env_logger::builder().is_test(true).try_init();
+
+    // 1. Setup a small 3x3 test DB.
+    // We use a small grid so the total number of queries is manageable for a brute-force check.
+    let dim = 2;
+    let size_per_dim = 3;
+    let db: Box<dyn Searchable + Sync + 'static> = Box::new(testDB::new(dim, size_per_dim, 10));
+
+    // 2. Get all possible domain pairs (every possible bounding box)
+    let all_pairs = Selector::get_dom_pairs(&db);
+
+    // 3. Initialize the QueryDistribution with Uniform
+    // This will pre-calculate the "Expected" probabilities using your math
+    let qd = QueryDistribution::new(all_pairs.clone(), &db, DistributionType::Uniform);
+
+    // 4. Pretend we observed ALL possible queries EXACTLY ONCE (100% sample)
+    let observed_queries = all_pairs.clone();
+    let num_queries = observed_queries.len() as f64;
+
+    let mut max_diff = 0.0;
+    let mut failures = 0;
+
+    // 5. For every possible pair of points, calculate Observed vs Expected
+    for pair in &all_pairs {
+        // --- Calculate OBSERVED Probability (Empirical) ---
+        let mut enclose_count = 0;
+        for q in &observed_queries {
+            // Using your utility function
+            if encloses(q, pair) {
+                enclose_count += 1;
+            }
+        }
+        let obs_prob = enclose_count as f64 / num_queries;
+
+        // --- Calculate EXPECTED Probability (Mathematical) ---
+        let exp_prob = qd.cumulative_prob_lookup(pair);
+
+        let diff = (obs_prob - exp_prob).abs();
+        if diff > max_diff {
+            max_diff = diff;
+        }
+
+        // Compare with a small float tolerance
+        if diff > 1e-9 {
+            failures += 1;
+            error!(
+                "Mismatch on pair {:?}! Observed: {:.4}, Expected: {:.4}, Diff: {}",
+                pair, obs_prob, exp_prob, diff
+            );
+        }
+    }
+
+    info!("Maximum probability difference: {}", max_diff);
+    assert_eq!(
+        failures, 0,
+        "Observed probabilities did not match Expected probabilities!"
+    );
 }

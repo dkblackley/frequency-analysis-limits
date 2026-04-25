@@ -12,7 +12,7 @@ use crate::LAMA::solver::Solver;
 use crate::LAMA::translator::Translator;
 use crate::LAMA::utility::{encloses, get_mbq};
 use crate::{DomPair, Frequency, Record, Value};
-use log::{debug, error, info, warn};
+use log::{debug, error, info, trace, warn};
 use rand::distributions::Distribution;
 use rayon::iter::ParallelIterator;
 use rayon::prelude::IntoParallelRefIterator;
@@ -240,9 +240,9 @@ pub fn lama_attack(
 
         debug!("Solver failed to reconstruct full universe!!");
         //debug!("Known frequency-to-plaintext 2-tuple mappings: {freq_to_t_tuple:?}");
-        debug!("'encrypted/encoded' universe of plaintexts: {universe:?}");
-        debug!("Intvars workings: {:?}", solver);
-        debug!("CPModel: {:?}", model);
+        trace!("'encrypted/encoded' universe of plaintexts: {universe:?}");
+        trace!("Intvars workings: {:?}", solver);
+        trace!("CPModel: {:?}", model);
         debug!("Solver Status: {:?}", solver.solution_stat);
         return;
     }

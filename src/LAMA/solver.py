@@ -89,6 +89,7 @@ def main():
 
         solver = cp_model.CpSolver()
         status = solver.Solve(model)
+        solver.parameters.num_search_workers = 128
 
         if status in (cp_model.OPTIMAL, cp_model.FEASIBLE):
             print("RESULT: SUCCESS.", flush=True)

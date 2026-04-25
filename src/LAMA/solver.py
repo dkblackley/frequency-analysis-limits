@@ -8,7 +8,7 @@ from ortools.sat.python import cp_model
 
 class SolutionCollector(cp_model.CpSolverSolutionCallback):
     # Add objective_terms to the init
-    def __init__(self, variables, objective_terms, limit=100):
+    def __init__(self, variables, objective_terms, limit=1000000000):
         cp_model.CpSolverSolutionCallback.__init__(self)
         self.limit = limit
         self.num_solutions = 0
@@ -30,8 +30,8 @@ class SolutionCollector(cp_model.CpSolverSolutionCallback):
 
         # print(f"Found solution with cost {current_cost}")
 
-        # if self.num_solutions >= self.limit:
-        #     self.StopSearch()
+        if self.num_solutions >= self.limit:
+            self.StopSearch()
 
 
 def main():

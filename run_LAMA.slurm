@@ -1,14 +1,11 @@
 #!/bin/bash -l
 #SBATCH --job-name=LAMA
-#SBATCH --partition=normal
-#SBATCH --nodelist=amd049
-#SBATCH --reservation=dblackle_288
+#SBATCH --partition=bigmem
 #SBATCH --output=LAMA.out
 #SBATCH --error=LAMA.err
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
-#SBATCH --cpus-per-task=64
-#SBATCH --mem=450G
+#SBATCH --mem=3450G
 #SBATCH --time=2-00:30:00
 
 cd "$SLURM_SUBMIT_DIR"
@@ -93,14 +90,14 @@ $SG_RUN cargo clean
 echo "Building project inside container..."
 $SG_RUN cargo rustc --bin frequency_analysis_limits --release -- -Clink-arg=-lprotobuf
 
-padding=3
+padding=2
 
 # NAMES=("cali" "spitz")
 #DISTS=("uniform" "gaussian" "beta" "flat")
 #DATA_DIRS=("$SLURM_SUBMIT_DIR/databases/350x50" "$SLURM_SUBMIT_DIR/databases/175x25")
 
 
-NAMES=( "highway" "busstop" "shopparis" "cali" "spitz" )
+NAMES=( "spitz" )
  # NAMES=("spitz")
  # DISTS=("uniform" "gaussian" "beta" "flat")
 #DATA_DIRS=(
@@ -118,7 +115,7 @@ NAMES=( "highway" "busstop" "shopparis" "cali" "spitz" )
 #DATA_DIRS=("$SLURM_SUBMIT_DIR/databases/16x16x14")
 
 # Flat dist is very heavy. We only run for 2d 20x20 to 30x30.
-DISTS=("flat" "gaussian" "beta" "uniform")
+DISTS=("flat")
 DATA_DIRS=(
      "$SLURM_SUBMIT_DIR/databases/15x15"
 )
@@ -216,13 +213,13 @@ fi
 
  # Define the main variables
  name="grid"
- DISTS=("uniform" "gaussian" "beta")
+ DISTS=("uniform")
 
  # Initialize an array to track failures
  FAILED_RUNS=()
 
  # 1. Loop through dimensions 2, 3, 4, 5, and 6
- for dim in {2..6}; do
+ for dim in {4..6}; do
 
      # 2. Dynamically build the "10x10x..." string based on the dimension
      dim_str="6"

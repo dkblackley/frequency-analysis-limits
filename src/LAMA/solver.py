@@ -19,7 +19,7 @@ class SolutionCollector(cp_model.CpSolverSolutionCallback):
         self.solutions.append({
             "variables": [self.Value(v) for v in self.variables]
         })
-
+        print(f"Found: {self.num_solutions}")
         if self.num_solutions % 1000 == 0:
             print(f"Found: {self.num_solutions}")
 

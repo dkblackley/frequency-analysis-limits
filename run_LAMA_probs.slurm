@@ -1,12 +1,12 @@
 #!/bin/bash -l
-#SBATCH --job-name=LAMA_prob2
-#SBATCH --partition=bigmem
-#SBATCH --output=prob_LAMA2.out
-#SBATCH --error=prob_LAMA2.err
+#SBATCH --job-name=LAMA_prob
+#SBATCH --partition=dblackle_288
+#SBATCH --output=prob_LAMA.out
+#SBATCH --error=prob_LAMA.err
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
-#SBATCH --cpus-per-task=128
-#SBATCH --mem=3500G
+#SBATCH --cpus-per-task=64
+#SBATCH --mem=900G
 #SBATCH --time=2-00:30:00
 
 cd "$SLURM_SUBMIT_DIR"
@@ -120,7 +120,7 @@ DISTS=("uniform" "gaussian" "beta" )
 DATA_DIRS=(
      "$SLURM_SUBMIT_DIR/databases/15x15")
 
-PROBS=("0.35" "0.25" "0.15")
+PROBS=("0.3" "0.2" "0.1")
 # PROBS=("1.0")
 
 echo "Running canary"

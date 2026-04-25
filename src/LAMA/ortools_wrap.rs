@@ -44,6 +44,39 @@ impl PythonCpModel {
         Self::default()
     }
 
+    fn write_model_files(&self) {
+        let mut binary_data: Vec<i64> = Vec::new();
+        let mut metadata = Vec::new();
+
+        for tc in &self.table_constraints {
+            let start_idx = binary_data.len();
+            for (idx, tuple) in tc.values.iter().enumerate() {
+                binary_data.extend_from_slice(tuple);
+                binary_data.push(tc.costs[idx]); // Add cost immediately after the tuple plaintexts
+            }
+            metadata.push(ConstraintMeta {
+                var_ids: tc.vars.clone(),
+                start_idx,
+                length: tc.values.len() * (tc.vars.len() + 1),
+                tuple_size: tc.vars.len() + 1,
+            });
+        }
+
+        let mut bin_file = File::create("allowed.bin").expect("Failed to create bin file");
+        let byte_slice = unsafe {
+            std::slice::from_raw_parts(
+                binary_data.as_ptr() as *const u8,
+                binary_data.len() * std::mem::size_of::<i64>(),
+            )
+        };
+        bin_file
+            .write_all(byte_slice)
+            .expect("Failed to write binary data");
+
+        let meta_file = File::create("meta.json").expect("Failed to create meta file");
+        serde_json::to_writer(meta_file, &metadata).expect("Failed to write metadata");
+    }
+
     pub fn validate(&self, var_index_map: &HashMap<IntVar, (i32, i64)>) {
         let mut found_tracker = HashMap::new();
         let mut found_all = true;
@@ -59,7 +92,6 @@ impl PythonCpModel {
 
         // Validate cohesive rows and calculate true cost
         for tc in &self.table_constraints {
-            // Build the "true" target tuple we are looking for in this constraint
             let mut target_tuple = Vec::with_capacity(tc.vars.len());
             for var_idx in &tc.vars {
                 let orig_val = var_index_map.get(&(IntVar(*var_idx))).unwrap().1;
@@ -68,21 +100,13 @@ impl PythonCpModel {
 
             let mut found_matching_row = false;
 
-            // Search for the exact matching row
             for (row_idx, assignment) in tc.values.iter().enumerate() {
                 if assignment == &target_tuple {
-                    // We found the exact row!
                     found_matching_row = true;
-
-                    // Add the cost of this specific row EXACTLY ONCE
                     optimal_cost += tc.costs[row_idx];
-
-                    // Mark all these variables as found
                     for val in assignment {
                         found_tracker.insert(*val, true);
                     }
-
-                    // We found the true assignment for this constraint, move to the next constraint
                     break;
                 }
             }
@@ -105,8 +129,18 @@ impl PythonCpModel {
         if found_all {
             debug!("Every variable has at least 1 valid constraint! (They may still contradict...)")
         }
-
         debug!("Value for optimal cost was: {}!!", optimal_cost);
+
+        // NEW: Extract and write the true assignment straight to disk
+        let mut true_assignment = vec![0; self.num_vars as usize];
+        for (_var, (idx, val)) in var_index_map.iter() {
+            true_assignment[*idx as usize] = *val;
+        }
+
+        let true_sol_file =
+            File::create("true_solution.json").expect("Failed to create true solution file");
+        serde_json::to_writer(true_sol_file, &true_assignment)
+            .expect("Failed to write true solution data");
     }
 
     /// Mirrors the CP-SAT solve_with_parameters logic
@@ -156,7 +190,8 @@ impl PythonCpModel {
             .arg(self.num_vars.to_string())
             .arg(largest_val.to_string())
             //.arg(get_one.to_string())
-            .arg(false.to_string())
+            .arg(get_one.to_string())
+            .arg(true.to_string())
             // 2. Pipe the streams instead of inheriting them
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())

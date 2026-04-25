@@ -1,8 +1,7 @@
 #!/bin/bash -l
 #SBATCH --job-name=LAMA_prob
 #SBATCH --partition=bigmem
-#SBATCH reservation=dblackle_288
-#SBATCH --output=prob_LAMA.out
+#SBATCH --reservation=dblackle_288
 #SBATCH --error=prob_LAMA.err
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1

@@ -1,7 +1,7 @@
 #!/bin/bash -l
 #SBATCH --job-name=LAMA
 #SBATCH --partition=normal
-#SBATCH --nodelist=amd051
+#SBATCH --nodelist=amd049
 #SBATCH --reservation=dblackle_288
 #SBATCH --output=LAMA.out
 #SBATCH --error=LAMA.err

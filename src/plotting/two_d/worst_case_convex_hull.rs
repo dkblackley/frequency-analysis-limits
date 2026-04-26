@@ -7,6 +7,7 @@ use std::collections::HashMap;
 use std::error::Error;
 use std::fs;
 
+use crate::plotting::two_d::{format_db_name, format_dist_name};
 use rand::seq::SliceRandom;
 use rand::thread_rng;
 
@@ -126,13 +127,19 @@ pub fn compute_distance_sq(a: &[f64], b: &[f64]) -> f64 {
 
 /// Returns (Max Centroid MSE, Max Worst-Case MSE)
 
+/// Computes the GLOBAL MAXIMUM Centroid MSE and Worst-Case Midpoint MSE for a set of hulls.
+/// Returns (Max Centroid MSE, Max Worst-Case MSE, Max Hull Diameter, Max Centroid-to-Vertex Distance)
 pub fn compute_dataset_metrics(
     hulls: &[PointConvexHull],
-
     true_points: &[Vec<f64>], // Ground truth points mapping 1:1 with the hulls
-) -> (f64, f64) {
+) -> (f64, f64, f64, f64) {
     let mut max_centroid_mse = 0.0_f64;
     let mut max_worst_case_mse = 0.0_f64;
+
+    // New trackers for logging
+    let mut global_max_diameter_sq = 0.0_f64;
+    let mut global_max_centroid_spread_sq = 0.0_f64;
+
     let mut has_valid_points = false;
 
     for (hull, true_pt) in hulls.iter().zip(true_points.iter()) {
@@ -147,51 +154,53 @@ pub fn compute_dataset_metrics(
         // ---------------------------------------------------------
         // 1. Calculate the Centroid (Barycenter)
         // ---------------------------------------------------------
-
         let mut centroid = vec![0.0; dims];
-
         for v in &hull.vertices {
             for i in 0..dims {
                 centroid[i] += v[i];
             }
         }
-
         for i in 0..dims {
             centroid[i] /= num_vertices;
         }
 
         let centroid_mse = compute_distance_sq(&centroid, true_pt) / (dims as f64);
 
-        // ---------------------------------------------------------
+        // NEW: Measure distance between centroid and all proposed points in this hull
+        let mut max_spread_for_this_hull_sq = 0.0_f64;
+        for v in &hull.vertices {
+            let dist_sq = compute_distance_sq(&centroid, v);
+            if dist_sq > max_spread_for_this_hull_sq {
+                max_spread_for_this_hull_sq = dist_sq;
+            }
+        }
+        global_max_centroid_spread_sq =
+            global_max_centroid_spread_sq.max(max_spread_for_this_hull_sq);
 
+        // ---------------------------------------------------------
         // 2. Calculate the Worst-Case Midpoint (Longest Diameter)
-
         // ---------------------------------------------------------
-
         let mut max_dist_sq = -1.0;
-
         let mut best_v1 = &hull.vertices[0];
-
         let mut best_v2 = &hull.vertices[0];
 
         // O(N^2) search across vertices for the longest distance.
-
         for i in 0..hull.vertices.len() {
             for j in i..hull.vertices.len() {
                 let d_sq = compute_distance_sq(&hull.vertices[i], &hull.vertices[j]);
 
                 if d_sq > max_dist_sq {
                     max_dist_sq = d_sq;
-
                     best_v1 = &hull.vertices[i];
-
                     best_v2 = &hull.vertices[j];
                 }
             }
         }
 
-        let mut midpoint = vec![0.0; dims];
+        // NEW: Track the largest diameter found globally
+        global_max_diameter_sq = global_max_diameter_sq.max(max_dist_sq);
 
+        let mut midpoint = vec![0.0; dims];
         for i in 0..dims {
             midpoint[i] = (best_v1[i] + best_v2[i]) / 2.0;
         }
@@ -199,21 +208,23 @@ pub fn compute_dataset_metrics(
         let worst_case_mse = compute_distance_sq(&midpoint, true_pt) / (dims as f64);
 
         // ---------------------------------------------------------
-
         // 3. Track the absolute maximums instead of averaging
-
         // ---------------------------------------------------------
-
         max_centroid_mse = max_centroid_mse.max(centroid_mse);
-
         max_worst_case_mse = max_worst_case_mse.max(worst_case_mse);
     }
 
     if !has_valid_points {
-        return (0.0, 0.0);
+        return (0.0, 0.0, 0.0, 0.0);
     }
 
-    (max_centroid_mse, max_worst_case_mse)
+    // Return the actual distances (sqrt of squared distances) for the physical metrics
+    (
+        max_centroid_mse,
+        max_worst_case_mse,
+        global_max_diameter_sq.sqrt(),
+        global_max_centroid_spread_sq.sqrt(),
+    )
 }
 
 /// Orchestrates reading files for ALL distributions and calculating their convex hulls
@@ -224,7 +235,7 @@ pub fn process_and_plot_convex_hulls(
 ) -> Result<(), Box<dyn Error>> {
     // Structure: dist -> method -> vec of (query, cent_mse, worst_mse)
     let mut db_data: HashMap<&str, HashMap<String, Vec<(f64, f64, f64)>>> = HashMap::new();
-    let search_domain = (60, 60);
+    let search_domain = (20, 20);
     let query_percents = vec![10.0, 20.0, 30.0];
 
     // Helper closure to extract true points for the MSE calculator
@@ -250,7 +261,14 @@ pub fn process_and_plot_convex_hulls(
                 let point_clouds =
                     generate_sampled_reconstructions(&data, search_domain, 5.0, 30.0, 5.0);
                 let hulls = get_per_point_convex_hulls(&point_clouds);
-                let (cent_mse, worst_mse) = compute_dataset_metrics(&hulls, &true_points);
+
+                let (cent_mse, worst_mse, max_diam, max_cent_spread) =
+                    compute_dataset_metrics(&hulls, &true_points);
+
+                log::info!(
+                    "DB: {} | Dist: {} | Method: even_less | Query: {}% -> Max Hull Diameter: {:.4}, Max Centroid-to-Vertex: {:.4}",
+                    db_name, dist, query, max_diam, max_cent_spread
+                );
 
                 plot_data
                     .entry("even_less".to_string())
@@ -272,7 +290,14 @@ pub fn process_and_plot_convex_hulls(
                 let point_clouds =
                     generate_sampled_reconstructions(&data, search_domain, 5.0, 30.0, 5.0);
                 let hulls = get_per_point_convex_hulls(&point_clouds);
-                let (cent_mse, worst_mse) = compute_dataset_metrics(&hulls, &true_points);
+
+                let (cent_mse, worst_mse, max_diam, max_cent_spread) =
+                    compute_dataset_metrics(&hulls, &true_points);
+
+                log::info!(
+                    "DB: {} | Dist: {} | Method: remin | Query: {}% -> Max Hull Diameter: {:.4}, Max Centroid-to-Vertex: {:.4}",
+                    db_name, dist, query, max_diam, max_cent_spread
+                );
 
                 plot_data
                     .entry("remin".to_string())
@@ -285,7 +310,7 @@ pub fn process_and_plot_convex_hulls(
             // ---------------------------------------------------------
             let limits_query = query / 100.0;
             let limits_path = format!(
-                "{}/{}/limits/{}_{}_p{}.json",
+                "{}/{}/limits/{}_{}_p{}_reconstruction.json",
                 data_dir, db_name, db_name, dist, limits_query
             );
 
@@ -296,7 +321,14 @@ pub fn process_and_plot_convex_hulls(
                 if !multi_run_data.is_empty() {
                     let true_points = extract_true_points(&multi_run_data[0]);
                     let hulls = get_per_point_convex_hulls(&multi_run_data);
-                    let (cent_mse, worst_mse) = compute_dataset_metrics(&hulls, &true_points);
+
+                    let (cent_mse, worst_mse, max_diam, max_cent_spread) =
+                        compute_dataset_metrics(&hulls, &true_points);
+
+                    log::info!(
+                        "DB: {} | Dist: {} | Method: limits | Query: {}% -> Max Hull Diameter: {:.4}, Max Centroid-to-Vertex: {:.4}",
+                        db_name, dist, query, max_diam, max_cent_spread
+                    );
 
                     plot_data
                         .entry("limits".to_string())
@@ -304,7 +336,7 @@ pub fn process_and_plot_convex_hulls(
                         .push((query, cent_mse, worst_mse));
                 }
             } else {
-                warn!("Could not find limits file: {}", limits_path);
+                log::warn!("Could not find limits file: {}", limits_path);
             }
         } // END QUERY LOOP
 
@@ -347,7 +379,7 @@ fn plot_convex_side_by_side(
     root.fill(&WHITE)?;
 
     let sub_areas = root.split_evenly((1, num_dists));
-    let pretty_db = db_name.to_uppercase();
+    let pretty_db = format_db_name(db_name);
 
     for (i, &dist) in distributions.iter().enumerate() {
         let area = &sub_areas[i];
@@ -366,17 +398,17 @@ fn plot_convex_side_by_side(
         }
         let y_max = if max_mse == 0.0 { 1.0 } else { max_mse * 1.05 };
 
-        let pretty_dist = format_title_case(dist);
+        let pretty_dist = format_dist_name(dist);
         let title = format!("{} - {} Dist.", pretty_db, pretty_dist);
 
         // Increased title space slightly to support larger font
-        let (title_area, chart_area) = area.split_vertically(140);
+        let (title_area, chart_area) = area.split_vertically(100);
         let centered_title_area = title_area.margin(0, 0, 180, 20);
 
         ChartBuilder::on(&centered_title_area)
             .caption(
                 title,
-                ("Linux Biolinum", 76, FontStyle::Bold) // MASSIVE TITLE
+                ("Linux Biolinum", 82, FontStyle::Bold) // MASSIVE TITLE
                     .into_font()
                     .color(&BLACK),
             )
@@ -385,8 +417,8 @@ fn plot_convex_side_by_side(
         let mut chart = ChartBuilder::on(&chart_area)
             .margin_top(10)
             .margin_bottom(30)
-            .margin_left(60)
-            .margin_right(60)
+            .margin_left(25)
+            .margin_right(25)
             .x_label_area_size(140) // Increased area for massive x-axis text
             .y_label_area_size(140) // Increased area for massive y-axis text
             .build_cartesian_2d(10.0..30.0f64, 0.0..y_max)?; // 10-30 for x
@@ -461,7 +493,7 @@ fn plot_convex_side_by_side(
         chart
             .configure_series_labels()
             .position(SeriesLabelPosition::MiddleRight)
-            .background_style(RGBColor(255, 255, 255).mix(0.95))
+            .background_style(RGBColor(255, 255, 255).mix(0.55))
             .border_style(TRANSPARENT) // Removed border for cleaner look
             .label_font(("Linux Biolinum", 44, FontStyle::Bold).into_font()) // MASSIVE LEGEND FONT
             .margin(11)

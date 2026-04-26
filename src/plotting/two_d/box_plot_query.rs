@@ -2,6 +2,7 @@ use crate::plotting::post::calculate_mse;
 use crate::plotting::two_d::worst_case_convex_hull::{
     compute_distance_sq, format_title_case, generate_sampled_reconstructions, get_method_style,
 };
+use crate::plotting::two_d::{format_db_name, format_dist_name};
 use crate::plotting::ReconstructionDataPoint;
 use log::{debug, warn};
 use plotters::data::Quartiles;
@@ -11,6 +12,22 @@ use std::error::Error;
 use std::fs;
 // (Keep your existing `get_method_style`, `apply_transform`, `generate_sampled_reconstructions`,
 // `format_title_case`, and `compute_distance_sq` functions exactly as they are).
+
+fn format_metric(val: f64) -> String {
+    if val == 0.0 {
+        return "0".to_string();
+    }
+    let abs_val = val.abs();
+    if abs_val >= 1_000_000_000.0 {
+        format!("{:.1}B", val / 1_000_000_000.0).replace(".0B", "B")
+    } else if abs_val >= 1_000_000.0 {
+        format!("{:.1}M", val / 1_000_000.0).replace(".0M", "M")
+    } else if abs_val >= 1_000.0 {
+        format!("{:.1}k", val / 1_000.0).replace(".0k", "K")
+    } else {
+        format!("{:.0}", val) // Standard whole number for anything < 1000
+    }
+}
 
 /// The Wrapper: Runs your function 10,000 times to get the distribution for the Box Plot
 pub fn compute_reconstruction_mses(point_clouds: &[Vec<ReconstructionDataPoint>]) -> Vec<f64> {
@@ -121,9 +138,9 @@ fn plot_boxplot_side_by_side(
 
     // 2. CREATE THE SUPER TITLE AREA
     // Slice off the top 140 pixels across the entire width for our main title
-    let (title_area, body_area) = root.split_vertically(140);
-    let pretty_db = db_name.to_uppercase();
-    let super_title = format!("{} - MSE Distribution", pretty_db);
+    let (title_area, body_area) = root.split_vertically(80);
+    let pretty_db = format_db_name(db_name);
+    let super_title = format!("{}", pretty_db);
 
     ChartBuilder::on(&title_area)
         .caption(
@@ -159,9 +176,9 @@ fn plot_boxplot_side_by_side(
         // Dynamically scale up the power of 10 if needed, but baseline is 10,000
         let y_max = 10f32.powf(max_mse.log10().ceil());
 
-        let pretty_dist = format_title_case(dist);
+        let pretty_dist = format_dist_name(dist);
         // Sub-title now only contains the distribution to avoid text collision
-        let title = format!("{} Distribution", pretty_dist);
+        let title = format!("{} Dist.", pretty_dist);
 
         let (sub_title_area, chart_area) = area.split_vertically(100);
         let centered_sub_title_area = sub_title_area.margin(0, 0, 0, 0);
@@ -178,8 +195,8 @@ fn plot_boxplot_side_by_side(
         let mut chart = ChartBuilder::on(&chart_area)
             .margin_top(10)
             .margin_bottom(30)
-            .margin_left(60)
-            .margin_right(60)
+            .margin_left(5)
+            .margin_right(20)
             .x_label_area_size(140)
             // INCREASED Y label area size so '10000' fits nicely without clipping
             .y_label_area_size(180)
@@ -200,7 +217,7 @@ fn plot_boxplot_side_by_side(
             .label_style(("Linux Biolinum", 68).into_font())
             .x_label_formatter(&|x| format!("{:.0}%", x))
             // Format labels normally (will naturally render 10, 100, 1000, 10000)
-            .y_label_formatter(&|y| format!("{:.0}", y))
+            .y_label_formatter(&|y| format_metric(*y as f64))
             .draw()?;
 
         let mut mapped_methods: Vec<(&String, &str, usize, RGBColor, i32)> = plot_data
@@ -235,7 +252,7 @@ fn plot_boxplot_side_by_side(
                     Boxplot::new_vertical(q, &quartiles)
                         .width(35) // Made wider (from 25 to 35) for better visibility
                         .whisker_width(0.6)
-                        .style(color.mix(0.2).filled())
+                        .style(color.mix(0.65).filled())
                         .offset(offset_px),
                 );
 

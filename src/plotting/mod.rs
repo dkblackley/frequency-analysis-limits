@@ -1,3 +1,4 @@
+use crate::plotting::convex_hull::get_per_point_convex_hulls;
 use crate::plotting::post::{calculate_mse, scale_to_absolute_range};
 use crate::plotting::two_d::box_plot_query::process_and_plot_boxplots;
 use crate::plotting::two_d::debug_mse::plot_mse_frequency_histogram_split;
@@ -6,7 +7,9 @@ use crate::plotting::two_d::mse_by_all_reconstructions::plot_histograms_of_all_r
 use crate::plotting::two_d::mse_vs_grid_size::plot_grid_by_mse;
 use crate::plotting::two_d::spatial_plot::run_spatial_plots;
 use crate::plotting::two_d::three_dim::plot_nh_minimal_3d;
-use crate::plotting::two_d::worst_case_convex_hull::process_and_plot_convex_hulls;
+use crate::plotting::two_d::worst_case_convex_hull::{
+    compute_dataset_metrics, process_and_plot_convex_hulls,
+};
 use crate::LAMA::translator::TranslatorMeta;
 use log::{info, warn};
 use serde::{Deserialize, Serialize};
@@ -89,6 +92,8 @@ fn load_limits_method(path: &str) -> Result<Vec<Vec<ReconstructionDataPoint>>, B
 }
 
 pub fn do_plotting() {
+    quick_and_dirty_analysis().unwrap();
+
     // plot_histograms_of_all_reconstructions("spitz", (50, 50), (60, 60), "uniform").unwrap();
     // Hardcoded vectors for easy modification
     // let grid_sizes = vec![(20, "20x20"), (25, "25x25"), (50, "50x50")];
@@ -102,6 +107,16 @@ pub fn do_plotting() {
 
     for data in datasets.clone() {
         run_spatial_plots(data, "databases/50x50", "uniform", 50).unwrap();
+    }
+
+    for name in datasets.clone() {
+        let res = plot_lama_distributions(name);
+        match res {
+            Ok(_) => {}
+            Err(e) => {
+                warn!("{name} LAMa 15x15 flat distribution histogram failed: {e}")
+            }
+        }
     }
 
     let grid_sizes: Vec<(u32, String)> = (20..=50)
@@ -126,26 +141,16 @@ pub fn do_plotting() {
     //     }
     // }
     for name in datasets.clone() {
-        // // 1. Process and Plot Convex Hulls
-        // if let Err(e) = process_and_plot_convex_hulls(name, "databases/15x15", &distributions) {
-        //     warn!("{} convex hull plot failed: {}", name, e);
-        // }
+        // 1. Process and Plot Convex Hulls
+        if let Err(e) = process_and_plot_convex_hulls(name, "databases/15x15", &distributions) {
+            warn!("{} convex hull plot failed: {}", name, e);
+        }
 
         // 2. Process and Plot Box Plots
         if let Err(e) = process_and_plot_boxplots(name, "databases/15x15", &distributions) {
             warn!("{} box plot failed: {}", name, e);
         }
     }
-
-    // for name in datasets.clone() {
-    //     let res = plot_lama_distributions(name);
-    //     match res {
-    //         Ok(_) => {}
-    //         Err(e) => {
-    //             warn!("{name} LAMa 15x15 distribution histogram failed: {e}")
-    //         }
-    //     }
-    // }
 }
 
 fn get_remin_even_less(
@@ -181,4 +186,110 @@ fn get_remin_even_less(
     }
 
     return Ok((true_point, recon_point));
+}
+
+/// A quick and dirty function to print lengths of the 15x15 files
+/// and compute the convex hull/centroid metrics for the 6x6* grids.
+pub fn quick_and_dirty_analysis() -> Result<(), Box<dyn Error>> {
+    // Helper closure to extract true points (reused from your code)
+    let extract_true_points = |data: &[ReconstructionDataPoint]| -> Vec<Vec<f64>> {
+        data.iter().map(|p| p.true_points.clone()).collect()
+    };
+
+    // ---------------------------------------------------------
+    // 1. 15x15 Files: Load and print lengths
+    // ---------------------------------------------------------
+    let files_15x15 = vec![
+        "databases/15x15/highway/limits/highway_flat_e0_d0.1_reconstruction.json",
+        "databases/15x15/shopparis/limits/shopparis_flat_e0_d0.1_reconstruction.json",
+        "databases/15x15/busstop/limits/busstop_flat_e0_d0.1_reconstruction.json",
+    ];
+
+    println!("--- 15x15 Dataset Lengths ---");
+    for path in files_15x15 {
+        match fs::read_to_string(path) {
+            Ok(content) => {
+                let data: Vec<Vec<ReconstructionDataPoint>> = serde_json::from_str(&content)?;
+                println!("File: {} \n  -> Outer Vec Length: {}", path, data.len());
+            }
+            Err(e) => println!("Failed to read {}: {}", path, e),
+        }
+    }
+    println!();
+
+    build_hulls_and_calculate_mse()
+}
+
+pub fn build_hulls_and_calculate_mse() -> Result<(), Box<dyn Error>> {
+    let grid_files = vec![
+        "databases/6x6/grid/limits/grid_uniform_e0_d0.001_reconstruction.json",
+        "databases/6x6x6/grid/limits/grid_uniform_e0_d0.001_reconstruction.json",
+        "databases/6x6x6x6/grid/limits/grid_uniform_e0_d0.001_reconstruction.json",
+    ];
+
+    println!("--- Centroid-based Construction & MSE Analysis ---");
+
+    for path in grid_files {
+        match fs::read_to_string(path) {
+            Ok(content) => {
+                // Deserialize the multiple runs
+                let multi_run_data: Vec<Vec<ReconstructionDataPoint>> =
+                    serde_json::from_str(&content)?;
+
+                if multi_run_data.is_empty() || multi_run_data[0].is_empty() {
+                    println!("File is empty or invalid: {}", path);
+                    continue;
+                }
+
+                // 1. Generate the convex hulls across all runs for each point
+                let hulls = get_per_point_convex_hulls(&multi_run_data);
+
+                // We use the ground truth from the first run (assuming it is constant across runs)
+                let base_run = &multi_run_data[0];
+
+                // 2. Build the new reconstructed dataset
+                let mut centroid_reconstruction = Vec::with_capacity(base_run.len());
+
+                for (i, original_point) in base_run.iter().enumerate() {
+                    let hull = &hulls[i];
+                    let dims = original_point.true_points.len();
+                    let mut centroid = vec![0.0; dims];
+                    let num_vertices = hull.vertices.len();
+
+                    if num_vertices > 0 {
+                        // Sum up all vertices
+                        for v in &hull.vertices {
+                            for d in 0..dims {
+                                centroid[d] += v[d];
+                            }
+                        }
+                        // Divide by the number of vertices to get the barycenter
+                        for d in 0..dims {
+                            centroid[d] /= num_vertices as f64;
+                        }
+                    } else {
+                        // Fallback: if the hull is somehow empty, default to the standard reconstruction
+                        centroid = original_point.reconstructed_points.clone();
+                    }
+
+                    // 3. Assemble the new Data Point mapping the centroid as the new reconstructed point
+                    centroid_reconstruction.push(ReconstructionDataPoint {
+                        true_points: original_point.true_points.clone(),
+                        reconstructed_points: centroid,
+                        unscaled_points: None, // Or clone original_point.unscaled_points if you need it later
+                    });
+                }
+
+                // 4. Pass our newly built Vec to your calculation function
+                let final_mse = calculate_mse(&centroid_reconstruction);
+
+                println!("Processed: {}", path);
+                println!("  -> Dataset Size: {}", centroid_reconstruction.len());
+                println!("  -> Final Centroid Reconstruction MSE: {:.6}\n", final_mse);
+            }
+            Err(e) => println!("Failed to read {}: {}", path, e),
+        }
+    }
+
+    Ok(())
 }

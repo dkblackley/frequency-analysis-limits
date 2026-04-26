@@ -54,7 +54,7 @@ pub fn plot_lama_distributions(name: &str) -> Result<(), Box<dyn Error>> {
     let path_to_root = format!("databases/{grid}/{name}");
 
     // The three distributions we want to plot for LAMa
-    let distributions = vec!["uniform", "gaussian", "flat"];
+    let distributions = vec!["gaussian", "uniform", "flat"];
 
     let mut dist_to_mse: HashMap<String, Vec<f64>> = HashMap::new();
 
@@ -153,7 +153,11 @@ pub fn plot_lama_distributions(name: &str) -> Result<(), Box<dyn Error>> {
             .margin_bottom(0)
             .margin_left(25)
             .margin_right(25)
-            .caption(format_dist_name(dist), title_font.clone())
+            .caption(
+                // Add 2 or 3 em-spaces to physically push the text right
+                format!("\u{2003}\u{2003}{}", format_dist_name(dist)),
+                title_font.clone(),
+            )
             .x_label_area_size(90)
             .y_label_area_size(100) // Standardized gap
             .build_cartesian_2d(0.0f64..(num_bins as f64), 0..max_y)?;

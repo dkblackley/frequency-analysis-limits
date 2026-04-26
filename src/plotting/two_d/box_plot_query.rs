@@ -193,13 +193,13 @@ fn plot_boxplot_side_by_side(
             .build_cartesian_2d(0..1, 0..1)?;
 
         let mut chart = ChartBuilder::on(&chart_area)
-            .margin_top(10)
+            .margin_top(20)
             .margin_bottom(30)
-            .margin_left(5)
-            .margin_right(20)
-            .x_label_area_size(140)
+            .margin_left(55)
+            .margin_right(55)
+            .x_label_area_size(250)
             // INCREASED Y label area size so '10000' fits nicely without clipping
-            .y_label_area_size(180)
+            .y_label_area_size(270)
             // 4. APPLY LOG SCALE (Base 10) FROM 10 TO y_max
             .build_cartesian_2d(5.0..35.0f64, (10.0f32..y_max).log_scale())?;
 

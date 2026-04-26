@@ -68,7 +68,6 @@ mkdir -p "$LLVM_DIR"
 cd "$LLVM_DIR"
 
 # Download a stable, pre-compiled portable release of LLVM/Clang
-# (Using the Ubuntu 18.04 build for maximum glibc compatibility across distributions)
 wget -q https://github.com/llvm/llvm-project/releases/download/llvmorg-16.0.0/clang+llvm-16.0.0-x86_64-linux-gnu-ubuntu-18.04.tar.xz
 tar -xf clang+llvm-16.0.0-x86_64-linux-gnu-ubuntu-18.04.tar.xz --strip-components=1
 rm clang+llvm-16.0.0-x86_64-linux-gnu-ubuntu-18.04.tar.xz
@@ -76,17 +75,17 @@ rm clang+llvm-16.0.0-x86_64-linux-gnu-ubuntu-18.04.tar.xz
 cd "$SLURM_SUBMIT_DIR"
 # ---------------------------------------
 
-# 1. Update the prepend path to include BOTH CMake and the new Clang binaries
 export SINGULARITYENV_PREPEND_PATH="$LLVM_DIR/bin:$CMAKE_DIR/bin"
-
-# 2. Point bindgen directly to the downloaded libclang shared library
 export SINGULARITYENV_LIBCLANG_PATH="$LLVM_DIR/lib"
 
-# 3. Dynamically locate the intrinsic Clang headers directory (where float.h lives)
-CLANG_INCLUDE_DIR=$(ls -d "$LLVM_DIR"/lib/clang/*/include | head -n 1)
+# THE DIRTY FIX:
+# Force feed bindgen the absolute, hardcoded paths to the exact location of the
+# intrinsic Clang headers for LLVM 16. We inject both '16' and '16.0.0' to cover
+# our bases regardless of how the tarball drops the directory structure.
+export SINGULARITYENV_C_INCLUDE_PATH="$LLVM_DIR/lib/clang/16/include:$LLVM_DIR/lib/clang/16.0.0/include"
+export SINGULARITYENV_CPLUS_INCLUDE_PATH="$LLVM_DIR/lib/clang/16/include:$LLVM_DIR/lib/clang/16.0.0/include"
+export SINGULARITYENV_BINDGEN_EXTRA_CLANG_ARGS="-I$LLVM_DIR/lib/clang/16/include -I$LLVM_DIR/lib/clang/16.0.0/include"
 
-# 4. Explicitly pass the include flag to bindgen so the C compiler can find standard headers
-export SINGULARITYENV_BINDGEN_EXTRA_CLANG_ARGS="-I${CLANG_INCLUDE_DIR}"
 cd "$SLURM_SUBMIT_DIR"
 # ---------------------------------------
 

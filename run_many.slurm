@@ -8,7 +8,7 @@
 
 # NEW: GMU Array syntax.
 # 5 names * 4 dists * 1 dir * 1 prob = 20 total combinations. (Indexes 0 through 19)
-#SBATCH --array=0-53
+#SBATCH --array=0-530
 
 # NEW: GMU best practice for array logging (%A = Master Array ID, %a = Task ID)
 #SBATCH --output=logs/LAMA_%A_%a.out
@@ -52,7 +52,7 @@ SG_RUN="singularity exec --bind /scratch/dblackle --bind /scratch/dblackle/cargo
 # Define your parameter arrays
 NAMES=("drink" "busstop" "highway" "shopparis" "cali" "spitz" )
 DISTS=("gaussian" "beta" "uniform")
-DATA_DIRS=( "$SLURM_SUBMIT_DIR/databases/15x15" )
+DATA_DIRS=( "${SLURM_SUBMIT_DIR}/databases/15x15_run_"{1..10} )
 PROBS=("0.3" "0.2" "0.1")
 
 # --- PARAMETER DECODING MATH ---

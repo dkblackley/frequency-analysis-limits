@@ -8,7 +8,7 @@
 
 # NEW: GMU Array syntax.
 # 5 names * 4 dists * 1 dir * 1 prob = 20 total combinations. (Indexes 0 through 19)
-#SBATCH --array=0-19
+#SBATCH --array=0-44
 
 # NEW: GMU best practice for array logging (%A = Master Array ID, %a = Task ID)
 #SBATCH --output=logs/LAMA_%A_%a.out

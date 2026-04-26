@@ -100,24 +100,22 @@ pub fn plot_nh_minimal_3d() -> Result<(), Box<dyn Error>> {
     let vermillion = RGBColor(213, 94, 0);
     let subtitle_font = ("Linux Biolinum", 80, FontStyle::Bold).into_font();
 
-    // ---------------------------------------------------------
-    // LEFT PLOT: Ground Truth
-    // ---------------------------------------------------------
     let mut chart_left = ChartBuilder::on(&left_area)
         .caption("Ground Truth", subtitle_font.clone().color(&BLACK))
         .margin(60)
+        // FIX 1: Restore native (x, y, z) ranges so they map to your EmptyElement::at((x, y, z))
         .build_cartesian_3d(
-            (min_x - x_pad)..(max_x + x_pad), // Give Y the X range
-            (min_y - y_pad)..(max_y + y_pad), // Give X the Y range
+            (min_x - x_pad)..(max_x + x_pad),
+            (min_y - y_pad)..(max_y + y_pad),
             (min_z - z_pad)..(max_z + z_pad),
         )?;
 
-    // Adjust the camera angle!
-    // Play with these radian values until the orientation matches what you expect.
     chart_left.with_projection(|mut pb| {
-        pb.pitch = 0.5; // Looking down angle
-        pb.yaw = 0.5; // Rotation angle
-        pb.scale = 0.9; // Zoom out slightly so it fits the margins
+        // FIX 2: Add ~1.57 radians (90 degrees) to the pitch to make it "fall over".
+        // Use std::f64::consts::FRAC_PI_2 for exact math.
+        pb.pitch = -0.5 + std::f64::consts::FRAC_PI_2;
+        pb.yaw = 0.0 + std::f64::consts::FRAC_PI_2 + std::f64::consts::FRAC_PI_2; // Keep your horizontal rotation
+        pb.scale = 0.9;
         pb.into_matrix()
     });
 
@@ -149,12 +147,12 @@ pub fn plot_nh_minimal_3d() -> Result<(), Box<dyn Error>> {
             (min_z - z_pad)..(max_z + z_pad),
         )?;
 
-    // Adjust the camera angle!
-    // Play with these radian values until the orientation matches what you expect.
     chart_right.with_projection(|mut pb| {
-        pb.pitch = 0.5; // Looking down angle
-        pb.yaw = 0.1; // Rotation angle
-        pb.scale = 0.9; // Zoom out slightly so it fits the margins
+        // FIX 2: Add ~1.57 radians (90 degrees) to the pitch to make it "fall over".
+        // Use std::f64::consts::FRAC_PI_2 for exact math.
+        pb.pitch = -0.5 + std::f64::consts::FRAC_PI_2;
+        pb.yaw = 0.0 + std::f64::consts::FRAC_PI_2 + std::f64::consts::FRAC_PI_2; // Keep your horizontal rotation
+        pb.scale = 0.9;
         pb.into_matrix()
     });
 

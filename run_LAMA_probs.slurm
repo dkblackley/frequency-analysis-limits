@@ -5,8 +5,8 @@
 #SBATCH --error=prob_LAMA.err
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
-#SBATCH --cpus-per-task=128
-#SBATCH --mem=3500G
+#SBATCH --cpus-per-task=64
+#SBATCH --mem=1900G
 #SBATCH --time=2-00:30:00
 
 

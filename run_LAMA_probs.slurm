@@ -6,7 +6,7 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=64
-#SBATCH --mem=3600G
+#SBATCH --mem=1900G
 #SBATCH --time=2-00:30:00
 
 
@@ -113,7 +113,7 @@ padding=0
 # )
 
 NAMES=("nh")
-DISTS=("uniform" "gaussian" "beta")
+DISTS=("gaussian" "beta" "uniform" )
 DATA_DIRS=("$SLURM_SUBMIT_DIR/databases/16x16x14")
 
 

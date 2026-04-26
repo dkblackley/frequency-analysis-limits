@@ -1,0 +1,8 @@
+Bootstrap: docker
+From: rust:1.77-bookworm # Or whichever version you need
+
+%post
+    apt-get update
+    # Install all the C++ build tools and bindgen dependencies at the OS level
+    apt-get install -y cmake clang libclang-dev build-essential protobuf-compiler
+    apt-get clean

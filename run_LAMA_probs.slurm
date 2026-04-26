@@ -1,6 +1,6 @@
 #!/bin/bash -l
 #SBATCH --job-name=LAMA_prob
-#SBATCH --partition=bigmem-HiPri
+#SBATCH --partition=bigmem
 #SBATCH --output=prob_LAMA.out
 #SBATCH --error=prob_LAMA.err
 #SBATCH --nodes=1

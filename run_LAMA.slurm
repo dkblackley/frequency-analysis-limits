@@ -7,7 +7,7 @@
 #SBATCH --error=LAMA.err
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
-#SBATCH --mem=450G
+#SBATCH --mem=480G
 #SBATCH --time=2-00:30:00
 
 cd "$SLURM_SUBMIT_DIR"
@@ -92,14 +92,13 @@ $SG_RUN cargo clean
 echo "Building project inside container..."
 $SG_RUN cargo rustc --bin frequency_analysis_limits --release -- -Clink-arg=-lprotobuf
 
-padding=2
+padding=0
 
 # NAMES=("cali" "spitz")
 #DISTS=("uniform" "gaussian" "beta" "flat")
 #DATA_DIRS=("$SLURM_SUBMIT_DIR/databases/350x50" "$SLURM_SUBMIT_DIR/databases/175x25")
 
 
-NAMES=( "spitz" )
  # NAMES=("spitz")
  # DISTS=("uniform" "gaussian" "beta" "flat")
 #DATA_DIRS=(
@@ -112,18 +111,19 @@ NAMES=( "spitz" )
 #     "$SLURM_SUBMIT_DIR/databases/50x50"
 # )
 
-#NAMES=("nh")
-#DISTS=("uniform" "gaussian" "beta")
-#DATA_DIRS=("$SLURM_SUBMIT_DIR/databases/16x16x14")
+NAMES=("nh")
+DISTS=( "gaussian" "beta" "uniform")
+DATA_DIRS=("$SLURM_SUBMIT_DIR/databases/16x16x14")
 
 # Flat dist is very heavy. We only run for 2d 20x20 to 30x30.
-DISTS=("flat")
-DATA_DIRS=(
-     "$SLURM_SUBMIT_DIR/databases/15x15"
-)
+#DISTS=("flat")
+#DATA_DIRS=(
+#     "$SLURM_SUBMIT_DIR/databases/15x15"
+#)
 
 # PROBS=("0.10" "0.15" "0.20" "0.25" "0.30")
-PROBS=("1.0")
+# PROBS=("1.0")
+PROBS=("0.3")
 
 echo "Running canary"
 $SG_RUN ./target/release/frequency_analysis_limits \

@@ -8,7 +8,7 @@
 
 # NEW: GMU Array syntax.
 # 5 names * 4 dists * 1 dir * 1 prob = 20 total combinations. (Indexes 0 through 19)
-#SBATCH --array=0-44
+#SBATCH --array=0-53
 
 # NEW: GMU best practice for array logging (%A = Master Array ID, %a = Task ID)
 #SBATCH --output=logs/LAMA_%A_%a.out
@@ -50,7 +50,7 @@ export PYTHON_EXEC="/home/dblackle/.conda/envs/main/bin/python3.10"
 SG_RUN="singularity exec --bind /scratch/dblackle --bind /scratch/dblackle/cargo:/usr/local/cargo $CONTAINER"
 
 # Define your parameter arrays
-NAMES=("drink" "busstop" "shopparis" "cali" "spitz" )
+NAMES=("drink" "busstop" "highway" "shopparis" "cali" "spitz" )
 DISTS=("gaussian" "beta" "uniform")
 DATA_DIRS=( "$SLURM_SUBMIT_DIR/databases/15x15" )
 PROBS=("0.3" "0.2" "0.1")

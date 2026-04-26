@@ -4,7 +4,7 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --mem=210G
-#SBATCH --time=2-00:30:00
+#SBATCH --time=0-02:30:00
 
 # NEW: GMU Array syntax.
 # 5 names * 4 dists * 1 dir * 1 prob = 20 total combinations. (Indexes 0 through 19)

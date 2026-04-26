@@ -67,11 +67,26 @@ rm -rf "$LLVM_DIR"
 mkdir -p "$LLVM_DIR"
 cd "$LLVM_DIR"
 
-# Download official pre-compiled LLVM binaries (compatible with Debian 12)
-wget -q https://github.com/llvm/llvm-project/releases/download/llvmorg-16.0.4/clang+llvm-16.0.4-x86_64-linux-gnu-ubuntu-22.04.tar.xz
-tar -xf clang+llvm-16.0.4-x86_64-linux-gnu-ubuntu-22.04.tar.xz --strip-components=1
-rm clang+llvm-16.0.4-x86_64-linux-gnu-ubuntu-22.04.tar.xz
+# Download a stable, pre-compiled portable release of LLVM/Clang
+# (Using the Ubuntu 18.04 build for maximum glibc compatibility across distributions)
+wget -q https://github.com/llvm/llvm-project/releases/download/llvmorg-16.0.0/clang+llvm-16.0.0-x86_64-linux-gnu-ubuntu-18.04.tar.xz
+tar -xf clang+llvm-16.0.0-x86_64-linux-gnu-ubuntu-18.04.tar.xz --strip-components=1
+rm clang+llvm-16.0.0-x86_64-linux-gnu-ubuntu-18.04.tar.xz
 
+cd "$SLURM_SUBMIT_DIR"
+# ---------------------------------------
+
+# 1. Update the prepend path to include BOTH CMake and the new Clang binaries
+export SINGULARITYENV_PREPEND_PATH="$LLVM_DIR/bin:$CMAKE_DIR/bin"
+
+# 2. Point bindgen directly to the downloaded libclang shared library
+export SINGULARITYENV_LIBCLANG_PATH="$LLVM_DIR/lib"
+
+# 3. Dynamically locate the intrinsic Clang headers directory (where float.h lives)
+CLANG_INCLUDE_DIR=$(ls -d "$LLVM_DIR"/lib/clang/*/include | head -n 1)
+
+# 4. Explicitly pass the include flag to bindgen so the C compiler can find standard headers
+export SINGULARITYENV_BINDGEN_EXTRA_CLANG_ARGS="-I${CLANG_INCLUDE_DIR}"
 cd "$SLURM_SUBMIT_DIR"
 # ---------------------------------------
 

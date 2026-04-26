@@ -1,14 +1,12 @@
 #!/bin/bash -l
 #SBATCH --job-name=LAMA_prob
-#SBATCH --partition=normal
-#SBATCH --nodelist=amd051
-#SBATCH --reservation=dblackle_288
+#SBATCH --partition=bigmem
 #SBATCH --output=prob_LAMA.out
 #SBATCH --error=prob_LAMA.err
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=64
-#SBATCH --mem=470G
+#SBATCH --mem=3600G
 #SBATCH --time=2-00:30:00
 
 

@@ -1,11 +1,11 @@
 #!/bin/bash -l
 #SBATCH --job-name=LAMA
-#SBATCH --partition=bigmem
+#SBATCH --partition=normal
 #SBATCH --output=LAMA.out
 #SBATCH --error=LAMA.err
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
-#SBATCH --mem=3450G
+#SBATCH --mem=10G
 #SBATCH --time=2-00:30:00
 
 cd "$SLURM_SUBMIT_DIR"

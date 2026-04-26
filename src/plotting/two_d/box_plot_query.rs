@@ -71,7 +71,7 @@ pub fn process_and_plot_boxplots(
             // 3. LIMITS (Pre-sampled 10k)
             let limits_query = query / 100.0;
             let limits_path = format!(
-                "{}/{}/limits/{}_{}_p{}.json",
+                "{}/{}/limits/{}_{}_p{}_reconstruction.json",
                 data_dir, db_name, db_name, dist, limits_query
             );
             if let Ok(content) = fs::read_to_string(&limits_path) {
@@ -264,7 +264,7 @@ fn plot_boxplot_side_by_side(
         chart
             .configure_series_labels()
             .position(SeriesLabelPosition::UpperRight)
-            .background_style(RGBColor(255, 255, 255).mix(0.95))
+            .background_style(RGBColor(255, 255, 255).mix(0.55))
             .border_style(TRANSPARENT)
             .label_font(("Linux Biolinum", 44, FontStyle::Bold).into_font())
             .margin(11)

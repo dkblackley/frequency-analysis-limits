@@ -5,6 +5,7 @@ use crate::plotting::two_d::flat_dist_hist::plot_lama_distributions;
 use crate::plotting::two_d::mse_by_all_reconstructions::plot_histograms_of_all_reconstructions;
 use crate::plotting::two_d::mse_vs_grid_size::plot_grid_by_mse;
 use crate::plotting::two_d::spatial_plot::run_spatial_plots;
+use crate::plotting::two_d::three_dim::plot_nh_minimal_3d;
 use crate::plotting::two_d::worst_case_convex_hull::process_and_plot_convex_hulls;
 use crate::LAMA::translator::TranslatorMeta;
 use log::{info, warn};
@@ -96,6 +97,8 @@ pub fn do_plotting() {
     // let datasets = vec!["highway", "spitz"];
     let methods = vec!["even_less", "remin", "limits"];
     let distributions = vec!["uniform", "gaussian", "beta"];
+
+    plot_nh_minimal_3d().expect("TODO: panic message");
 
     for data in datasets.clone() {
         run_spatial_plots(data, "databases/50x50", "uniform", 50).unwrap();

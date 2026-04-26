@@ -4,6 +4,7 @@ pub mod flat_dist_hist;
 pub mod mse_by_all_reconstructions;
 pub(crate) mod mse_vs_grid_size;
 pub mod spatial_plot;
+pub mod three_dim;
 pub mod worst_case_convex_hull;
 
 pub fn format_db_name(db: &str) -> &str {

@@ -109,7 +109,7 @@ def main():
     solver.parameters.enumerate_all_solutions = True
     solver.parameters.num_search_workers = 1
 
-    limit = 100000 if probabilistic else 100000000000
+    limit = 20000 if probabilistic else 100000000000
     if get_one:
         limit = 1
 

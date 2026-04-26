@@ -42,7 +42,7 @@ pub fn process_and_plot_boxplots(
             if let Ok(content) = fs::read_to_string(&el_path) {
                 let data: Vec<ReconstructionDataPoint> = serde_json::from_str(&content)?;
                 let point_clouds =
-                    generate_sampled_reconstructions(&data, search_domain, 1.0, 45.0, 2.0);
+                    generate_sampled_reconstructions(&data, search_domain, 5.0, 30.0, 5.0);
                 let mses = compute_reconstruction_mses(&point_clouds);
 
                 plot_data
@@ -264,7 +264,7 @@ fn plot_boxplot_side_by_side(
         chart
             .configure_series_labels()
             .position(SeriesLabelPosition::UpperRight)
-            .background_style(RGBColor(255, 255, 255).mix(0.55))
+            .background_style(RGBColor(255, 255, 255).mix(0.15))
             .border_style(TRANSPARENT)
             .label_font(("Linux Biolinum", 44, FontStyle::Bold).into_font())
             .margin(11)

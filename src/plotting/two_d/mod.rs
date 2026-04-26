@@ -1,3 +1,4 @@
+pub mod box_plot_query;
 pub mod debug_mse;
 pub mod flat_dist_hist;
 pub mod mse_by_all_reconstructions;

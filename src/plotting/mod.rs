@@ -1,4 +1,5 @@
 use crate::plotting::post::{calculate_mse, scale_to_absolute_range};
+use crate::plotting::two_d::box_plot_query::process_and_plot_boxplots;
 use crate::plotting::two_d::debug_mse::plot_mse_frequency_histogram_split;
 use crate::plotting::two_d::flat_dist_hist::plot_lama_distributions;
 use crate::plotting::two_d::mse_by_all_reconstructions::plot_histograms_of_all_reconstructions;
@@ -122,7 +123,15 @@ pub fn do_plotting() {
     //     }
     // }
     for name in datasets.clone() {
-        let res = process_and_plot_convex_hulls(name, "databases/15x15", &*distributions);
+        // // 1. Process and Plot Convex Hulls
+        // if let Err(e) = process_and_plot_convex_hulls(name, "databases/15x15", &distributions) {
+        //     warn!("{} convex hull plot failed: {}", name, e);
+        // }
+
+        // 2. Process and Plot Box Plots
+        if let Err(e) = process_and_plot_boxplots(name, "databases/15x15", &distributions) {
+            warn!("{} box plot failed: {}", name, e);
+        }
     }
 
     // for name in datasets.clone() {

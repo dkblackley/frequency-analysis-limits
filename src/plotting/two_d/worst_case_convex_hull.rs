@@ -11,7 +11,7 @@ use rand::seq::SliceRandom;
 use rand::thread_rng;
 
 /// Maps dataset method strings to their display names, rank, and color.
-fn get_method_style(method: &str) -> (&'static str, usize, RGBColor) {
+pub fn get_method_style(method: &str) -> (&'static str, usize, RGBColor) {
     match method {
         "limits" => ("LAMa", 0, RGBColor(0, 114, 178)), // Blue
         "even_less" => ("Even Less", 1, RGBColor(230, 159, 0)), // Orange
@@ -20,7 +20,7 @@ fn get_method_style(method: &str) -> (&'static str, usize, RGBColor) {
     }
 }
 
-fn apply_transform(
+pub fn apply_transform(
     data: &[ReconstructionDataPoint],
 
     dx: f64,
@@ -64,13 +64,9 @@ fn apply_transform(
 
 pub fn generate_sampled_reconstructions(
     data: &[ReconstructionDataPoint],
-
     search_domain: (usize, usize),
-
     shift_step: f64,
-
     rot_step_deg: f64,
-
     scale_step: f64,
 ) -> Vec<Vec<ReconstructionDataPoint>> {
     // 1. Get all valid transform configurations
@@ -112,7 +108,7 @@ pub fn generate_sampled_reconstructions(
 }
 
 /// Helper function to format strings for the title
-fn format_title_case(s: &str) -> String {
+pub fn format_title_case(s: &str) -> String {
     let mut chars = s.chars();
     match chars.next() {
         None => String::new(),
@@ -122,7 +118,7 @@ fn format_title_case(s: &str) -> String {
 
 /// Helper to compute the squared Euclidean distance between two N-dimensional points
 
-fn compute_distance_sq(a: &[f64], b: &[f64]) -> f64 {
+pub fn compute_distance_sq(a: &[f64], b: &[f64]) -> f64 {
     a.iter().zip(b.iter()).map(|(x, y)| (x - y).powi(2)).sum()
 }
 
@@ -368,7 +364,7 @@ fn plot_convex_side_by_side(
                 max_mse = max_mse.max(cent_mse).max(worst_mse);
             }
         }
-        let y_max = if max_mse == 0.0 { 1.0 } else { max_mse * 1.15 };
+        let y_max = if max_mse == 0.0 { 1.0 } else { max_mse * 1.05 };
 
         let pretty_dist = format_title_case(dist);
         let title = format!("{} - {} Dist.", pretty_db, pretty_dist);
@@ -392,22 +388,22 @@ fn plot_convex_side_by_side(
             .margin_left(60)
             .margin_right(60)
             .x_label_area_size(140) // Increased area for massive x-axis text
-            .y_label_area_size(200) // Increased area for massive y-axis text
-            .build_cartesian_2d(0.0..40.0f64, 0.0..y_max)?;
+            .y_label_area_size(140) // Increased area for massive y-axis text
+            .build_cartesian_2d(10.0..30.0f64, 0.0..y_max)?; // 10-30 for x
 
         chart
             .configure_mesh()
             .bold_line_style(RGBColor(230, 230, 230))
             .light_line_style(TRANSPARENT)
             .axis_style(RGBColor(100, 100, 100))
-            .x_desc("Query Percentage (%)")
-            .y_desc("Mean Squared Error (MSE)")
-            .x_labels(5) // Hits 0, 10, 20, 30, 40
+            .x_desc("Query Percent")
+            .y_desc("MSE")
+            .x_labels(4) // Hits 10, 20, 30
             .y_labels(6)
             .axis_desc_style(("Linux Biolinum", 86, FontStyle::Bold).into_font()) // MASSIVE AXIS DESC
             .label_style(("Linux Biolinum", 68).into_font()) // MASSIVE LABELS
             .x_label_formatter(&|x| format!("{:.0}%", x))
-            .y_label_formatter(&|y| format!("{:.2}", y))
+            .y_label_formatter(&|y| format!("{:.0}", y))
             .draw()?;
 
         // Grab methods and sort by Rank so LAMa (Blue) is always first
@@ -429,17 +425,20 @@ fn plot_convex_side_by_side(
 
             // --- A: SOLID LINE (Worst-Case Midpoint) ---
             chart
-                .draw_series(LineSeries::new(worst_points.clone(), color.stroke_width(6)))?
+                .draw_series(LineSeries::new(
+                    worst_points.clone(),
+                    color.mix(0.4).stroke_width(6),
+                ))?
                 .label(pretty_name) // SIMPLIFIED: Just the method name
                 .legend(move |(x, y)| {
                     // SIMPLIFIED: Massive colored rectangle
-                    Rectangle::new([(x, y - 18), (x + 50, y + 18)], color.filled())
+                    Rectangle::new([(x, y - 12), (x + 25, y + 12)], color.filled())
                 });
 
             chart.draw_series(
                 worst_points
                     .iter()
-                    .map(|(x, y)| Circle::new((*x, *y), 15, color.filled())),
+                    .map(|(x, y)| Circle::new((*x, *y), 15, color.mix(0.4).filled())),
             )?;
 
             // --- B: DASHED LINE (Centroid Barycenter) ---
@@ -464,8 +463,8 @@ fn plot_convex_side_by_side(
             .position(SeriesLabelPosition::MiddleRight)
             .background_style(RGBColor(255, 255, 255).mix(0.95))
             .border_style(TRANSPARENT) // Removed border for cleaner look
-            .label_font(("Linux Biolinum", 56, FontStyle::Bold).into_font()) // MASSIVE LEGEND FONT
-            .margin(20)
+            .label_font(("Linux Biolinum", 44, FontStyle::Bold).into_font()) // MASSIVE LEGEND FONT
+            .margin(11)
             .draw()?;
     }
 

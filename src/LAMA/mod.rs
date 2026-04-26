@@ -247,7 +247,7 @@ pub fn lama_attack(
         return;
     }
 
-    let unique_name = format!("{db_name}_{dist}_e{eps}_d{delta}");
+    let unique_name = format!("{db_name}_{dist}_p{query_percent}");
 
     let mut correct = 0;
     let mut first_resp = HashMap::new();

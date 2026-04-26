@@ -205,7 +205,7 @@ impl PythonCpModel {
             .arg(self.num_vars.to_string())
             .arg(largest_val.to_string())
             .arg(get_one.to_string())
-            .arg(false.to_string())
+            .arg(true.to_string())
             .arg(&self.run_id)
             // 2. Pipe the streams instead of inheriting them
             .stdout(Stdio::piped())

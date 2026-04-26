@@ -4,12 +4,14 @@ use crate::plotting::two_d::flat_dist_hist::plot_lama_distributions;
 use crate::plotting::two_d::mse_by_all_reconstructions::plot_histograms_of_all_reconstructions;
 use crate::plotting::two_d::mse_vs_grid_size::plot_grid_by_mse;
 use crate::plotting::two_d::spatial_plot::run_spatial_plots;
+use crate::plotting::two_d::worst_case_convex_hull::process_and_plot_convex_hulls;
 use crate::LAMA::translator::TranslatorMeta;
 use log::{info, warn};
 use serde::{Deserialize, Serialize};
 use std::error::Error;
 use std::fs;
 
+mod convex_hull;
 mod metrics;
 pub mod post;
 pub mod tables;
@@ -119,16 +121,19 @@ pub fn do_plotting() {
     //         }
     //     }
     // }
-
     for name in datasets.clone() {
-        let res = plot_lama_distributions(name);
-        match res {
-            Ok(_) => {}
-            Err(e) => {
-                warn!("{name} LAMa 15x15 distribution histogram failed: {e}")
-            }
-        }
+        let res = process_and_plot_convex_hulls(name, "databases/15x15", &*distributions);
     }
+
+    // for name in datasets.clone() {
+    //     let res = plot_lama_distributions(name);
+    //     match res {
+    //         Ok(_) => {}
+    //         Err(e) => {
+    //             warn!("{name} LAMa 15x15 distribution histogram failed: {e}")
+    //         }
+    //     }
+    // }
 }
 
 fn get_remin_even_less(

@@ -1,259 +1,473 @@
+use crate::plotting::convex_hull::{get_per_point_convex_hulls, PointConvexHull};
+use crate::plotting::two_d::mse_by_all_reconstructions::combined_search;
 use crate::plotting::ReconstructionDataPoint;
-// Adjust to your crate's path
-use geo::{ConvexHull, MultiPoint, Point};
-use log::{debug, error};
+use log::{debug, warn};
 use plotters::prelude::*;
+use std::collections::HashMap;
 use std::error::Error;
 use std::fs;
 
-/// A simplified struct to hold only the essential connection info per cluster
-#[derive(Debug, Clone)]
-pub struct SleekPointConnection {
-    pub true_point: [f64; 2],
-    pub worst_case_point: [f64; 2],
+use rand::seq::SliceRandom;
+use rand::thread_rng;
+
+/// Maps dataset method strings to their display names, rank, and color.
+fn get_method_style(method: &str) -> (&'static str, usize, RGBColor) {
+    match method {
+        "limits" => ("LAMa", 0, RGBColor(0, 114, 178)), // Blue
+        "even_less" => ("Even Less", 1, RGBColor(230, 159, 0)), // Orange
+        "remin" => ("Remin", 2, RGBColor(0, 158, 115)), // Green
+        _ => ("Unknown", 99, BLACK),
+    }
 }
 
-pub fn do_convex_hull_plots(db_name: &str, data_dir: &str) {
-    let path = format!(
-        "{}/{}/limits/{}_uniform_e0_d0.9_reconstruction.json",
-        data_dir, db_name, db_name
+fn apply_transform(
+    data: &[ReconstructionDataPoint],
+
+    dx: f64,
+
+    dy: f64,
+
+    angle_deg: f64,
+
+    sx: f64,
+
+    sy: f64,
+) -> Vec<ReconstructionDataPoint> {
+    let rad = angle_deg.to_radians();
+
+    let (sin_t, cos_t) = rad.sin_cos();
+
+    data.iter()
+        .map(|p| {
+            let (rx, ry) = (p.reconstructed_points[0], p.reconstructed_points[1]);
+
+            let scaled_x = rx * sx;
+
+            let scaled_y = ry * sy;
+
+            let rot_x = scaled_x * cos_t - scaled_y * sin_t;
+
+            let rot_y = scaled_x * sin_t + scaled_y * cos_t;
+
+            ReconstructionDataPoint {
+                true_points: p.true_points.clone(),
+
+                reconstructed_points: vec![rot_x + dx, rot_y + dy],
+
+                unscaled_points: None,
+            }
+        })
+        .collect()
+}
+
+/// Runs the combined search, samples 10k transforms, and returns the generated point clouds.
+
+pub fn generate_sampled_reconstructions(
+    data: &[ReconstructionDataPoint],
+
+    search_domain: (usize, usize),
+
+    shift_step: f64,
+
+    rot_step_deg: f64,
+
+    scale_step: f64,
+) -> Vec<Vec<ReconstructionDataPoint>> {
+    // 1. Get all valid transform configurations
+
+    let evaluated_transforms = combined_search(
+        data,
+        search_domain,
+        shift_step,
+        rot_step_deg,
+        search_domain,
+        scale_step,
     );
-    debug!("About to load data from {}", &path);
 
-    let content = fs::read_to_string(&path).expect("Failed to read JSON file");
-    let all_data: Vec<Vec<ReconstructionDataPoint>> =
-        serde_json::from_str(&content).expect("Failed to parse JSON");
+    // 2. Shuffle and take up to 10,000
 
-    // let mut flipped: Vec<Vec<ReconstructionDataPoint>> = all_data
-    //     .iter()
-    //     .map(|cluster| {
-    //         cluster
-    //             .iter()
-    //             .map(|point| flip_coordinates(point.clone()))
-    //             .collect()
-    //     })
-    //     .collect();
+    let mut rng = thread_rng();
 
-    // let first = &flipped[0];
-    // let mut truth = Vec::new();
-    //
-    // for recon in first {
-    //     let tru = ReconstructionDataPoint {
-    //         true_points: recon.true_points.clone(),
-    //         reconstructed_points: recon.true_points.clone(),
-    //         unscaled_points: None,
-    //     };
-    //
-    //     truth.push(tru);
-    // }
-    //
-    // flipped.push(truth);
+    let mut sampled_transforms = evaluated_transforms;
 
-    // Extract ALL points rather than just the worst-case connections
-    let full_data = extract_all_points(&all_data);
-    let output_path = format!("figures/{}_comprehensive_hull.svg", db_name);
+    sampled_transforms.shuffle(&mut rng);
 
-    if let Err(e) = plot_comprehensive_convex_hull(&full_data, &output_path, 0.1, 3.0) {
-        error!("Failed to generate plot: {}", e);
-    } else {
-        debug!(
-            "Successfully generated transparent SVG plot at {}",
-            output_path
-        );
+    let sample_size = sampled_transforms.len().min(10_000);
+
+    let final_samples = &sampled_transforms[..sample_size];
+
+    // 3. Apply the transform to only the chosen 10k to save memory
+
+    let mut point_clouds = Vec::with_capacity(sample_size);
+
+    for &(_, dx, dy, angle, sx, sy) in final_samples {
+        // Assuming apply_transform is available in your scope as seen in your commented code
+
+        let recon = apply_transform(data, dx, dy, angle, sx, sy);
+
+        point_clouds.push(recon);
+    }
+
+    point_clouds
+}
+
+/// Helper function to format strings for the title
+fn format_title_case(s: &str) -> String {
+    let mut chars = s.chars();
+    match chars.next() {
+        None => String::new(),
+        Some(f) => f.to_uppercase().collect::<String>() + chars.as_str(),
     }
 }
 
-pub struct FullPlotData {
-    pub true_points: Vec<[f64; 2]>,
-    pub all_reconstructed_points: Vec<[f64; 2]>,
+/// Helper to compute the squared Euclidean distance between two N-dimensional points
+
+fn compute_distance_sq(a: &[f64], b: &[f64]) -> f64 {
+    a.iter().zip(b.iter()).map(|(x, y)| (x - y).powi(2)).sum()
 }
 
-// -----------------------------------------------------------------------------
-// Data Processing
-// -----------------------------------------------------------------------------
+/// Computes the GLOBAL MAXIMUM Centroid MSE and Worst-Case Midpoint MSE for a set of hulls.
 
-// We no longer need squared_distance since we aren't searching for the single worst point.
+/// Returns (Max Centroid MSE, Max Worst-Case MSE)
 
-pub fn extract_all_points(data: &[Vec<ReconstructionDataPoint>]) -> FullPlotData {
-    let mut true_points = Vec::new();
-    let mut all_reconstructed_points = Vec::new();
+pub fn compute_dataset_metrics(
+    hulls: &[PointConvexHull],
 
-    if data.is_empty() || data[0].is_empty() {
-        return FullPlotData {
-            true_points,
-            all_reconstructed_points,
-        };
-    }
+    true_points: &[Vec<f64>], // Ground truth points mapping 1:1 with the hulls
+) -> (f64, f64) {
+    let mut max_centroid_mse = 0.0_f64;
+    let mut max_worst_case_mse = 0.0_f64;
+    let mut has_valid_points = false;
 
-    let num_points = data[0].len();
-    let num_runs = data.len();
-
-    for point_idx in 0..num_points {
-        // Collect ground truth point
-        let true_coords = [
-            data[0][point_idx].true_points[0],
-            data[0][point_idx].true_points[1],
-        ];
-        true_points.push(true_coords);
-
-        // Collect EVERY reconstructed point across all runs
-        for run_idx in 0..num_runs {
-            let rx = data[run_idx][point_idx].reconstructed_points[0];
-            let ry = data[run_idx][point_idx].reconstructed_points[1];
-            all_reconstructed_points.push([rx, ry]);
+    for (hull, true_pt) in hulls.iter().zip(true_points.iter()) {
+        if hull.vertices.is_empty() {
+            continue;
         }
+
+        has_valid_points = true;
+        let dims = true_pt.len();
+        let num_vertices = hull.vertices.len() as f64;
+
+        // ---------------------------------------------------------
+        // 1. Calculate the Centroid (Barycenter)
+        // ---------------------------------------------------------
+
+        let mut centroid = vec![0.0; dims];
+
+        for v in &hull.vertices {
+            for i in 0..dims {
+                centroid[i] += v[i];
+            }
+        }
+
+        for i in 0..dims {
+            centroid[i] /= num_vertices;
+        }
+
+        let centroid_mse = compute_distance_sq(&centroid, true_pt) / (dims as f64);
+
+        // ---------------------------------------------------------
+
+        // 2. Calculate the Worst-Case Midpoint (Longest Diameter)
+
+        // ---------------------------------------------------------
+
+        let mut max_dist_sq = -1.0;
+
+        let mut best_v1 = &hull.vertices[0];
+
+        let mut best_v2 = &hull.vertices[0];
+
+        // O(N^2) search across vertices for the longest distance.
+
+        for i in 0..hull.vertices.len() {
+            for j in i..hull.vertices.len() {
+                let d_sq = compute_distance_sq(&hull.vertices[i], &hull.vertices[j]);
+
+                if d_sq > max_dist_sq {
+                    max_dist_sq = d_sq;
+
+                    best_v1 = &hull.vertices[i];
+
+                    best_v2 = &hull.vertices[j];
+                }
+            }
+        }
+
+        let mut midpoint = vec![0.0; dims];
+
+        for i in 0..dims {
+            midpoint[i] = (best_v1[i] + best_v2[i]) / 2.0;
+        }
+
+        let worst_case_mse = compute_distance_sq(&midpoint, true_pt) / (dims as f64);
+
+        // ---------------------------------------------------------
+
+        // 3. Track the absolute maximums instead of averaging
+
+        // ---------------------------------------------------------
+
+        max_centroid_mse = max_centroid_mse.max(centroid_mse);
+
+        max_worst_case_mse = max_worst_case_mse.max(worst_case_mse);
     }
 
-    FullPlotData {
-        true_points,
-        all_reconstructed_points,
+    if !has_valid_points {
+        return (0.0, 0.0);
     }
+
+    (max_centroid_mse, max_worst_case_mse)
 }
 
-// -----------------------------------------------------------------------------
-// Plotting
-// -----------------------------------------------------------------------------
-
-pub fn plot_comprehensive_convex_hull(
-    data: &FullPlotData,
-    output_path: &str,
-    x_padder: f64,
-    y_padder: f64,
+/// Orchestrates reading files for ALL distributions and calculating their convex hulls
+pub fn process_and_plot_convex_hulls(
+    db_name: &str,
+    data_dir: &str,
+    distributions: &[&str],
 ) -> Result<(), Box<dyn Error>> {
-    if data.true_points.is_empty() && data.all_reconstructed_points.is_empty() {
+    // Structure: dist -> method -> vec of (query, cent_mse, worst_mse)
+    let mut db_data: HashMap<&str, HashMap<String, Vec<(f64, f64, f64)>>> = HashMap::new();
+    let search_domain = (60, 60);
+    let query_percents = vec![10.0, 20.0, 30.0];
+
+    // Helper closure to extract true points for the MSE calculator
+    let extract_true_points = |data: &[ReconstructionDataPoint]| -> Vec<Vec<f64>> {
+        data.iter().map(|p| p.true_points.clone()).collect()
+    };
+
+    for &dist in distributions {
+        let mut plot_data: HashMap<String, Vec<(f64, f64, f64)>> = HashMap::new();
+
+        for &query in &query_percents {
+            // ---------------------------------------------------------
+            // 1. EVEN LESS (Needs sampling)
+            // ---------------------------------------------------------
+            let el_path = format!(
+                "{}/{}/even_less/{}_prob{}.0_{}_15x15_even_less.json",
+                data_dir, db_name, db_name, query, dist
+            );
+            if let Ok(content) = fs::read_to_string(&el_path) {
+                let data: Vec<ReconstructionDataPoint> = serde_json::from_str(&content)?;
+                let true_points = extract_true_points(&data);
+
+                let point_clouds =
+                    generate_sampled_reconstructions(&data, search_domain, 5.0, 30.0, 5.0);
+                let hulls = get_per_point_convex_hulls(&point_clouds);
+                let (cent_mse, worst_mse) = compute_dataset_metrics(&hulls, &true_points);
+
+                plot_data
+                    .entry("even_less".to_string())
+                    .or_default()
+                    .push((query, cent_mse, worst_mse));
+            }
+
+            // ---------------------------------------------------------
+            // 2. REMIN (Needs sampling)
+            // ---------------------------------------------------------
+            let remin_path = format!(
+                "{}/{}/remin/{}_prob{}.0_{}_15x15_classic.json",
+                data_dir, db_name, db_name, query, dist
+            );
+            if let Ok(content) = fs::read_to_string(&remin_path) {
+                let data: Vec<ReconstructionDataPoint> = serde_json::from_str(&content)?;
+                let true_points = extract_true_points(&data);
+
+                let point_clouds =
+                    generate_sampled_reconstructions(&data, search_domain, 5.0, 30.0, 5.0);
+                let hulls = get_per_point_convex_hulls(&point_clouds);
+                let (cent_mse, worst_mse) = compute_dataset_metrics(&hulls, &true_points);
+
+                plot_data
+                    .entry("remin".to_string())
+                    .or_default()
+                    .push((query, cent_mse, worst_mse));
+            }
+
+            // ---------------------------------------------------------
+            // 3. LIMITS
+            // ---------------------------------------------------------
+            let limits_query = query / 100.0;
+            let limits_path = format!(
+                "{}/{}/limits/{}_{}_p{}.json",
+                data_dir, db_name, db_name, dist, limits_query
+            );
+
+            if let Ok(content) = fs::read_to_string(&limits_path) {
+                let multi_run_data: Vec<Vec<ReconstructionDataPoint>> =
+                    serde_json::from_str(&content)?;
+
+                if !multi_run_data.is_empty() {
+                    let true_points = extract_true_points(&multi_run_data[0]);
+                    let hulls = get_per_point_convex_hulls(&multi_run_data);
+                    let (cent_mse, worst_mse) = compute_dataset_metrics(&hulls, &true_points);
+
+                    plot_data
+                        .entry("limits".to_string())
+                        .or_default()
+                        .push((query, cent_mse, worst_mse));
+                }
+            } else {
+                warn!("Could not find limits file: {}", limits_path);
+            }
+        } // END QUERY LOOP
+
+        db_data.insert(dist, plot_data);
+    } // END DISTRIBUTION LOOP
+
+    // ---------------------------------------------------------
+    // 4. Generate the Combined Plot
+    // ---------------------------------------------------------
+    if !db_data.is_empty() {
+        let output_svg = format!("figures/convex_lines/{}_convex_mse_combined.svg", db_name);
+        plot_convex_side_by_side(db_name, &db_data, distributions, &output_svg)?;
+        debug!(
+            "Successfully generated combined convex hull plot at {}",
+            output_svg
+        );
+    } else {
+        warn!("No data found for {}, skipping plot.", db_name);
+    }
+
+    Ok(())
+}
+
+fn plot_convex_side_by_side(
+    db_name: &str,
+    db_data: &HashMap<&str, HashMap<String, Vec<(f64, f64, f64)>>>,
+    distributions: &[&str],
+    output_path: &str,
+) -> Result<(), Box<dyn Error>> {
+    let num_dists = distributions.len();
+    if num_dists == 0 {
         return Ok(());
     }
 
-    // 1. Determine absolute boundaries based on ALL points
-    let (mut min_x, mut max_x) = (f64::INFINITY, f64::NEG_INFINITY);
-    let (mut min_y, mut max_y) = (f64::INFINITY, f64::NEG_INFINITY);
+    // REDUCED overall canvas size to make the plot area smaller
+    let total_width = 850 * num_dists as u32;
+    let total_height = 700;
 
-    let all_points_iter = data
-        .true_points
-        .iter()
-        .chain(data.all_reconstructed_points.iter());
+    let root = SVGBackend::new(output_path, (total_width, total_height)).into_drawing_area();
+    root.fill(&WHITE)?;
 
-    for p in all_points_iter {
-        min_x = min_x.min(p[0]);
-        max_x = max_x.max(p[0]);
-        min_y = min_y.min(p[1]);
-        max_y = max_y.max(p[1]);
-    }
+    let sub_areas = root.split_evenly((1, num_dists));
+    let pretty_db = db_name.to_uppercase();
 
-    // 2. Pad data ranges
-    let x_pad = (max_x - min_x) * x_padder;
-    let y_pad = (max_y - min_y) * y_padder;
+    for (i, &dist) in distributions.iter().enumerate() {
+        let area = &sub_areas[i];
 
-    let final_min_x = min_x - x_pad;
-    let final_max_x = max_x + x_pad;
-    let final_min_y = min_y - y_pad;
-    let final_max_y = max_y + y_pad;
+        let plot_data = match db_data.get(dist) {
+            Some(data) if !data.is_empty() => data,
+            _ => continue,
+        };
 
-    // -------------------------------------------------------------------------
-    // ASPECT RATIO FIX
-    // -------------------------------------------------------------------------
-    let range_x = final_max_x - final_min_x;
-    let range_y = final_max_y - final_min_y;
+        // 1. Find the Maximum Y value for THIS subplot
+        let mut max_mse = 0.0_f64;
+        for points in plot_data.values() {
+            for &(_, cent_mse, worst_mse) in points {
+                max_mse = max_mse.max(cent_mse).max(worst_mse);
+            }
+        }
+        let y_max = if max_mse == 0.0 { 1.0 } else { max_mse * 1.15 };
 
-    let base_width: f64 = 1600.0;
-    let calculated_height = (base_width * (range_y / range_x)).max(300.0);
+        let pretty_dist = format_title_case(dist);
+        let title = format!("{} - {} Dist.", pretty_db, pretty_dist);
 
-    let root = SVGBackend::new(output_path, (base_width as u32, calculated_height as u32))
-        .into_drawing_area();
+        // Increased title space slightly to support larger font
+        let (title_area, chart_area) = area.split_vertically(140);
+        let centered_title_area = title_area.margin(0, 0, 180, 20);
 
-    root.fill(&TRANSPARENT)?;
+        ChartBuilder::on(&centered_title_area)
+            .caption(
+                title,
+                ("Linux Biolinum", 76, FontStyle::Bold) // MASSIVE TITLE
+                    .into_font()
+                    .color(&BLACK),
+            )
+            .build_cartesian_2d(0..1, 0..1)?;
 
-    let mut chart = ChartBuilder::on(&root)
-        .margin(40)
-        .x_label_area_size(50)
-        .y_label_area_size(80)
-        .build_cartesian_2d(final_min_x..final_max_x, final_min_y..final_max_y)?;
+        let mut chart = ChartBuilder::on(&chart_area)
+            .margin_top(10)
+            .margin_bottom(30)
+            .margin_left(60)
+            .margin_right(60)
+            .x_label_area_size(140) // Increased area for massive x-axis text
+            .y_label_area_size(200) // Increased area for massive y-axis text
+            .build_cartesian_2d(0.0..40.0f64, 0.0..y_max)?;
 
-    let text_color = BLACK;
-    let true_blue = RGBColor(0, 114, 178);
-    let error_vermilion = RGBColor(213, 94, 0);
-
-    chart
-        .configure_mesh()
-        .bold_line_style(RGBColor(235, 235, 235))
-        .light_line_style(TRANSPARENT)
-        .axis_style(&text_color)
-        .x_desc("Component 1")
-        .y_desc("Component 2")
-        .label_style(("Linux Biolinum", 18).into_font().color(&text_color))
-        .draw()?;
-
-    // -------------------------------------------------------------------------
-    // LAYER 1: Calculate and draw the Global Convex Hull
-    // -------------------------------------------------------------------------
-    // Map ALL data (ground truth + reconstructions) into geo::Point structs
-    let geo_points: Vec<Point<f64>> = data
-        .true_points
-        .iter()
-        .chain(data.all_reconstructed_points.iter())
-        .map(|p| Point::new(p[0], p[1]))
-        .collect();
-
-    let multi_point = MultiPoint::new(geo_points);
-    let convex_hull_polygon = multi_point.convex_hull();
-
-    let hull_coords: Vec<(f64, f64)> = convex_hull_polygon
-        .exterior()
-        .coords()
-        .map(|coord| (coord.x, coord.y))
-        .collect();
-
-    if !hull_coords.is_empty() {
-        // Draw the filled translucent interior of the hull
-        chart.draw_series(std::iter::once(Polygon::new(
-            hull_coords.clone(),
-            error_vermilion.mix(0.15).filled(),
-        )))?;
-
-        // Draw the solid boundary line
         chart
-            .draw_series(std::iter::once(PathElement::new(
-                hull_coords.clone(),
-                error_vermilion.stroke_width(2),
-            )))?
-            .label("Global Boundary (Hull)")
-            .legend(move |(x, y)| {
-                Rectangle::new(
-                    [(x, y - 5), (x + 20, y + 5)],
-                    error_vermilion.mix(0.15).filled(),
-                )
-            });
+            .configure_mesh()
+            .bold_line_style(RGBColor(230, 230, 230))
+            .light_line_style(TRANSPARENT)
+            .axis_style(RGBColor(100, 100, 100))
+            .x_desc("Query Percentage (%)")
+            .y_desc("Mean Squared Error (MSE)")
+            .x_labels(5) // Hits 0, 10, 20, 30, 40
+            .y_labels(6)
+            .axis_desc_style(("Linux Biolinum", 86, FontStyle::Bold).into_font()) // MASSIVE AXIS DESC
+            .label_style(("Linux Biolinum", 68).into_font()) // MASSIVE LABELS
+            .x_label_formatter(&|x| format!("{:.0}%", x))
+            .y_label_formatter(&|y| format!("{:.2}", y))
+            .draw()?;
 
-        // NEW: Explicitly plot the vertices that define the convex hull
-        chart
-            .draw_series(
-                hull_coords
+        // Grab methods and sort by Rank so LAMa (Blue) is always first
+        let mut mapped_methods: Vec<(&String, &str, usize, RGBColor)> = plot_data
+            .keys()
+            .map(|method| {
+                let (pretty, rank, color) = get_method_style(method);
+                (method, pretty, rank, color)
+            })
+            .collect();
+        mapped_methods.sort_by_key(|&(_, _, rank, _)| rank);
+
+        for (raw_method, pretty_name, _, color) in mapped_methods {
+            let mut sorted_data = plot_data[raw_method].clone();
+            sorted_data.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
+
+            let centroid_points: Vec<_> = sorted_data.iter().map(|(q, c, _)| (*q, *c)).collect();
+            let worst_points: Vec<_> = sorted_data.iter().map(|(q, _, w)| (*q, *w)).collect();
+
+            // --- A: SOLID LINE (Worst-Case Midpoint) ---
+            chart
+                .draw_series(LineSeries::new(worst_points.clone(), color.stroke_width(6)))?
+                .label(pretty_name) // SIMPLIFIED: Just the method name
+                .legend(move |(x, y)| {
+                    // SIMPLIFIED: Massive colored rectangle
+                    Rectangle::new([(x, y - 18), (x + 50, y + 18)], color.filled())
+                });
+
+            chart.draw_series(
+                worst_points
                     .iter()
-                    .map(|&(x, y)| Circle::new((x, y), 6, error_vermilion.filled())),
-            )?
-            .label("Hull Defining Points")
-            .legend(move |(x, y)| Circle::new((x, y), 6, error_vermilion.filled()));
+                    .map(|(x, y)| Circle::new((*x, *y), 15, color.filled())),
+            )?;
+
+            // --- B: DASHED LINE (Centroid Barycenter) ---
+            // Notice: We omit `.label()` and `.legend()` entirely here
+            chart.draw_series(DashedLineSeries::new(
+                centroid_points.clone(),
+                15, // Dash length
+                10, // Space length
+                color.stroke_width(5),
+            ))?;
+
+            chart.draw_series(
+                centroid_points
+                    .iter()
+                    .map(|(x, y)| Circle::new((*x, *y), 12, color.stroke_width(4))),
+            )?;
+        }
+
+        // Apply simplified, ultra-accessible legend styling
+        chart
+            .configure_series_labels()
+            .position(SeriesLabelPosition::MiddleRight)
+            .background_style(RGBColor(255, 255, 255).mix(0.95))
+            .border_style(TRANSPARENT) // Removed border for cleaner look
+            .label_font(("Linux Biolinum", 56, FontStyle::Bold).into_font()) // MASSIVE LEGEND FONT
+            .margin(20)
+            .draw()?;
     }
-
-    // -------------------------------------------------------------------------
-    // LAYER 2: Plot Ground Truth Data on top
-    // -------------------------------------------------------------------------
-    chart
-        .draw_series(
-            data.true_points
-                .iter()
-                .map(|p| Circle::new((p[0], p[1]), 5, true_blue.filled())),
-        )?
-        .label("Ground Truth")
-        .legend(move |(x, y)| Circle::new((x, y), 5, true_blue.filled()));
-
-    chart
-        .configure_series_labels()
-        .position(SeriesLabelPosition::UpperLeft)
-        .background_style(WHITE.mix(0.95).filled())
-        .border_style(TRANSPARENT)
-        .label_font(("Linux Biolinum", 16).into_font().color(&text_color))
-        .draw()?;
 
     root.present()?;
     Ok(())

@@ -1,14 +1,12 @@
 #!/bin/bash -l
 #SBATCH --job-name=LAMA_prob
-#SBATCH --partition=normal
-#SBATCH --nodelist=amd051
-#SBATCH --reservation=dblackle_288
+#SBATCH --partition=bigmem
 #SBATCH --output=prob_LAMA.out
 #SBATCH --error=prob_LAMA.err
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=64
-#SBATCH --mem=400G
+#SBATCH --mem=3500G
 #SBATCH --time=2-00:30:00
 
 
@@ -101,7 +99,7 @@ padding=0
 #DATA_DIRS=("$SLURM_SUBMIT_DIR/databases/350x50" "$SLURM_SUBMIT_DIR/databases/175x25")
 
 
- NAMES=("shopparis" "highway" "busstop" "drink" "cali" "spitz")
+ #NAMES=("shopparis" "highway" "busstop" "drink" "cali" "spitz")
  # DISTS=("uniform" "gaussian" "beta" "flat")
 # DISTS=("flat")
 #DATA_DIRS=(
@@ -114,18 +112,17 @@ padding=0
 #     "$SLURM_SUBMIT_DIR/databases/50x50"
 # )
 
-#NAMES=("nh")
-#DISTS=("uniform" "gaussian" "beta")
-#DATA_DIRS=("$SLURM_SUBMIT_DIR/databases/16x16x14")
+NAMES=("nh")
+DISTS=("uniform" "gaussian" "beta")
+DATA_DIRS=("$SLURM_SUBMIT_DIR/databases/16x16x14")
 
 
-DISTS=("uniform" "gaussian" "beta" )
-DATA_DIRS=(
-     "$SLURM_SUBMIT_DIR/databases/15x15"
-     "$SLURM_SUBMIT_DIR/databases/50x50"
-     )
+#DISTS=("uniform" "gaussian" "beta" )
+#DATA_DIRS=(
+#     "$SLURM_SUBMIT_DIR/databases/16x16x14"
+#     )
 
-PROBS=("0.3" "0.2" "0.1")
+PROBS=("0.3")
 # PROBS=("1.0")
 
 echo "Running canary"
@@ -224,7 +221,7 @@ fi
  FAILED_RUNS=()
 
  # 1. Loop through dimensions 2, 3, 4, 5, and 6
- for dim in {2..6}; do
+ for dim in {5..6}; do
 
      # 2. Dynamically build the "10x10x..." string based on the dimension
      dim_str="5"

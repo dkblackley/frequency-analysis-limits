@@ -37,7 +37,6 @@ impl Translator {
         info!("Starting");
         let mut rng = StdRng::seed_from_u64(42);
         encrypted_records.shuffle(&mut rng);
-
         let mut cp_model = PythonCpModel::new();
         let (var_index_map, enc_id_to_intvar) =
             Self::set_all_vars(&mut cp_model, largest_val, encrypted_records);
@@ -71,7 +70,7 @@ impl Translator {
         for i in 2..(max_t + 1) {
             // This may be too low for small databases
             // let safety_cap = (largest_val.clone() * 25) * (i as i64);
-            let safety_cap = 65;
+            let safety_cap = 100;
             // amount = largest_val.pow(i as u32);
             trunc_amount.push(safety_cap);
         }

@@ -154,8 +154,8 @@ for data_dir in "${DATA_DIRS[@]}"; do
             echo "========================================"
 
             # Determine initial 't' value based on distribution type
-            if [ "$dist" == "flat" ]; then
-                t_val=2
+            if [ "$dist" == "uniform" ]; then
+                t_val=3
             else
                 t_val=2
             fi
@@ -248,7 +248,7 @@ fi
 
          # Determine initial 't' value based on distribution type
          if [ "$dist" == "uniform" ]; then
-             t_val=2
+             t_val=3
          else
              t_val=2
          fi

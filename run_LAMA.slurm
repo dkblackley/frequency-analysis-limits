@@ -16,9 +16,9 @@ module --quiet purge
 module load hosts/hopper
 module load singularity
 
-cd "$SLURM_SUBMIT_DIR"
 # ---------------------------------------
-
+# 1. Setup OR-Tools (Outside Container)
+# ---------------------------------------
 ORTOOLS_DIR="/scratch/dblackle/ortools"
 echo "Setting up OR-Tools..."
 rm -rf "$ORTOOLS_DIR"
@@ -30,81 +30,46 @@ tar -xf or-tools_amd64_debian-12_cpp_v9.15.6755.tar.gz --strip-components=1
 rm or-tools_amd64_debian-12_cpp_v9.15.6755.tar.gz
 
 cd "$SLURM_SUBMIT_DIR"
-# ---------------------------------------
 
+# Export OR-Tools paths to the container
 export SINGULARITYENV_ORTOOLS_PREFIX="$ORTOOLS_DIR"
 export SINGULARITYENV_LD_LIBRARY_PATH="$ORTOOLS_DIR/lib"
 export SINGULARITYENV_LIBRARY_PATH="$ORTOOLS_DIR/lib"
 
-# Enable Rust logging and backtraces
-export SINGULARITYENV_RUST_LOG="debug"
-export SINGULARITYENV_RUST_BACKTRACE="1"
-
-CMAKE_DIR="/scratch/dblackle/cmake_portable"
-echo "Setting up portable CMake..."
-rm -rf "$CMAKE_DIR"
-mkdir -p "$CMAKE_DIR"
-cd "$CMAKE_DIR"
-
-wget -q https://github.com/Kitware/CMake/releases/download/v3.29.3/cmake-3.29.3-linux-x86_64.tar.gz
-tar -xf cmake-3.29.3-linux-x86_64.tar.gz --strip-components=1
-rm cmake-3.29.3-linux-x86_64.tar.gz
-
-cd "$SLURM_SUBMIT_DIR"
 # ---------------------------------------
-
-# Safely prepend the portable binary to the container's internal PATH
-export SINGULARITYENV_PREPEND_PATH="$CMAKE_DIR/bin"
-
+# 2. Setup Python Environment
+# ---------------------------------------
 source /home/dblackle/miniconda3/etc/profile.d/conda.sh
 conda activate main
 export PYTHON_EXEC="/home/dblackle/.conda/envs/main/bin/python3.10"
 
-## --- 3. Download and Unpack portable LLVM/Clang ---
-LLVM_DIR="/scratch/dblackle/llvm_portable"
-echo "Setting up portable LLVM/Clang..."
-rm -rf "$LLVM_DIR"
-mkdir -p "$LLVM_DIR"
-cd "$LLVM_DIR"
-
-# Download a stable, pre-compiled portable release of LLVM/Clang
-wget -q https://github.com/llvm/llvm-project/releases/download/llvmorg-16.0.0/clang+llvm-16.0.0-x86_64-linux-gnu-ubuntu-18.04.tar.xz
-tar -xf clang+llvm-16.0.0-x86_64-linux-gnu-ubuntu-18.04.tar.xz --strip-components=1
-rm clang+llvm-16.0.0-x86_64-linux-gnu-ubuntu-18.04.tar.xz
-
-cd "$SLURM_SUBMIT_DIR"
 # ---------------------------------------
-
-export SINGULARITYENV_PREPEND_PATH="$LLVM_DIR/bin:$CMAKE_DIR/bin"
-export SINGULARITYENV_LIBCLANG_PATH="$LLVM_DIR/lib"
-
-# THE DIRTY FIX:
-# Force feed bindgen the absolute, hardcoded paths to the exact location of the
-# intrinsic Clang headers for LLVM 16. We inject both '16' and '16.0.0' to cover
-# our bases regardless of how the tarball drops the directory structure.
-export SINGULARITYENV_C_INCLUDE_PATH="$LLVM_DIR/lib/clang/16/include:$LLVM_DIR/lib/clang/16.0.0/include"
-export SINGULARITYENV_CPLUS_INCLUDE_PATH="$LLVM_DIR/lib/clang/16/include:$LLVM_DIR/lib/clang/16.0.0/include"
-export SINGULARITYENV_BINDGEN_EXTRA_CLANG_ARGS="-I$LLVM_DIR/lib/clang/16/include -I$LLVM_DIR/lib/clang/16.0.0/include"
-
-cd "$SLURM_SUBMIT_DIR"
+# 3. Rust Environment Variables
 # ---------------------------------------
-
-# Point Rust's bindgen tool directly to the downloaded libclang.so
-export SINGULARITYENV_LIBCLANG_PATH="$LLVM_DIR/lib"
-
-CONTAINER="/scratch/dblackle/rust_env.sif"
-
+export SINGULARITYENV_RUST_LOG="debug"
+export SINGULARITYENV_RUST_BACKTRACE="1"
 export SINGULARITYENV_RAYON_NUM_THREADS=$SLURM_CPUS_PER_TASK
 
+# Output the full debug trace if bindgen fails again
+export SINGULARITYENV_CARGO_PROFILE_RELEASE_BUILD_OVERRIDE_DEBUG="true"
+
+# ---------------------------------------
+# 4. Execute Build in Container
+# ---------------------------------------
+CONTAINER="/scratch/dblackle/rust_env.sif"
 SG_RUN="singularity exec --bind /scratch/dblackle --bind /scratch/dblackle/cargo:/usr/local/cargo $CONTAINER"
-echo "Wiping corrupted global Cargo registry cache..."
+
+echo "Wiping global Cargo registry cache to ensure clean state..."
 rm -rf /scratch/dblackle/cargo/registry
 
 echo "Cleaning previous cached builds..."
 $SG_RUN cargo clean
 
 echo "Building project inside container..."
-$SG_RUN cargo rustc --bin frequency_analysis_limits --release -- -Clink-arg=-lprotobuf
+# Pipe output to a file so we don't lose the error message if it crashes
+$SG_RUN cargo rustc --bin frequency_analysis_limits --release -- -Clink-arg=-lprotobuf > full_build_log.txt 2>&1
+
+echo "Build finished. Check full_build_log.txt for details."
 
 padding=0
 

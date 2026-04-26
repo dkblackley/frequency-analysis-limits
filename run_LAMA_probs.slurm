@@ -1,12 +1,12 @@
 #!/bin/bash -l
 #SBATCH --job-name=LAMA_prob
-#SBATCH --partition=bigmem
+#SBATCH --partition=bigmem-HiPri
 #SBATCH --output=prob_LAMA.out
 #SBATCH --error=prob_LAMA.err
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --mem=3500G
-#SBATCH --time=2-00:30:00
+#SBATCH --time=0-11:30:00
 
 
 cd "$SLURM_SUBMIT_DIR"

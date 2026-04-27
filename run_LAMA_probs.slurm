@@ -5,7 +5,7 @@
 #SBATCH --error=prob_LAMA.err
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
-#SBATCH --mem=900G
+#SBATCH --mem=3200G
 #SBATCH --time=2-00:30:00
 
 

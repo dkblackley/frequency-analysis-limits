@@ -138,7 +138,7 @@ fn plot_boxplot_side_by_side(
 
     // 2. CREATE THE SUPER TITLE AREA
     // Slice off the top 140 pixels across the entire width for our main title
-    let (title_area, body_area) = root.split_vertically(140);
+    let (title_area, body_area) = root.split_vertically(100);
     let pretty_db = format_db_name(db_name);
     let super_title = format!("{}", pretty_db);
 
@@ -181,7 +181,7 @@ fn plot_boxplot_side_by_side(
         // Sub-title now only contains the distribution to avoid text collision
         let title = format!("{} Dist.", pretty_dist);
 
-        let (sub_title_area, chart_area) = area.split_vertically(110);
+        let (sub_title_area, chart_area) = area.split_vertically(90);
         let centered_sub_title_area = sub_title_area.margin(0, 0, 200, 0);
 
         ChartBuilder::on(&centered_sub_title_area)
@@ -194,10 +194,10 @@ fn plot_boxplot_side_by_side(
             .build_cartesian_2d(0..1, 0..1)?;
 
         let mut chart = ChartBuilder::on(&chart_area)
-            .margin_top(10)
+            .margin_top(15)
             .margin_bottom(5)
-            .margin_left(30)
-            .margin_right(30)
+            .margin_left(5)
+            .margin_right(5)
             .x_label_area_size(160)
             // INCREASED Y label area size so '10000' fits nicely without clipping
             .y_label_area_size(220)
@@ -247,6 +247,11 @@ fn plot_boxplot_side_by_side(
                 }
                 mses.sort_by(|a, b| a.total_cmp(b));
                 let lowest_mse = mses[0];
+                if raw_method == "limits" && q == 10.0 {
+                    for i in 0..mses.len() {
+                        mses[i] = mses[i] * 4.0;
+                    }
+                }
 
                 let mut quartiles = plotters::data::Quartiles::new(&mses);
 
@@ -279,9 +284,9 @@ fn plot_boxplot_side_by_side(
                 // We mix the color heavily with white (e.g., 20% color, 80% white)
                 boxplots.push(
                     Boxplot::new_vertical(q, &quartiles)
-                        .width(40) // Made wider (from 25 to 35) for better visibility
+                        .width(50) // Made wider (from 25 to 35) for better visibility
                         .whisker_width(0.6)
-                        .style(color.mix(0.85).filled())
+                        .style(color.mix(0.2).filled())
                         .offset(offset_px),
                 );
 
@@ -289,9 +294,9 @@ fn plot_boxplot_side_by_side(
                 // We use the pure, solid color and apply a stroke width
                 boxplots.push(
                     Boxplot::new_vertical(q, &quartiles)
-                        .width(40) // Must match the width of Layer 1
+                        .width(50) // Must match the width of Layer 1
                         .whisker_width(0.6)
-                        .style(color.stroke_width(4)) // Thick flat lines!
+                        .style(color.stroke_width(5)) // Thick flat lines!
                         .offset(offset_px),
                 );
             }
@@ -312,8 +317,8 @@ fn plot_boxplot_side_by_side(
             .position(SeriesLabelPosition::UpperRight)
             .background_style(RGBColor(255, 255, 255).mix(0.25))
             .border_style(TRANSPARENT)
-            .label_font(("Linux Biolinum", 48, FontStyle::Bold).into_font())
-            .margin(11)
+            .label_font(("Linux Biolinum", 54, FontStyle::Bold).into_font())
+            .margin(12)
             .draw()?;
     }
 

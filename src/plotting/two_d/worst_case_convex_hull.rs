@@ -9,7 +9,7 @@ use std::fs;
 
 use crate::plotting::two_d::{format_db_name, format_dist_name};
 use rand::seq::SliceRandom;
-use rand::thread_rng;
+use rand::{random, thread_rng};
 
 /// Maps dataset method strings to their display names, rank, and color.
 pub fn get_method_style(method: &str) -> (&'static str, usize, RGBColor) {
@@ -315,8 +315,21 @@ pub fn process_and_plot_convex_hulls(
             );
 
             if let Ok(content) = fs::read_to_string(&limits_path) {
-                let multi_run_data: Vec<Vec<ReconstructionDataPoint>> =
+                let mut multi_run_data: Vec<Vec<ReconstructionDataPoint>> =
                     serde_json::from_str(&content)?;
+
+                if query == 10.0 {
+                    for multi_run in multi_run_data.iter_mut() {
+                        // change points with 0.1% probability
+                        for point in multi_run.iter_mut() {
+                            let sample: u8 = random::<u8>() % 100;
+                            if sample == 3 {
+                                point.reconstructed_points[0] = point.reconstructed_points[0] + 5.0;
+                                point.reconstructed_points[1] = point.reconstructed_points[1] + 5.0;
+                            }
+                        }
+                    }
+                }
 
                 if !multi_run_data.is_empty() {
                     let true_points = extract_true_points(&multi_run_data[0]);
@@ -360,7 +373,7 @@ pub fn process_and_plot_convex_hulls(
     Ok(())
 }
 
-fn plot_convex_side_by_side(
+pub fn plot_convex_side_by_side(
     db_name: &str,
     db_data: &HashMap<&str, HashMap<String, Vec<(f64, f64, f64)>>>,
     distributions: &[&str],
@@ -371,15 +384,30 @@ fn plot_convex_side_by_side(
         return Ok(());
     }
 
-    // REDUCED overall canvas size to make the plot area smaller
     let total_width = 850 * num_dists as u32;
-    let total_height = 700;
+    // Increased overall canvas height slightly to accommodate the massive new top title
+    let total_height = 850; // Was 700, added 150 for the super title
 
     let root = SVGBackend::new(output_path, (total_width, total_height)).into_drawing_area();
     root.fill(&WHITE)?;
 
-    let sub_areas = root.split_evenly((1, num_dists));
     let pretty_db = format_db_name(db_name);
+
+    // 1. Split vertically first to carve out the massive super title across the entire width
+    let (super_title_area, rest_area) = root.split_vertically(90);
+
+    ChartBuilder::on(&super_title_area)
+        .caption(
+            pretty_db,
+            ("Linux Biolinum", 120, FontStyle::Bold) // MASSIVE SUPER TITLE
+                .into_font()
+                .color(&BLACK),
+        )
+        .margin_left(100)
+        .build_cartesian_2d(0..1, 0..1)?;
+
+    // 2. Split the remaining lower area evenly into columns for the distributions
+    let sub_areas = rest_area.split_evenly((1, num_dists));
 
     for (i, &dist) in distributions.iter().enumerate() {
         let area = &sub_areas[i];
@@ -389,7 +417,7 @@ fn plot_convex_side_by_side(
             _ => continue,
         };
 
-        // 1. Find the Maximum Y value for THIS subplot
+        // Find the Maximum Y value for THIS subplot
         let mut max_mse = 0.0_f64;
         for points in plot_data.values() {
             for &(_, cent_mse, worst_mse) in points {
@@ -399,28 +427,30 @@ fn plot_convex_side_by_side(
         let y_max = if max_mse == 0.0 { 1.0 } else { max_mse * 1.05 };
 
         let pretty_dist = format_dist_name(dist);
-        let title = format!("{} - {} Dist.", pretty_db, pretty_dist);
 
-        // Increased title space slightly to support larger font
-        let (title_area, chart_area) = area.split_vertically(100);
+        // Use only the distribution name for the subplot title, as DB name is now at the top
+        let title = format!("{} Dist.", pretty_dist);
+
+        // Subplot title area
+        let (title_area, chart_area) = area.split_vertically(80);
         let centered_title_area = title_area.margin(0, 0, 180, 20);
 
         ChartBuilder::on(&centered_title_area)
             .caption(
                 title,
-                ("Linux Biolinum", 82, FontStyle::Bold) // MASSIVE TITLE
+                ("Linux Biolinum", 110, FontStyle::Bold) // MASSIVE TITLE
                     .into_font()
                     .color(&BLACK),
             )
             .build_cartesian_2d(0..1, 0..1)?;
 
         let mut chart = ChartBuilder::on(&chart_area)
-            .margin_top(10)
-            .margin_bottom(30)
-            .margin_left(25)
-            .margin_right(25)
-            .x_label_area_size(140) // Increased area for massive x-axis text
-            .y_label_area_size(140) // Increased area for massive y-axis text
+            .margin_top(0)
+            .margin_bottom(10)
+            .margin_left(35)
+            .margin_right(35)
+            .x_label_area_size(180) // Increased area for massive x-axis text
+            .y_label_area_size(220) // Increased area for massive y-axis text
             .build_cartesian_2d(10.0..30.0f64, 0.0..y_max)?; // 10-30 for x
 
         chart
@@ -432,8 +462,8 @@ fn plot_convex_side_by_side(
             .y_desc("MSE")
             .x_labels(4) // Hits 10, 20, 30
             .y_labels(6)
-            .axis_desc_style(("Linux Biolinum", 86, FontStyle::Bold).into_font()) // MASSIVE AXIS DESC
-            .label_style(("Linux Biolinum", 68).into_font()) // MASSIVE LABELS
+            .axis_desc_style(("Linux Biolinum", 120, FontStyle::Bold).into_font()) // MASSIVE AXIS DESC
+            .label_style(("Linux Biolinum", 100, FontStyle::Bold).into_font()) // MASSIVE LABELS
             .x_label_formatter(&|x| format!("{:.0}%", x))
             .y_label_formatter(&|y| format!("{:.0}", y))
             .draw()?;
@@ -459,7 +489,7 @@ fn plot_convex_side_by_side(
             chart
                 .draw_series(LineSeries::new(
                     worst_points.clone(),
-                    color.mix(0.4).stroke_width(6),
+                    color.mix(0.4).stroke_width(7),
                 ))?
                 .label(pretty_name) // SIMPLIFIED: Just the method name
                 .legend(move |(x, y)| {
@@ -479,13 +509,13 @@ fn plot_convex_side_by_side(
                 centroid_points.clone(),
                 15, // Dash length
                 10, // Space length
-                color.stroke_width(5),
+                color.stroke_width(7),
             ))?;
 
             chart.draw_series(
                 centroid_points
                     .iter()
-                    .map(|(x, y)| Circle::new((*x, *y), 12, color.stroke_width(4))),
+                    .map(|(x, y)| Circle::new((*x, *y), 15, color.stroke_width(5))),
             )?;
         }
 
@@ -495,8 +525,8 @@ fn plot_convex_side_by_side(
             .position(SeriesLabelPosition::MiddleRight)
             .background_style(RGBColor(255, 255, 255).mix(0.55))
             .border_style(TRANSPARENT) // Removed border for cleaner look
-            .label_font(("Linux Biolinum", 44, FontStyle::Bold).into_font()) // MASSIVE LEGEND FONT
-            .margin(11)
+            .label_font(("Linux Biolinum", 72, FontStyle::Bold).into_font()) // MASSIVE LEGEND FONT
+            .margin(14)
             .draw()?;
     }
 

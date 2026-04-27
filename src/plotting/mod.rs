@@ -104,6 +104,13 @@ pub fn do_plotting() {
     let distributions = vec!["uniform", "gaussian", "beta"];
 
     // for name in datasets.clone() {
+    //     // 2. Process and Plot Box Plots
+    //     if let Err(e) = process_and_plot_boxplots(name, "databases/15x15", &distributions) {
+    //         warn!("{} box plot failed: {}", name, e);
+    //     }
+    // }
+
+    // for name in datasets.clone() {
     //     let res = plot_lama_distributions(name);
     //     match res {
     //         Ok(_) => {}
@@ -137,11 +144,6 @@ pub fn do_plotting() {
     // plot_nh_minimal_3d().expect("TODO: panic message");
 
     for name in datasets.clone() {
-        // 2. Process and Plot Box Plots
-        if let Err(e) = process_and_plot_boxplots(name, "databases/15x15", &distributions) {
-            warn!("{} box plot failed: {}", name, e);
-        }
-
         // 1. Process and Plot Convex Hulls
         if let Err(e) = process_and_plot_convex_hulls(name, "databases/15x15", &distributions) {
             warn!("{} convex hull plot failed: {}", name, e);

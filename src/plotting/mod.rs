@@ -1,5 +1,5 @@
 use crate::plotting::convex_hull::get_per_point_convex_hulls;
-use crate::plotting::post::{calculate_mse, scale_to_absolute_range};
+use crate::plotting::post::{calculate_mse, do_averaging, scale_to_absolute_range};
 use crate::plotting::two_d::box_plot_query::process_and_plot_boxplots;
 use crate::plotting::two_d::debug_mse::plot_mse_frequency_histogram_split;
 use crate::plotting::two_d::flat_dist_hist::plot_lama_distributions;
@@ -92,62 +92,59 @@ fn load_limits_method(path: &str) -> Result<Vec<Vec<ReconstructionDataPoint>>, B
 }
 
 pub fn do_plotting() {
-    quick_and_dirty_analysis().unwrap();
+    // do_averaging().expect("TODO: panic message");
+    // quick_and_dirty_analysis().unwrap();
 
     // Hardcoded vectors for easy modification
     // let grid_sizes = vec![(20, "20x20"), (25, "25x25"), (50, "50x50")];
     // let grid_sizes = vec![(25, "25x25"), (50, "50x50")];
-    let datasets = vec!["shopparis", "busstop", "cali", "drink", "highway", "spitz"];
+    let datasets = vec!["busstop", "shopparis", "cali", "drink", "highway", "spitz"];
     // let datasets = vec!["highway", "spitz"];
     let methods = vec!["even_less", "remin", "limits"];
     let distributions = vec!["uniform", "gaussian", "beta"];
 
-    plot_nh_minimal_3d().expect("TODO: panic message");
-
-    for data in datasets.clone() {
-        run_spatial_plots(data, "databases/50x50", "uniform", 50).unwrap();
-    }
-
-    for name in datasets.clone() {
-        let res = plot_lama_distributions(name);
-        match res {
-            Ok(_) => {}
-            Err(e) => {
-                warn!("{name} LAMa 15x15 flat distribution histogram failed: {e}")
-            }
-        }
-    }
-
-    let grid_sizes: Vec<(u32, String)> = (20..=50)
-        .step_by(10)
-        .map(|n| (n, format!("{}x{}", n, n)))
-        .collect();
-
-    plot_grid_by_mse(&grid_sizes, &datasets, &methods, &distributions).unwrap();
-
-    // The numbers for the domains below don't exactly match the original domain. This is
-    // because somethimes the best case/procrustes analysis sometimes actually falls outside the
-    // domain. This is a little arbitrary, but just give these methods some more room to get the
-    // truly best result.
+    // for name in datasets.clone() {
+    //     let res = plot_lama_distributions(name);
+    //     match res {
+    //         Ok(_) => {}
+    //         Err(e) => {
+    //             warn!("{name} LAMa 15x15 flat distribution histogram failed: {e}")
+    //         }
+    //     }
+    // }
 
     // for name in datasets.clone() {
     //     let res = plot_histograms_of_all_reconstructions(name, (50, 50), (60, 60), "uniform");
     //     match res {
     //         Ok(_) => {}
     //         Err(e) => {
-    //             warn!("{name} hustogram of all recons 50x50 failed:  {e}")
+    //             warn!("{name} histogram of all recons 50x50 failed:  {e}")
     //         }
     //     }
     // }
-    for name in datasets.clone() {
-        // 1. Process and Plot Convex Hulls
-        if let Err(e) = process_and_plot_convex_hulls(name, "databases/15x15", &distributions) {
-            warn!("{} convex hull plot failed: {}", name, e);
-        }
 
+    // let grid_sizes: Vec<(u32, String)> = (20..=50)
+    //     .step_by(10)
+    //     .map(|n| (n, format!("{}x{}", n, n)))
+    //     .collect();
+    //
+    // plot_grid_by_mse(&grid_sizes, &datasets, &methods, &distributions).unwrap();
+
+    // for data in datasets.clone() {
+    //     run_spatial_plots(data, "databases/50x50", "uniform", 50).unwrap();
+    // }
+    //
+    // plot_nh_minimal_3d().expect("TODO: panic message");
+
+    for name in datasets.clone() {
         // 2. Process and Plot Box Plots
         if let Err(e) = process_and_plot_boxplots(name, "databases/15x15", &distributions) {
             warn!("{} box plot failed: {}", name, e);
+        }
+
+        // 1. Process and Plot Convex Hulls
+        if let Err(e) = process_and_plot_convex_hulls(name, "databases/15x15", &distributions) {
+            warn!("{} convex hull plot failed: {}", name, e);
         }
     }
 }

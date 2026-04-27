@@ -67,7 +67,7 @@ $SG_RUN cargo clean
 
 echo "Building project inside container..."
 # Pipe output to a file so we don't lose the error message if it crashes
-$SG_RUN cargo rustc --bin frequency_analysis_limits --release -- -Clink-arg=-lprotobuf > full_build_log.txt 2>&1
+$SG_RUN cargo rustc --bin frequency_analysis_limits --release -- -Clink-arg=-lprotobuf
 
 echo "Build finished. Check full_build_log.txt for details."
 

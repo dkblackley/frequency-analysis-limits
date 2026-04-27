@@ -84,28 +84,20 @@ pub fn plot_lama_distributions(name: &str) -> Result<(), Box<dyn Error>> {
     root.fill(&WHITE)?;
 
     // 3. Vertical Split for Super Title
-    let (title_area, plot_area) = root.split_vertically(0);
+    let (title_area, plot_area) = root.split_vertically(70);
 
     let text_color = BLACK;
     let font_family = "Linux Biolinum";
-    let super_title_font = (font_family, 50, FontStyle::Bold)
+    let super_title_font = (font_family, 80, FontStyle::Bold)
         .into_font()
         .color(&text_color);
 
     ChartBuilder::on(&title_area)
         .caption(format!("{}", format_db_name(name)), super_title_font)
+        .margin_left(80)
         .build_cartesian_2d(0f32..1f32, 0f32..1f32)?;
 
     let num_bins = 8;
-
-    // Typography
-    let label_font = (font_family, 42).into_font().color(&text_color);
-    let axis_font = (font_family, 50, FontStyle::Bold)
-        .into_font()
-        .color(&text_color);
-    let title_font = (font_family, 50, FontStyle::Bold)
-        .into_font()
-        .color(&text_color);
 
     // Hardcode LAMa color (Sky Blue from your existing palette)
     let lama_color = RGBColor(86, 180, 233);
@@ -149,17 +141,19 @@ pub fn plot_lama_distributions(name: &str) -> Result<(), Box<dyn Error>> {
         let max_y = ((local_max_freq as f64 * 1.1).ceil() as usize).max(1);
 
         let mut chart = ChartBuilder::on(panel)
-            .margin_top(50)
-            .margin_bottom(0)
-            .margin_left(25)
+            .margin_top(10)
+            .margin_bottom(5)
+            .margin_left(10)
             .margin_right(25)
+            .x_label_area_size(100)
+            // INCREASED Y label area size so '10000' fits nicely without clipping
+            .y_label_area_size(120)
             .caption(
                 // Add 2 or 3 em-spaces to physically push the text right
-                format!("\u{2003}\u{2003}{}", format_dist_name(dist)),
-                title_font.clone(),
+                format!("\u{2003}\u{2003}\u{2003}{}", format_dist_name(dist)),
+                ("Linux Biolinum", 70, FontStyle::Bold).into_font(),
             )
-            .x_label_area_size(90)
-            .y_label_area_size(100) // Standardized gap
+            // Standardized gap
             .build_cartesian_2d(0.0f64..(num_bins as f64), 0..max_y)?;
 
         chart
@@ -178,8 +172,8 @@ pub fn plot_lama_distributions(name: &str) -> Result<(), Box<dyn Error>> {
                 }
             })
             .y_label_formatter(&|y| format_metric(*y as f64))
-            .label_style(label_font.clone())
-            .axis_desc_style(axis_font.clone())
+            .axis_desc_style(("Linux Biolinum", 70, FontStyle::Bold).into_font())
+            .label_style(("Linux Biolinum", 45, FontStyle::Bold).into_font())
             .light_line_style(WHITE.mix(0.0))
             .bold_line_style(BLACK.mix(0.1))
             .draw()?;

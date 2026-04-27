@@ -22,9 +22,9 @@ pub fn plot_histograms_of_all_reconstructions(
     let grid = format!("{}x{}", domain.0, domain.1);
     let path_to_root = format!("databases/{grid}/{name}");
 
-    let shift_step = 1.0;
-    let scale_step = 1.0;
-    let rotate = 30.0;
+    let shift_step = 5.0;
+    let scale_step = 5.0;
+    let rotate = 45.0;
 
     let path = format!("{path_to_root}/even_less/{name}_prob100.0_{dist}_{grid}_even_less.json");
     debug!("About to load data from {}", &path);
@@ -319,21 +319,21 @@ fn format_metric(val: f64) -> String {
     if abs_val >= 1_000_000_000.0 {
         let scaled = val / 1_000_000_000.0;
         if scaled.abs() < 10.0 {
-            format!("{:.1}B", scaled).replace(".0B", "B")
+            format!("{:.0}B", scaled).replace(".0B", "B")
         } else {
             format!("{:.0}B", scaled)
         }
     } else if abs_val >= 1_000_000.0 {
         let scaled = val / 1_000_000.0;
         if scaled.abs() < 10.0 {
-            format!("{:.1}M", scaled).replace(".0M", "M")
+            format!("{:.0}M", scaled).replace(".0M", "M")
         } else {
             format!("{:.0}M", scaled)
         }
     } else if abs_val >= 1_000.0 {
         let scaled = val / 1_000.0;
         if scaled.abs() < 10.0 {
-            format!("{:.1}K", scaled).replace(".0K", "K")
+            format!("{:.0}K", scaled).replace(".0K", "K")
         } else {
             format!("{:.0}K", scaled)
         }
@@ -356,7 +356,7 @@ pub fn plot_mse_frequency_histogram_split(
 ) -> Result<(), Box<dyn Error>> {
     let num_plots = mse_data.len().max(1);
 
-    let root = SVGBackend::new(output_path, (600 * num_plots as u32, 400)).into_drawing_area();
+    let root = SVGBackend::new(output_path, (450 * num_plots as u32, 400)).into_drawing_area();
     root.fill(&WHITE)?;
 
     if mse_data.is_empty() {
@@ -364,29 +364,50 @@ pub fn plot_mse_frequency_histogram_split(
     }
 
     // 1. Vertical Split for Super Title
-    let (title_area, plot_area) = root.split_vertically(0);
+    let (title_area, rest_area) = root.split_vertically(60);
+
+    // 2. Horizontal Split for the Rotated Database Name (Global Y-axis title)
+    // This gives a 60px wide column on the far left, leaving the rest for the plots
+    let (y_title_area, plot_area) = rest_area.split_horizontally(60);
 
     let text_color = BLACK;
     let font_family = "Linux Biolinum";
-    let super_title_font = (font_family, 46, FontStyle::Bold)
+    let super_title_font = (font_family, 75, FontStyle::Bold)
         .into_font()
         .color(&text_color);
 
+    // 3. Super Title (Now only showing the Dist name)
     ChartBuilder::on(&title_area)
-        .caption(
-            format!("{} - {} Dist.", database_name, dist_name),
-            super_title_font,
-        )
+        .caption(format!("{} Dist.", dist_name), super_title_font)
+        .margin_left(160)
         .build_cartesian_2d(0f32..1f32, 0f32..1f32)?;
+
+    // 4. Draw the Rotated Database Name
+    let y_title_style = (font_family, 75, FontStyle::Bold)
+        .into_font()
+        .color(&text_color)
+        .transform(plotters::style::FontTransform::Rotate270) // Use Rotate90 for top-to-bottom
+        .pos(plotters::style::text_anchor::Pos::new(
+            plotters::style::text_anchor::HPos::Center,
+            plotters::style::text_anchor::VPos::Center,
+        ));
+
+    y_title_area.draw(&plotters::element::Text::new(
+        database_name,
+        (30, 145), // Placed 30px from left edge, vertically centered
+        y_title_style,
+    ))?;
 
     let num_bins = 8;
 
     // Typography
-    let label_font = (font_family, 42).into_font().color(&text_color);
-    let axis_font = (font_family, 46, FontStyle::Bold)
+    let label_font = (font_family, 50, FontStyle::Bold)
         .into_font()
         .color(&text_color);
-    let title_font = (font_family, 46, FontStyle::Bold)
+    let axis_font = (font_family, 70, FontStyle::Bold)
+        .into_font()
+        .color(&text_color);
+    let title_font = (font_family, 70, FontStyle::Bold)
         .into_font()
         .color(&text_color);
 
@@ -456,16 +477,19 @@ pub fn plot_mse_frequency_histogram_split(
         let max_y = ((local_max_freq as f64 * 1.1).ceil() as usize).max(1);
 
         // Expanded label area to fix Y-axis overlap
-        let y_label_area = if *method == "LAMa" { 90 } else { 120 };
+        let y_label_area = if *method == "LAMa" { 80 } else { 120 };
 
         // Render Chart
         let mut chart = ChartBuilder::on(panel)
-            .margin_top(50)
-            .margin_bottom(0)
-            .margin_left(80)
-            .margin_right(45)
-            .caption(*method, title_font.clone())
-            .x_label_area_size(90)
+            .margin_top(15)
+            .margin_bottom(15)
+            .margin_left(20)
+            .margin_right(35)
+            .caption(
+                format!("\u{2003}\u{2003}{}", format_dist_name(method)),
+                title_font.clone(),
+            )
+            .x_label_area_size(100)
             .y_label_area_size(y_label_area)
             // THE FIX: Fake the X-axis domain to be perfectly 0.0 to 8.0
             // Plotters will effortlessly align ticks to exactly 0, 1, 2, etc.
@@ -475,7 +499,7 @@ pub fn plot_mse_frequency_histogram_split(
             .configure_mesh()
             .disable_x_mesh()
             .x_labels(5)
-            .y_labels(6)
+            .y_labels(5)
             .y_desc("# of Solutions")
             .x_desc("MSE")
             .x_label_formatter(&|x| {
@@ -508,12 +532,12 @@ pub fn plot_mse_frequency_histogram_split(
 
             chart.draw_series(std::iter::once(Rectangle::new(
                 [(x_start + gap, 0), (x_end - gap, count)],
-                color.mix(0.5).filled(),
+                color.mix(0.55).filled(),
             )))?;
 
             chart.draw_series(std::iter::once(Rectangle::new(
                 [(x_start + gap, 0), (x_end - gap, count)],
-                color.stroke_width(2),
+                color.mix(0.55).stroke_width(2),
             )))?;
         }
     }

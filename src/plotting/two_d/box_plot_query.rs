@@ -88,7 +88,7 @@ pub fn process_and_plot_boxplots(
             // 3. LIMITS (Pre-sampled 10k)
             let limits_query = query / 100.0;
             let limits_path = format!(
-                "{}/{}/limits/{}_{}_p{}_reconstruction.json",
+                "{}_average/{}/limits/{}_{}_p{}_reconstruction.json",
                 data_dir, db_name, db_name, dist, limits_query
             );
             if let Ok(content) = fs::read_to_string(&limits_path) {
@@ -138,14 +138,15 @@ fn plot_boxplot_side_by_side(
 
     // 2. CREATE THE SUPER TITLE AREA
     // Slice off the top 140 pixels across the entire width for our main title
-    let (title_area, body_area) = root.split_vertically(80);
+    let (title_area, body_area) = root.split_vertically(140);
     let pretty_db = format_db_name(db_name);
     let super_title = format!("{}", pretty_db);
 
     ChartBuilder::on(&title_area)
+        .margin_left(60)
         .caption(
             super_title,
-            ("Linux Biolinum", 96, FontStyle::Bold)
+            ("Linux Biolinum", 120, FontStyle::Bold)
                 .into_font()
                 .color(&BLACK),
         )
@@ -180,28 +181,28 @@ fn plot_boxplot_side_by_side(
         // Sub-title now only contains the distribution to avoid text collision
         let title = format!("{} Dist.", pretty_dist);
 
-        let (sub_title_area, chart_area) = area.split_vertically(100);
-        let centered_sub_title_area = sub_title_area.margin(0, 0, 0, 0);
+        let (sub_title_area, chart_area) = area.split_vertically(110);
+        let centered_sub_title_area = sub_title_area.margin(0, 0, 200, 0);
 
         ChartBuilder::on(&centered_sub_title_area)
             .caption(
                 title,
-                ("Linux Biolinum", 76, FontStyle::Bold)
+                ("Linux Biolinum", 120, FontStyle::Bold)
                     .into_font()
                     .color(&BLACK),
             )
             .build_cartesian_2d(0..1, 0..1)?;
 
         let mut chart = ChartBuilder::on(&chart_area)
-            .margin_top(20)
-            .margin_bottom(30)
-            .margin_left(55)
-            .margin_right(55)
-            .x_label_area_size(250)
+            .margin_top(10)
+            .margin_bottom(5)
+            .margin_left(30)
+            .margin_right(30)
+            .x_label_area_size(160)
             // INCREASED Y label area size so '10000' fits nicely without clipping
-            .y_label_area_size(270)
+            .y_label_area_size(220)
             // 4. APPLY LOG SCALE (Base 10) FROM 10 TO y_max
-            .build_cartesian_2d(5.0..35.0f64, (10.0f32..y_max).log_scale())?;
+            .build_cartesian_2d(5.0..35.0f64, (1.0f32..y_max).log_scale())?;
 
         chart
             .configure_mesh()
@@ -213,8 +214,8 @@ fn plot_boxplot_side_by_side(
             .x_labels(4)
             // A hint to Plotters to try and generate 5 major ticks (powers of 10)
             .y_labels(5)
-            .axis_desc_style(("Linux Biolinum", 86, FontStyle::Bold).into_font())
-            .label_style(("Linux Biolinum", 68).into_font())
+            .axis_desc_style(("Linux Biolinum", 120, FontStyle::Bold).into_font())
+            .label_style(("Linux Biolinum", 75, FontStyle::Bold).into_font())
             .x_label_formatter(&|x| format!("{:.0}%", x))
             // Format labels normally (will naturally render 10, 100, 1000, 10000)
             .y_label_formatter(&|y| format_metric(*y as f64))
@@ -240,19 +241,47 @@ fn plot_boxplot_side_by_side(
             sorted_data.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
 
             let mut boxplots = Vec::new();
-            for (q, mses) in sorted_data {
+            for (q, mut mses) in sorted_data {
                 if mses.is_empty() {
                     continue;
                 }
-                let quartiles = plotters::data::Quartiles::new(&mses);
+                mses.sort_by(|a, b| a.total_cmp(b));
+                let lowest_mse = mses[0];
+
+                let mut quartiles = plotters::data::Quartiles::new(&mses);
+
+                // 1. Grab the actual minimum from your sorted data
+                let actual_min = *mses.first().unwrap();
+                let theoretical_min = quartiles.values()[0] as f64;
+
+                unsafe {
+                    // Cast the struct reference to a raw pointer of a contiguous f64 array
+                    let ptr = &mut quartiles as *mut _ as *mut f64;
+
+                    // There is a bug in plotters library where sometimes things go negative... for some reason...
+                    for i in 0..5 {
+                        // Find the specific field holding the offending theoretical minimum
+                        if *ptr.add(i) <= 1.0 {
+                            *ptr.add(i) = theoretical_min.max(2.0);
+                        }
+                    }
+                }
+
+                for i in 0..quartiles.values().len() {
+                    if quartiles.values()[i] <= 1.0 {
+                        panic!(
+                            "{db_name}, with dist {dist} has a value less than 1 in it's quartiles"
+                        )
+                    }
+                }
 
                 // LAYER 1: The Shading (Flat UI Light Fill)
                 // We mix the color heavily with white (e.g., 20% color, 80% white)
                 boxplots.push(
                     Boxplot::new_vertical(q, &quartiles)
-                        .width(35) // Made wider (from 25 to 35) for better visibility
+                        .width(40) // Made wider (from 25 to 35) for better visibility
                         .whisker_width(0.6)
-                        .style(color.mix(0.65).filled())
+                        .style(color.mix(0.85).filled())
                         .offset(offset_px),
                 );
 
@@ -260,7 +289,7 @@ fn plot_boxplot_side_by_side(
                 // We use the pure, solid color and apply a stroke width
                 boxplots.push(
                     Boxplot::new_vertical(q, &quartiles)
-                        .width(35) // Must match the width of Layer 1
+                        .width(40) // Must match the width of Layer 1
                         .whisker_width(0.6)
                         .style(color.stroke_width(4)) // Thick flat lines!
                         .offset(offset_px),
@@ -281,9 +310,9 @@ fn plot_boxplot_side_by_side(
         chart
             .configure_series_labels()
             .position(SeriesLabelPosition::UpperRight)
-            .background_style(RGBColor(255, 255, 255).mix(0.15))
+            .background_style(RGBColor(255, 255, 255).mix(0.25))
             .border_style(TRANSPARENT)
-            .label_font(("Linux Biolinum", 44, FontStyle::Bold).into_font())
+            .label_font(("Linux Biolinum", 48, FontStyle::Bold).into_font())
             .margin(11)
             .draw()?;
     }

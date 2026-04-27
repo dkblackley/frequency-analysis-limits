@@ -310,7 +310,7 @@ pub fn process_and_plot_convex_hulls(
             // ---------------------------------------------------------
             let limits_query = query / 100.0;
             let limits_path = format!(
-                "{}/{}/limits/{}_{}_p{}_reconstruction.json",
+                "{}_average/{}/limits/{}_{}_p{}_reconstruction.json",
                 data_dir, db_name, db_name, dist, limits_query
             );
 

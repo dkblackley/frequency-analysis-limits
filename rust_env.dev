@@ -1,5 +1,5 @@
 Bootstrap: docker
-From: rust:1.77-bookworm
+From: rust:1.95-bookworm
 
 %post
     # Update and install all necessary C++ build tools and bindgen dependencies

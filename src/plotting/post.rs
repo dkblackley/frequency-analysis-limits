@@ -1,6 +1,7 @@
 use crate::plotting::ReconstructionDataPoint;
 use log::{debug, info};
 use nalgebra::DMatrix;
+use rayon::prelude::*;
 use serde::Deserialize;
 use serde_json::json;
 use std::collections::{HashMap, HashSet};
@@ -8,6 +9,7 @@ use std::error::Error;
 use std::fs;
 use std::fs::File;
 use std::io::{BufReader, Write};
+use std::path::Path;
 
 fn quick_convert(file_path: &str, out_path: &str) {
     // Pre-allocate the vectors using the length of the hashmap to avoid reallocations
@@ -148,6 +150,9 @@ pub fn calculate_mse(data: &[ReconstructionDataPoint]) -> f64 {
                 .sum::<f64>()
         })
         .sum();
+    if sum_sq < 0 as f64 {
+        panic!("How did you even manage to compute a negative SE?")
+    }
     sum_sq / data.len() as f64
 }
 
@@ -481,6 +486,128 @@ pub fn process_and_map_points(
     }
 
     Ok(processed_results)
+}
+pub fn do_averaging() -> Result<(), Box<dyn Error>> {
+    let base_dir = "databases";
+    let avg_dir_name = "15x15_average";
+
+    let databases = vec!["busstop", "cali", "drink", "highway", "shopparis", "spitz"];
+
+    // Ensure our base average directory exists
+    let avg_base_path = Path::new(base_dir).join(avg_dir_name);
+    fs::create_dir_all(&avg_base_path)?;
+
+    // 1. Parallelize across databases
+    databases.par_iter().for_each(|&db| {
+        let run1_limits_dir = Path::new(base_dir)
+            .join("15x15_run_1")
+            .join(db)
+            .join("limits");
+
+        if !run1_limits_dir.exists() {
+            return;
+        }
+
+        let out_dir = avg_base_path.join(db).join("limits");
+        let _ = fs::create_dir_all(&out_dir); // Ignore errors if it already exists
+
+        // Collect all target files from run_1 to know what we are looking for
+        let mut target_files = Vec::new();
+        if let Ok(entries) = fs::read_dir(&run1_limits_dir) {
+            for entry in entries.flatten() {
+                let file_name = entry.file_name();
+                if file_name
+                    .to_string_lossy()
+                    .ends_with("_reconstruction.json")
+                {
+                    target_files.push(file_name);
+                }
+            }
+        }
+
+        // 2. Parallelize across the files within the database
+        target_files.par_iter().for_each(|file_name| {
+            let file_name_str = file_name.to_string_lossy();
+            println!("Processing {}/{}...", db, file_name_str);
+
+            // 3. Parallelize loading AND JSON parsing across all 10 runs
+            // Rayon's filter_map automatically handles missing files or bad JSON by skipping them
+            let loaded_runs: Vec<Vec<Vec<ReconstructionDataPoint>>> = (1..=10)
+                .into_par_iter()
+                .filter_map(|run_idx| {
+                    let run_path = Path::new(base_dir)
+                        .join(format!("15x15_run_{}", run_idx))
+                        .join(db)
+                        .join("limits")
+                        .join(file_name);
+
+                    // Read and parse the file. If either fails, return None to skip it.
+                    let content = fs::read_to_string(&run_path).ok()?;
+                    serde_json::from_str(&content).ok()
+                })
+                .collect();
+
+            let successful_runs = loaded_runs.len();
+            if successful_runs == 0 {
+                println!("  -> No valid runs found for {}, skipping.", file_name_str);
+                return;
+            }
+
+            // 4. Reduce: We now have all loaded runs in memory.
+            // We pop the first one off to act as our accumulator.
+            let mut loaded_runs_iter = loaded_runs.into_iter();
+            let mut accumulated_data = loaded_runs_iter.next().unwrap();
+
+            // Sum the remaining runs into the accumulator
+            for run_data in loaded_runs_iter {
+                for (acc_outer, current_outer) in accumulated_data.iter_mut().zip(run_data.iter()) {
+                    for (acc_pt, current_pt) in acc_outer.iter_mut().zip(current_outer.iter()) {
+                        // Sum true_points
+                        for (a, c) in acc_pt
+                            .true_points
+                            .iter_mut()
+                            .zip(current_pt.true_points.iter())
+                        {
+                            *a += c;
+                        }
+
+                        // Sum reconstructed_points
+                        for (a, c) in acc_pt
+                            .reconstructed_points
+                            .iter_mut()
+                            .zip(current_pt.reconstructed_points.iter())
+                        {
+                            *a += c;
+                        }
+                    }
+                }
+            }
+
+            // 5. Calculate the final average
+            let run_count_f64 = successful_runs as f64;
+            for acc_outer in accumulated_data.iter_mut() {
+                for acc_pt in acc_outer.iter_mut() {
+                    for val in acc_pt.true_points.iter_mut() {
+                        *val /= run_count_f64;
+                    }
+                    for val in acc_pt.reconstructed_points.iter_mut() {
+                        *val /= run_count_f64;
+                    }
+                }
+            }
+
+            // 6. Write the results
+            let out_file_path = out_dir.join(file_name);
+            if let Ok(out_json) = serde_json::to_string_pretty(&accumulated_data) {
+                if let Err(e) = fs::write(&out_file_path, out_json) {
+                    println!("  -> Failed to write {:?}: {}", out_file_path, e);
+                }
+            }
+        });
+    });
+
+    println!("\nAll parallel averaging complete!");
+    Ok(())
 }
 
 #[cfg(test)]

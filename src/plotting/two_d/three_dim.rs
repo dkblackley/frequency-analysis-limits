@@ -78,10 +78,10 @@ pub fn plot_nh_minimal_3d() -> Result<(), Box<dyn Error>> {
     root.fill(&bg_color)?;
 
     // 4. Create the Master Title Space
-    let (title_area, plot_area) = root.split_vertically(180);
+    let (title_area, plot_area) = root.split_vertically(120);
 
-    let title_font = ("Linux Biolinum", 130, FontStyle::Bold).into_font();
-    let text = "New Hampshire";
+    let title_font = ("Linux Biolinum", 160, FontStyle::Bold).into_font();
+    let text = "New Hampshire Mountains";
     let text_size = title_font.layout_box(text).unwrap_or(((0, 0), (0, 0)));
     let text_width = text_size.1 .0 - text_size.0 .0;
 
@@ -89,7 +89,7 @@ pub fn plot_nh_minimal_3d() -> Result<(), Box<dyn Error>> {
     title_area.draw_text(
         text,
         &title_font.color(&BLACK),
-        ((2400 - text_width) / 2, 40),
+        (((2400 - text_width) / 2) + 200, 40),
     )?;
 
     // 5. Split horizontally for the two totally independent 3D plots
@@ -98,12 +98,11 @@ pub fn plot_nh_minimal_3d() -> Result<(), Box<dyn Error>> {
     // Okabe-Ito Color Palette
     let sky_blue = RGBColor(86, 180, 233);
     let vermillion = RGBColor(213, 94, 0);
-    let subtitle_font = ("Linux Biolinum", 80, FontStyle::Bold).into_font();
+    let subtitle_font = ("Linux Biolinum", 120, FontStyle::Bold).into_font();
 
     let mut chart_left = ChartBuilder::on(&left_area)
         .caption("Ground Truth", subtitle_font.clone().color(&BLACK))
         .margin(60)
-        // FIX 1: Restore native (x, y, z) ranges so they map to your EmptyElement::at((x, y, z))
         .build_cartesian_3d(
             (min_x - x_pad)..(max_x + x_pad),
             (min_y - y_pad)..(max_y + y_pad),
@@ -113,16 +112,17 @@ pub fn plot_nh_minimal_3d() -> Result<(), Box<dyn Error>> {
     chart_left.with_projection(|mut pb| {
         // FIX 2: Add ~1.57 radians (90 degrees) to the pitch to make it "fall over".
         // Use std::f64::consts::FRAC_PI_2 for exact math.
-        pb.pitch = -0.5 + std::f64::consts::FRAC_PI_2;
-        pb.yaw = 0.0 + std::f64::consts::FRAC_PI_2 + std::f64::consts::FRAC_PI_2; // Keep your horizontal rotation
+        pb.pitch = -0.2 + std::f64::consts::FRAC_PI_2;
+        pb.yaw = -0.2 + std::f64::consts::PI;
         pb.scale = 0.9;
         pb.into_matrix()
     });
 
+    // Restore subtle grid lines so the brain can perceive 3D space
     chart_left
         .configure_axes()
         .axis_panel_style(TRANSPARENT)
-        .bold_grid_style(TRANSPARENT)
+        .bold_grid_style(BLACK.mix(0.2)) // <-- Changed from TRANSPARENT
         .light_grid_style(TRANSPARENT)
         .x_formatter(&|_| String::new())
         .y_formatter(&|_| String::new())
@@ -131,15 +131,14 @@ pub fn plot_nh_minimal_3d() -> Result<(), Box<dyn Error>> {
 
     chart_left.draw_series(true_points.iter().map(|&(x, y, z)| {
         EmptyElement::at((x, y, z))
-            + Circle::new((0, 0), 15, BLACK.filled())       // Cell shading outer ring
-            + Circle::new((0, 0), 11, sky_blue.filled()) // Flat color inner
+            // Semi-transparent fill creates depth via density when points overlap
+            + Circle::new((0, 0), 8, sky_blue.mix(0.8).filled())
+            // Crisp, thin white rim provides a sleek, modern separation
+            + Circle::new((0, 0), 8, WHITE.mix(0.9).stroke_width(1))
     }))?;
 
-    // ---------------------------------------------------------
-    // RIGHT PLOT: Hull Centroids
-    // ---------------------------------------------------------
     let mut chart_right = ChartBuilder::on(&right_area)
-        .caption("Hull Centroids", subtitle_font.color(&BLACK))
+        .caption("'Worst case' Reconstruction", subtitle_font.color(&BLACK))
         .margin(60)
         .build_cartesian_3d(
             (min_x - x_pad)..(max_x + x_pad),
@@ -150,16 +149,17 @@ pub fn plot_nh_minimal_3d() -> Result<(), Box<dyn Error>> {
     chart_right.with_projection(|mut pb| {
         // FIX 2: Add ~1.57 radians (90 degrees) to the pitch to make it "fall over".
         // Use std::f64::consts::FRAC_PI_2 for exact math.
-        pb.pitch = -0.5 + std::f64::consts::FRAC_PI_2;
-        pb.yaw = 0.0 + std::f64::consts::FRAC_PI_2 + std::f64::consts::FRAC_PI_2; // Keep your horizontal rotation
-        pb.scale = 0.9;
+        pb.pitch = 0.2 + std::f64::consts::FRAC_PI_2;
+        pb.yaw = std::f64::consts::PI;
+        pb.scale = 1.3;
         pb.into_matrix()
     });
 
+    // Apply the same subtle grid for consistency
     chart_right
         .configure_axes()
         .axis_panel_style(TRANSPARENT)
-        .bold_grid_style(TRANSPARENT)
+        .bold_grid_style(BLACK.mix(0.2)) // <-- Changed from TRANSPARENT
         .light_grid_style(TRANSPARENT)
         .x_formatter(&|_| String::new())
         .y_formatter(&|_| String::new())
@@ -168,8 +168,8 @@ pub fn plot_nh_minimal_3d() -> Result<(), Box<dyn Error>> {
 
     chart_right.draw_series(centroid_points.iter().map(|&(x, y, z)| {
         EmptyElement::at((x, y, z))
-            + Circle::new((0, 0), 15, BLACK.filled())
-            + Circle::new((0, 0), 11, vermillion.filled())
+            + Circle::new((0, 0), 8, vermillion.mix(0.7).filled())
+            + Circle::new((0, 0), 8, WHITE.mix(0.9).stroke_width(1))
     }))?;
 
     root.present()?;

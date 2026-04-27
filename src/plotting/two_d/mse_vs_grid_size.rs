@@ -122,14 +122,38 @@ fn plot_db_side_by_side(
         return Ok(());
     }
 
-    let total_width = 900 * num_dists as u32;
+    // Add 80 pixels to the total width to accommodate the left title column
+    let total_width = 900 * num_dists as u32 + 80;
     let total_height = 600;
 
     let root = SVGBackend::new(output_path, (total_width, total_height)).into_drawing_area();
     root.fill(&TRANSPARENT)?;
 
-    let sub_areas = root.split_evenly((1, num_dists));
+    // 1. Horizontal Split: Create an 80px wide column on the far left, leaving the rest for the plots
+    let (y_title_area, plots_area) = root.split_horizontally(70);
+
     let pretty_db = format_db_name(db);
+    let text_color = BLACK;
+    let font_family = "Linux Biolinum";
+
+    // 2. Draw the Rotated Database Name globally on the left
+    let y_title_style = (font_family, 130, FontStyle::Bold)
+        .into_font()
+        .color(&text_color)
+        .transform(plotters::style::FontTransform::Rotate270)
+        .pos(plotters::style::text_anchor::Pos::new(
+            plotters::style::text_anchor::HPos::Center,
+            plotters::style::text_anchor::VPos::Center,
+        ));
+
+    y_title_area.draw(&plotters::element::Text::new(
+        pretty_db,
+        (70, total_height as i32 / 2), // Centered vertically, 40px from the left edge
+        y_title_style,
+    ))?;
+
+    // 3. Split the remaining space evenly for each distribution plot
+    let sub_areas = plots_area.split_evenly((1, num_dists));
 
     for (i, &dist) in distributions.iter().enumerate() {
         let area = &sub_areas[i];
@@ -183,21 +207,19 @@ fn plot_db_side_by_side(
             Some(f) => f.to_uppercase().collect::<String>() + chars.as_str(),
         };
 
-        // THE FIX: Changed "Distribution" to "Dist."
-        let title = format!("{} - {} Dist.", pretty_db, pretty_dist);
+        // The top title for each plot now only needs the distribution name
+        let title = format!("{} Dist.", pretty_dist);
 
-        // THE FIX: Increased from 90 to 120 pixels to prevent intersection with the chart
+        // Split vertically to make space for the individual plot title
         let (title_area, chart_area) = area.split_vertically(100);
 
-        // THE FIX: Pushed left margin from 110 to 160 to center the title better
-        // over the newly expanded chart area beneath it
         let centered_title_area = title_area.margin(0, 0, 180, 20);
 
         // Draw the title safely in its dedicated space
         ChartBuilder::on(&centered_title_area)
             .caption(
                 title,
-                ("Linux Biolinum", 64, FontStyle::Bold)
+                (font_family, 120, FontStyle::Bold)
                     .into_font()
                     .color(&BLACK),
             )
@@ -208,9 +230,8 @@ fn plot_db_side_by_side(
             .margin_bottom(0)
             .margin_left(50)
             .margin_right(50)
-            .x_label_area_size(120)
-            // THE FIX: Increased to 180 to give the Y-axis numbers and text plenty of room
-            .y_label_area_size(180)
+            .x_label_area_size(180)
+            .y_label_area_size(210)
             .build_cartesian_2d(
                 (min_grid - x_pad)..(max_grid + x_pad),
                 (1.0f64..y_max).log_scale(), // Implement Log scale starting at 1.0
@@ -222,11 +243,9 @@ fn plot_db_side_by_side(
             .light_line_style(TRANSPARENT)
             .axis_style(RGBColor(100, 100, 100))
             .x_desc("Grid Size")
-            // THE FIX: Changed "Mean Squared Error" to "MSE"
             .y_desc("MSE")
-            // THE FIX: Bumped axis text size up from 60 to 72
             .x_labels(6)
-            .axis_desc_style(("Linux Biolinum", 80, FontStyle::Bold).into_font())
+            .axis_desc_style((font_family, 120, FontStyle::Bold).into_font())
             .x_label_formatter(&|x| format_metric(*x))
             .y_label_formatter(&|y| {
                 if *y <= 1.001 {
@@ -236,8 +255,7 @@ fn plot_db_side_by_side(
                     format_metric(*y)
                 }
             })
-            // THE FIX: Bumped axis tick numbers up from 54 to 60
-            .label_style(("Linux Biolinum", 60).into_font())
+            .label_style((font_family, 100, FontStyle::Bold).into_font())
             .draw()?;
 
         // Grab the methods and explicitly map them to their formatted name and rank order
@@ -288,10 +306,10 @@ fn plot_db_side_by_side(
         chart
             .configure_series_labels()
             .position(SeriesLabelPosition::LowerRight)
-            .background_style(RGBColor(255, 255, 255).mix(0.9))
-            .border_style(RGBColor(200, 200, 200))
-            .label_font(("Linux Biolinum", 44, FontStyle::Bold).into_font())
-            .margin(14)
+            .background_style(RGBColor(255, 255, 255).mix(0.25))
+            .border_style(RGBColor(200, 200, 200).mix(0.25))
+            .label_font((font_family, 64, FontStyle::Bold).into_font())
+            .margin(10)
             .draw()?;
     }
 

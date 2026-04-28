@@ -239,7 +239,7 @@ fi
              --t "$t_val" \
              --dim "$dim" \
              --dist "$dist" \
-             --query_percent 0.3
+             --query-percent 0.3
 
          # Check if the initial run failed ($? checks the exit code of the last command)
          if [ $? -ne 0 ]; then

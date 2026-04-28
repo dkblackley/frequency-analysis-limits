@@ -1,7 +1,7 @@
 #!/bin/bash -l
 #SBATCH --job-name=LAMA
 #SBATCH --partition=normal
-#SBATCH --nodelist=amd051
+#SBATCH --nodelist=amd049
 #SBATCH --reservation=dblackle_288
 #SBATCH --output=LAMA.out
 #SBATCH --error=LAMA.err
@@ -71,14 +71,14 @@ $SG_RUN cargo rustc --bin frequency_analysis_limits --release -- -Clink-arg=-lpr
 
 echo "Build finished. Check full_build_log.txt for details."
 
-padding=0
+padding=2
 
 # NAMES=("cali" "spitz")
 #DISTS=("uniform" "gaussian" "beta" "flat")
 #DATA_DIRS=("$SLURM_SUBMIT_DIR/databases/350x50" "$SLURM_SUBMIT_DIR/databases/175x25")
 
 
- # NAMES=("spitz")
+ NAMES=("spitz")
  # DISTS=("uniform" "gaussian" "beta" "flat")
 #DATA_DIRS=(
 #     "$SLURM_SUBMIT_DIR/databases/20x20"
@@ -90,19 +90,19 @@ padding=0
 #     "$SLURM_SUBMIT_DIR/databases/50x50"
 # )
 
-NAMES=("nh")
-DISTS=( "gaussian" "beta" "uniform")
-DATA_DIRS=("$SLURM_SUBMIT_DIR/databases/16x16x14")
+#NAMES=("nh")
+#DISTS=( "gaussian" "beta" "uniform")
+#DATA_DIRS=("$SLURM_SUBMIT_DIR/databases/16x16x14")
 
 # Flat dist is very heavy. We only run for 2d 20x20 to 30x30.
-#DISTS=("flat")
-#DATA_DIRS=(
-#     "$SLURM_SUBMIT_DIR/databases/15x15"
-#)
+DISTS=("flat")
+DATA_DIRS=(
+     "$SLURM_SUBMIT_DIR/databases/15x15"
+)
 
 # PROBS=("0.10" "0.15" "0.20" "0.25" "0.30")
 # PROBS=("1.0")
-PROBS=("0.3")
+# PROBS=("0.3")
 
 echo "Running canary"
 $SG_RUN ./target/release/frequency_analysis_limits \
@@ -194,13 +194,13 @@ fi
 
  # Define the main variables
  name="grid"
- DISTS=("uniform")
+ DISTS=("gaussian" "uniform")
 
  # Initialize an array to track failures
  FAILED_RUNS=()
 
  # 1. Loop through dimensions 2, 3, 4, 5, and 6
- for dim in {4..6}; do
+ for dim in {2..6}; do
 
      # 2. Dynamically build the "10x10x..." string based on the dimension
      dim_str="6"
@@ -238,7 +238,8 @@ fi
              --name "$name" \
              --t "$t_val" \
              --dim "$dim" \
-             --dist "$dist"
+             --dist "$dist" \
+             --query_percent 0.3
 
          # Check if the initial run failed ($? checks the exit code of the last command)
          if [ $? -ne 0 ]; then

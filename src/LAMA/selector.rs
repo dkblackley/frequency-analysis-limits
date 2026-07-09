@@ -549,16 +549,15 @@ impl<'a> Selector<'a> {
         let mut vars = ProblemVariables::new();
 
         let x: Vec<Variable> = (0..num_items)
-            .map(|_| vars.add(variable().min(0.0).max(1.0)))
+            .map(|_| vars.add(variable().max(1)))
             .collect();
 
         let y: Vec<Variable> = (0..itemsets.len())
-            .map(|_| vars.add(variable().min(0.0).max(1.0)))
+            .map(|_| vars.add(variable().max(1)))
             .collect();
 
         let objective: Expression = y.iter().sum();
 
-        // Note: Consider using highs instead of default_solver for better performance
         let mut model = highs(vars.maximise(objective));
 
         let weight_expr: Expression = x.iter().sum();
@@ -616,11 +615,15 @@ impl<'a> Selector<'a> {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
     use crate::dataloader::tester::testDB;
     use crate::dataloader::Searchable;
     use crate::LAMA::selector::Selector;
-
-    use super::*;
+    use crate::LAMA::utility::encloses;
+    use rand::Rng;
+    use serde::Serialize;
+    use std::fs::File;
+    use std::io::BufWriter;
 
     #[cfg(test)]
     mod statistical_bounds_tests {
@@ -771,5 +774,110 @@ mod tests {
                 "The empirical probability deviated beyond the guaranteed VC bound!"
             );
         }
+    }
+    #[derive(Serialize)]
+    struct DistResults {
+        true_max_err: Vec<f64>,
+        true_avg_err: Vec<f64>,
+        vc_bound: Vec<f64>,
+    }
+
+    #[test]
+    fn generate_vc_plot_data() {
+        let _ = env_logger::builder()
+            .is_test(true)
+            .filter_level(log::LevelFilter::Info)
+            .try_init();
+
+        // 1. Setup DB
+        let dim = 2;
+        let size_per_dim = 10;
+        let db: Box<dyn Searchable + Sync + 'static> =
+            Box::new(testDB::new(dim, size_per_dim, 100));
+
+        let delta = 0.05;
+        let max_samples = 100;
+        let mut rng = rand::thread_rng();
+
+        let mut all_results: HashMap<String, DistResults> = HashMap::new();
+        let distributions = ["uniform", "gaussian", "beta"];
+
+        for dist_name in distributions {
+            let mut selector = Selector::new(dist_name, &db);
+            let resp = selector.get_all_possible_responses();
+            let vc = Selector::simple_bound_corollary2(&resp, &db.get_universe());
+
+            let mut current_dist_results = DistResults {
+                true_max_err: Vec::with_capacity(max_samples),
+                true_avg_err: Vec::with_capacity(max_samples),
+                vc_bound: Vec::with_capacity(max_samples),
+            };
+
+            // --- THE CRITICAL FIX ---
+            // Instead of 100 random test tuples, we extract the ENTIRE universe of possible queries.
+            // This guarantees we find the exact mathematical maximum error across the whole space.
+            let all_possible_queries = &selector.query_distribution.pairs;
+            let total_queries_in_space = all_possible_queries.len() as f64;
+
+            let mut sampled_queries = Vec::with_capacity(max_samples);
+
+            info!(
+                "Processing distribution: {} up to {} samples",
+                dist_name, max_samples
+            );
+            info!(
+                "Evaluating against {} total queries in the space",
+                total_queries_in_space
+            );
+
+            // Step by exactly 1 sample at a time
+            for num_samples in 1..=max_samples {
+                // Draw exactly 1 new sample based on the underlying true distribution
+                let idx = selector.query_distribution.sampler.sample(&mut rng);
+                sampled_queries.push(selector.query_distribution.pairs[idx].clone());
+
+                let epsilon = Selector::calculate_epsilon_real_vc(vc, num_samples, delta);
+
+                let mut max_observed_error = 0.0;
+                let mut total_observed_error = 0.0;
+
+                // Evaluate the current empirical pool against EVERY possible query in the DB
+                for target_mbq in all_possible_queries {
+                    let p_true = selector
+                        .query_distribution
+                        .cumulative_prob_lookup(target_mbq);
+
+                    let mut enclose_count = 0;
+                    for obs_mbq in &sampled_queries {
+                        if encloses(obs_mbq, target_mbq) {
+                            enclose_count += 1;
+                        }
+                    }
+
+                    let p_emp = (enclose_count as f64) / (num_samples as f64);
+                    let error = (p_emp - p_true).abs();
+
+                    if error > max_observed_error {
+                        max_observed_error = error;
+                    }
+                    total_observed_error += error;
+                }
+
+                // The true average error across the entire space
+                let avg_observed_error = total_observed_error / total_queries_in_space;
+
+                current_dist_results.true_max_err.push(max_observed_error);
+                current_dist_results.true_avg_err.push(avg_observed_error);
+                current_dist_results.vc_bound.push(epsilon);
+            }
+
+            all_results.insert(dist_name.to_string(), current_dist_results);
+        }
+
+        let file = File::create("vc_bounds_results.json").expect("Unable to create results file");
+        let writer = BufWriter::new(file);
+        serde_json::to_writer_pretty(writer, &all_results).expect("Failed to write JSON output");
+
+        info!("Successfully wrote records to vc_bounds_results.json");
     }
 }

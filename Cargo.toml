@@ -38,3 +38,4 @@ unsafe_code = "warn" # or "deny"
 [lints.clippy]
 pedantic = "warn"
 unwrap_used = "warn"
+

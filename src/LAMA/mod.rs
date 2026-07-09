@@ -68,7 +68,7 @@ pub fn lama_attack(
                 (*padding, *padding),
                 (*padding, *padding),
             )
-            .unwrap(),
+                .unwrap(),
         );
     }
 
@@ -386,4 +386,92 @@ fn save_reconstruction_data(
     let writer = BufWriter::new(file);
 
     serde_json::to_writer_pretty(writer, &data).unwrap();
+}
+
+
+#[cfg(test)]
+mod metadata_tests {
+    use super::*;
+    use crate::dataloader::tester::testDB;
+    use crate::dataloader::three_d::ThreeDMap;
+    use crate::dataloader::two_d::TwoDMap;
+    use crate::dataloader::Searchable;
+
+    // Helper function to handle math and printing for any dimension
+    fn print_stats(name: &str, size_str: &str, items: usize, high: &[i64]) {
+        // Calculate total possible grid cells
+        let capacity: i64 = high.iter().map(|&val| val + 1).product();
+        let density = (items as f64 / capacity as f64) * 100.0;
+
+        // Calculate total queries using f64 to avoid overflow on higher dimensions
+        let mut total_queries: f64 = 1.0;
+        for &item in high {
+            total_queries *= ((item as f64 + 1.0) * (item as f64 + 2.0)) / 2.0;
+        }
+
+        let q_10 = (total_queries * 0.10).ceil() as i64;
+        let q_20 = (total_queries * 0.20).ceil() as i64;
+        let q_30 = (total_queries * 0.30).ceil() as i64;
+
+        println!(
+            "{:<12} | {:<15} | {:<10} | {:>6.2}%   | {:<12} | {:<12} | {:<12} | {:<15}",
+            name, size_str, items, density, q_10, q_20, q_30, total_queries as i64
+        );
+    }
+
+    #[test]
+    fn print_all_database_metadata() {
+        println!(
+            "{:<12} | {:<15} | {:<10} | {:<10} | {:<12} | {:<12} | {:<12} | {:<15}",
+            "Dataset", "Grid", "Items", "Density", "10% Queries", "20% Queries", "30% Queries", "100% Queries"
+        );
+        println!("{:-<115}", "");
+
+        // 1. Process 2D Maps
+        let grid_sizes = ["10x10", "20x20", "30x30", "40x40", "50x50"];
+        let datasets = ["spitz", "cali", "shopparis", "highway", "busstop", "drink"];
+
+        for name in datasets {
+            for size in grid_sizes {
+                let path = format!("databases/{}/{}/{}.json", size, name, name);
+
+                if std::path::Path::new(&path).exists() {
+                    let locs = TwoDMap::load_array_locations_from_file(&path).unwrap();
+                    let db = TwoDMap::new_unscaled(locs, name, (0, 0), (0, 0)).unwrap();
+
+                    let items = db.get_universe().len();
+                    let (_low, high) = db.get_dom_pair();
+
+                    print_stats(name, size, items, &high);
+                }
+            }
+        }
+
+        // 2. Process 3D Map (nh)
+        let path_3d = "databases/16x16x14/nh/nh.json";
+        if std::path::Path::new(&path_3d).exists() {
+            let locs = ThreeDMap::load_array_locations_from_file(path_3d).unwrap();
+            let db = ThreeDMap::new_unscaled(locs, "nh").unwrap();
+
+            let items = db.get_universe().len();
+            let (_low, high) = db.get_dom_pair();
+
+            print_stats("nh", "16x16x14", items, &high);
+        }
+
+        // 3. Process N-Dimensional Synthetic Grids
+        for dim in 1..=6 {
+            let size_str = vec!["6"; dim].join("x");
+
+            // Uses your exact test parameters: dim, size_per_dim=6, density=35
+            let db = testDB::new(dim, 6, 35);
+            let items = db.get_universe().len();
+            let (_low, high) = db.get_dom_pair();
+
+            print_stats("grid", &size_str, items, &high);
+        }
+
+        println!("Done!");
+        panic!()
+    }
 }

@@ -4,3 +4,4 @@ LD_LIBRARY_PATH = "/opt/ortools/lib"
 
 [build]
 rustflags = ["-l", "protobuf"]
+target-dir = "/home/yelnat/.cargo-target/frequency_analysis_limits"

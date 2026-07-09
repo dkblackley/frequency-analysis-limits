@@ -4,5 +4,7 @@
     <mapping directory="" vcs="Git" />
     <mapping directory="$PROJECT_DIR$/databases/databases/frequency-analysis-limits" vcs="Git" />
     <mapping directory="$PROJECT_DIR$/databases/frequency-analysis-limits" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/vendor_patches/qhull-rs" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/vendor_patches/qhull-rs/qhull-sys/qhull" vcs="Git" />
   </component>
 </project>

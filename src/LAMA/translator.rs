@@ -1,4 +1,4 @@
-use crate::LAMA::ortools_wrap::{IntVar, PythonCpModel, TableConstraint};
+use crate::LAMA::mini_solver::{CpModel, IntVar, TableConstraint};
 use indicatif::{ProgressBar, ProgressStyle};
 use itertools::Itertools;
 use log::{debug, error, info, trace, warn};
@@ -24,20 +24,26 @@ pub struct Translator {
     upper: i64,
     pub enc_id_to_intvar: HashMap<i64, IntVar>,
     pub var_index_map: HashMap<IntVar, (i32, i64)>,
-    proto_model: PythonCpModel, // Replaced CpModelProto
+    proto_model: CpModel, // Replaced CpModelProto
     pub t_assignment_archive: HashMap<usize, HashMap<Vec<i64>, Vec<Vec<i64>>>>,
-    pub prev_t_assignments: HashMap<i64, Vec<Vec<i64>>>,
     trunc_amount: Vec<i64>,
     pub metadata: TranslatorMeta,
     found_map: HashMap<i64, (bool, f64)>,
+    // Do we have perfect knowledge? if so we don't need to truncate/try to match anythign
+    perfect: bool,
 }
 
 impl Translator {
-    pub fn new(largest_val: i64, mut encrypted_records: Vec<i64>, max_t: &usize) -> Self {
+    pub fn new(largest_val: i64, mut encrypted_records: Vec<i64>, max_t: &usize, perfect: bool) -> Self {
         info!("Starting");
         let mut rng = StdRng::seed_from_u64(42);
         encrypted_records.shuffle(&mut rng);
-        let mut cp_model = PythonCpModel::new();
+        let mut limit: Option<usize> = None;
+        if !perfect {
+            limit = Some(1000);
+        }
+
+        let mut cp_model = CpModel::new(limit);
         let (var_index_map, enc_id_to_intvar) =
             Self::set_all_vars(&mut cp_model, largest_val, encrypted_records);
         let trunc_amount = Self::get_trunc_amount(&largest_val, &max_t);
@@ -54,11 +60,10 @@ impl Translator {
             enc_id_to_intvar,
             var_index_map,
             t_assignment_archive: HashMap::new(),
-            prev_t_assignments: HashMap::new(),
             trunc_amount,
             metadata: TranslatorMeta::default(),
-
             found_map: debug,
+            perfect,
         }
     }
 
@@ -70,7 +75,7 @@ impl Translator {
         for i in 2..(max_t + 1) {
             // This may be too low for small databases
             // let safety_cap = (largest_val.clone() * 25) * (i as i64);
-            let safety_cap = 75;
+            let safety_cap = 85;
             // amount = largest_val.pow(i as u32);
             trunc_amount.push(safety_cap);
         }
@@ -87,16 +92,16 @@ impl Translator {
         return self.enc_id_to_intvar.clone();
     }
 
-    pub fn get_proto_model(self) -> PythonCpModel {
+    pub fn get_proto_model(self) -> CpModel {
         return self.proto_model;
     }
 
-    pub fn set_proto_model(&mut self, new_model: PythonCpModel) {
+    pub fn set_proto_model(&mut self, new_model: CpModel) {
         self.proto_model = new_model;
     }
 
     fn set_all_vars(
-        cp_model: &mut PythonCpModel,
+        cp_model: &mut CpModel,
         _upper: i64,
         encrypted_records: Vec<i64>,
     ) -> (HashMap<IntVar, (i32, i64)>, HashMap<i64, IntVar>) {
@@ -107,7 +112,7 @@ impl Translator {
         let pb = ProgressBar::new(encrypted_records.len() as u64);
         pb.set_style(
             ProgressStyle::default_bar()
-                .template("{spinner:.green} [{elapsed_precise}] [{wide_bar:.cyan/blue}] {pos}/{len} ({eta})")
+                .template("[{elapsed_precise}] {bar:40.cyan/blue} {percent}% {msg} (ETA: {eta_precise})")
                 .unwrap()
                 .progress_chars("#>-"),
         );
@@ -137,10 +142,10 @@ impl Translator {
     }
 
     fn add_allowed_assignments(
-        model: &mut PythonCpModel,
+        model: &mut CpModel,
         vars: &Vec<IntVar>,
-        allowed_plaintexts: &Vec<Vec<i64>>,
-        costs: &Vec<i64>, // Pass the costs in here
+        allowed_plaintexts: Vec<Vec<i64>>,
+        costs: Vec<i64>, // Pass the costs in here
         var_index_map: &HashMap<IntVar, (i32, i64)>,
     ) {
         let mut var_indices = Vec::new();
@@ -151,8 +156,8 @@ impl Translator {
 
         model.table_constraints.push(TableConstraint {
             vars: var_indices,
-            values: allowed_plaintexts.clone(),
-            costs: costs.clone(),
+            values: allowed_plaintexts,
+            costs: costs,
         });
     }
 
@@ -228,8 +233,8 @@ impl Translator {
                 Self::add_allowed_assignments(
                     &mut self.proto_model,
                     &vec![var],
-                    &just_plaintexts,
-                    &costs,
+                    just_plaintexts.clone(),
+                    costs,
                     &self.var_index_map,
                 );
 
@@ -286,9 +291,10 @@ impl Translator {
         t: usize,
         largest_val: i64,
         encrypted_records: &[i64],
-        mut cp_model: PythonCpModel,
+        mut cp_model: CpModel,
         validate_candidate: V,
-    ) -> (PythonCpModel, HashMap<IntVar, (i32, i64)>)
+        perfect: bool,
+    ) -> (CpModel, HashMap<IntVar, (i32, i64)>)
     where
         V: Fn(&[i64], &[i64]) -> (bool, f64) + Sync + Send,
     {
@@ -356,8 +362,11 @@ impl Translator {
                 ((valid_plaintexts.len() as f64) * (trunk_percent / 100.0)).round() as usize;
 
             // 3. Sort and truncate using the calculated count.
-            valid_plaintexts.par_sort_unstable_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
-            valid_plaintexts.truncate(keep_count);
+            if !perfect {
+                valid_plaintexts.par_sort_unstable_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
+                valid_plaintexts.truncate(keep_count);
+            }
+
 
             let just_plaintexts: Vec<Vec<i64>> =
                 valid_plaintexts.iter().map(|(pt, _)| pt.clone()).collect();
@@ -373,8 +382,8 @@ impl Translator {
             Self::add_allowed_assignments(
                 &mut cp_model,
                 &main_vars,
-                &just_plaintexts,
-                &costs,
+                just_plaintexts,
+                costs,
                 &var_index_map,
             );
         }
@@ -415,7 +424,7 @@ impl Translator {
 
         let temp_found = Mutex::new(Vec::new());
 
-        let table_constraints: Vec<(Vec<i64>, Vec<(Vec<i64>, f64)>)> = t_minus_1_assignments
+        let mut table_constraints: Vec<(Vec<i64>, Vec<(Vec<i64>, f64)>)> = t_minus_1_assignments
             .clone()
             .par_iter()
             .flat_map(|(t_minus_1_tuple, sub_assigns)| {
@@ -492,7 +501,6 @@ impl Translator {
         // ------------------------------------------------------------------------
         // PHASE 2: Single Global CP-SAT Model
         // ------------------------------------------------------------------------
-        let mut current_t_cache = HashMap::with_capacity(table_constraints.len());
         debug!("Mini model clone");
         let mut mini_model = self.proto_model.clone();
         info!(
@@ -506,20 +514,22 @@ impl Translator {
                 .map(|rec| *self.enc_id_to_intvar.get(rec).unwrap())
                 .collect();
 
-            let trunk_percent = *self.trunc_amount.get(t).unwrap_or(&10) as f64;
+            if !self.perfect {
+                let trunk_percent = *self.trunc_amount.get(t).unwrap_or(&10) as f64;
 
-            // 2. Calculate the number of items that percentage represents based on the current length.
-            let keep_count =
-                ((valid_plaintexts.len() as f64) * (trunk_percent / 100.0)).round() as usize;
+                // 2. Calculate the number of items that percentage represents based on the current length.
+                let keep_count =
+                    ((valid_plaintexts.len() as f64) * (trunk_percent / 100.0)).round() as usize;
 
-            // 3. Sort and truncate using the calculated count.
-            valid_plaintexts.par_sort_unstable_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
-            valid_plaintexts.truncate(keep_count);
+                // 3. Sort and truncate using the calculated count.
+                valid_plaintexts.par_sort_unstable_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
+                valid_plaintexts.truncate(keep_count);
+            }
 
             let just_plaintexts: Vec<Vec<i64>> =
                 valid_plaintexts.iter().map(|(pt, _)| pt.clone()).collect();
 
-            for enc in &enc_t_tuple {
+            for enc in enc_t_tuple {
                 let true_assignment_survived =
                     just_plaintexts.iter().any(|plaint| plaint.contains(&enc));
 
@@ -548,30 +558,20 @@ impl Translator {
             Self::add_allowed_assignments(
                 &mut mini_model,
                 &main_vars,
-                &just_plaintexts,
-                &costs,
+                just_plaintexts,
+                costs,
                 &self.var_index_map,
             );
-
-            current_t_cache.insert(enc_t_tuple, valid_plaintexts);
         }
 
         // ------------------------------------------------------------------------
         // PHASE 3: Solve
         // ------------------------------------------------------------------------
         debug!("Running mini-solve via Python");
-        let solve_pb = ProgressBar::new_spinner();
-        solve_pb.enable_steady_tick(std::time::Duration::from_millis(500));
-        solve_pb.set_style(
-            ProgressStyle::default_spinner()
-                .template("{spinner:.blue} [{elapsed_precise}] Mini-Solver thinking (no strict ETA for SAT problems)...")
-                .unwrap()
-        );
 
         // This calls your wrapper instead of ffi::solve_with_parameters
         mini_model.validate(&self.var_index_map);
         let response = mini_model.solve(self.upper, false);
-        solve_pb.finish_with_message(format!("Mini-Solver finished in {:?}", solve_pb.elapsed()));
 
         if response.is_none() {
             warn!("Solver returned error or Infeasible");
@@ -592,6 +592,10 @@ impl Translator {
         // ------------------------------------------------------------------------
         let mut updated_t_cache: HashMap<Vec<i64>, Vec<Vec<i64>>> =
             HashMap::with_capacity(table_constraints.len());
+
+        self.proto_model.table_constraints.clear();
+        drop(mini_model);
+
 
         for (enc_t_tuple, _old_valid_assignments) in table_constraints {
             let solver_indices: Vec<usize> = enc_t_tuple
@@ -632,8 +636,8 @@ impl Translator {
             Self::add_allowed_assignments(
                 &mut self.proto_model,
                 &main_vars,
-                &surviving_assignments,
-                &costs,
+                surviving_assignments.clone(),
+                costs,
                 &self.var_index_map,
             );
 

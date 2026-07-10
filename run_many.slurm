@@ -40,12 +40,6 @@ export SINGULARITYENV_PREPEND_PATH="$CMAKE_DIR/bin"
 export SINGULARITYENV_LIBCLANG_PATH="$LLVM_DIR/lib"
 export SINGULARITYENV_RAYON_NUM_THREADS=$SLURM_CPUS_PER_TASK
 
-# 4. Activate Python Environment
-# (CRITICAL: Your Rust code spawns a subprocess using $PYTHON_EXEC to run solver.py)
-source /home/dblackle/miniconda3/etc/profile.d/conda.sh
-conda activate main
-export PYTHON_EXEC="/home/dblackle/.conda/envs/main/bin/python3.10"
-
 # 5. Define the execution command
 SG_RUN="singularity exec --bind /scratch/dblackle --bind /scratch/dblackle/cargo:/usr/local/cargo $CONTAINER"
 

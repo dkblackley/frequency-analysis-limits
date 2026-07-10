@@ -24,7 +24,7 @@ use std::io::BufWriter;
 use std::time::Instant;
 
 mod error;
-pub mod ortools_wrap;
+pub mod mini_solver;
 pub mod query;
 pub mod selector;
 pub mod solver;
@@ -103,6 +103,7 @@ pub fn lama_attack(
         largest_possible_val,
         loaded_db.get_universe(),
         &(t.clone() as usize),
+        *query_percent == 1.0,
     );
 
     let query_dist_ref = &selector.query_distribution;

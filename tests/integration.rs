@@ -8,7 +8,7 @@ use frequency_analysis_limits::plotting::two_d::spatial_plot::{
     plot_spatial_reconstruction, plot_spatial_reconstruction_all_items,
 };
 use frequency_analysis_limits::LAMA::into_recon_data;
-use frequency_analysis_limits::LAMA::ortools_wrap::PythonCpModel;
+use frequency_analysis_limits::LAMA::mini_solver::CpModel;
 use frequency_analysis_limits::LAMA::selector::Selector;
 use frequency_analysis_limits::LAMA::solver::CpSolverStatus::{Feasible, Optimal};
 use frequency_analysis_limits::LAMA::solver::Solver;
@@ -202,7 +202,7 @@ fn end_flat() {
         "3. Initializing Translator with universe size: {}",
         universe.len()
     );
-    let mut translator = Translator::new(largest_enc_val, universe.clone(), &2);
+    let mut translator = Translator::new(largest_enc_val, universe.clone(), &2, true);
 
     // Grab references to avoid lifetime closure issues
     let query_dist_ref = &selector.query_distribution;
@@ -248,13 +248,14 @@ fn end_flat() {
     };
 
     info!("Bruteforcing t=2");
-    let model = PythonCpModel::new();
+    let model = CpModel::new(None);
     let (mut model, index_map) = Translator::process_t_brute_force(
         2,
         largest_enc_val,
         &*universe.clone(),
         model,
         &validate_candidate,
+        true,
     );
     let mut solver = Solver::new(index_map);
     let responses = solver.solve(&mut model, largest_enc_val, false);
@@ -344,7 +345,7 @@ fn end_flat() {
         0.0,
         0.0,
     )
-    .expect("TODO: panic message");
+        .expect("TODO: panic message");
 
     let valid = find_valid_solution(&responses, &total_responses);
 
@@ -367,11 +368,11 @@ fn end_to_end() {
         .unwrap();
 
     // This should take about a minute to run... (if not very sparse!)
-    let rows_cols = 8;
+    let rows_cols = 15;
     let dim = 2;
 
     info!("Loading test DB ({}x{})", rows_cols, rows_cols);
-    let loaded_db: Box<dyn Searchable + Sync> = Box::new(testDB::new(dim, rows_cols, 40));
+    let loaded_db: Box<dyn Searchable + Sync> = Box::new(testDB::new(dim, rows_cols, 80));
 
     let dist = "uniform";
     let eps = 0.0; // Perfect knowledge constraint
@@ -389,7 +390,7 @@ fn end_to_end() {
         low_pair,
         high_pair
     );
-    let mut translator = Translator::new(largest_enc_val, universe.clone(), &4);
+    let mut translator = Translator::new(largest_enc_val, universe.clone(), &4, true);
 
     let query_dist_ref = &selector.query_distribution;
     let high_pair_ref = &high_pair;
@@ -437,8 +438,8 @@ fn end_to_end() {
     info!("--> Processing Recursive Case (t=3) sequentially across chunk models...");
     translator.process_t_greater_than_1(3, &universe, &validate_candidate);
 
-    info!("--> Processing Recursive Case (t=4) sequentially across chunk models...");
-    translator.process_t_greater_than_1(4, &universe, &validate_candidate);
+    // info!("--> Processing Recursive Case (t=4) sequentially across chunk models...");
+    // translator.process_t_greater_than_1(4, &universe, &validate_candidate);
 
     info!("5. Building and executing the CP-SAT Solver for the final constraint graph...");
     let mut solver = Solver::new(translator.get_var_index_map());
@@ -560,7 +561,7 @@ fn end_to_end_sampled() {
     let universe = loaded_db.get_universe();
     let largest_enc_val: i64 = flatten_nd(&high_pair, &high_pair, &low_pair);
 
-    let mut translator = Translator::new(largest_enc_val, universe.clone(), &4);
+    let mut translator = Translator::new(largest_enc_val, universe.clone(), &4, false);
     let query_dist_ref = &selector.query_distribution;
     let high_pair_ref = &high_pair;
     let low_pair_ref = &low_pair;
@@ -678,7 +679,7 @@ fn end_to_end_sampled() {
         0.0,
         0.0,
     )
-    .expect("TODO: panic message");
+        .expect("TODO: panic message");
 
     let mut correct = 0;
     let mut incorrect = 0;

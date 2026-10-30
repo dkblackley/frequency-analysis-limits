@@ -524,7 +524,9 @@ impl Translator {
             return None;
         }
 
-
+        // ------------------------------------------------------------------------
+        // PHASE 2: Single Global CP-SAT Model
+        // ------------------------------------------------------------------------
         debug!("Mini model clone");
         let mut mini_model = self.proto_model.clone();
         info!(

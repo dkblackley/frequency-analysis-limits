@@ -235,3 +235,4 @@ impl CpModel {
         solutions
     }
 }
+

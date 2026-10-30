@@ -31,6 +31,7 @@ pub struct Translator {
     found_map: HashMap<i64, (bool, f64)>,
     // Do we have perfect knowledge? if so we don't need to truncate/try to match anythign
     perfect: bool,
+    pub last_solutions: Option<Vec<Vec<i64>>>,
 }
 
 impl Translator {
@@ -64,6 +65,7 @@ impl Translator {
             metadata: TranslatorMeta::default(),
             found_map: debug,
             perfect,
+            last_solutions: None,
         }
     }
 
@@ -472,6 +474,21 @@ impl Translator {
                                     }
                                 }
 
+                                // Before dumping every 3-tuple that matched into the solver, we can first ask this:
+                                // Our previous round gave us possible full DB-reconstructions. Of every possible 3-tuple
+                                // over every possible DB, did this 3-tuple ever once even appear? If not, we don't need to
+                                // bother giving it to the SAT, we know it isn't even in the previous solutions.
+                                if let (Some(prev), true) = (&self.last_solutions, self.perfect) {
+                                    let appeared = prev.iter().any(|sol| {
+                                        t_tuple.iter().zip(&candidate).all(|(rec, pt)| {
+                                            sol[self.var_index_map[&self.enc_id_to_intvar[rec]].0 as usize] == *pt
+                                        })
+                                    });
+                                    if !appeared {
+                                        continue;
+                                    }
+                                }
+
                                 mini_constrain_count.fetch_add(
                                     candidate.len(),
                                     std::sync::atomic::Ordering::Relaxed,
@@ -571,7 +588,9 @@ impl Translator {
 
         // This calls your wrapper instead of ffi::solve_with_parameters
         mini_model.validate(&self.var_index_map);
+
         let response = mini_model.solve(self.upper, false);
+        if let Some(r) = &response { self.last_solutions = Some(r.clone()); }
 
         if response.is_none() {
             warn!("Solver returned error or Infeasible");

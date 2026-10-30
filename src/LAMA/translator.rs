@@ -31,6 +31,8 @@ pub struct Translator {
     found_map: HashMap<i64, (bool, f64)>,
     // Do we have perfect knowledge? if so we don't need to truncate/try to match anythign
     perfect: bool,
+    // Store the exact, full databases that we reconstructed in the previous round.
+    pub last_solutions: Option<Vec<Vec<i64>>>,
 }
 
 impl Translator {
@@ -64,6 +66,7 @@ impl Translator {
             metadata: TranslatorMeta::default(),
             found_map: debug,
             perfect,
+            last_solutions: None,
         }
     }
 
@@ -494,13 +497,34 @@ impl Translator {
             self.found_map.insert(key, val);
         }
 
+        // Before dumping every t-tuple that matched into the solver, we can first ask this:
+        // Our previous round gave us possible full DB-reconstructions. Of every possible t-tuple
+        // over every possible DB, did this assignment ever once even appear? If not, remove it
+        // from the table, we know it isn't even in the previous solutions.
+        if let (Some(prev), true) = (&self.last_solutions, self.perfect) {
+            table_constraints
+                .par_iter_mut()
+                .for_each(|(enc_t_tuple, valid_plaintexts)| {
+                    let solver_indices: Vec<usize> = enc_t_tuple
+                        .iter()
+                        .map(|rec| self.var_index_map[&self.enc_id_to_intvar[rec]].0 as usize)
+                        .collect();
+
+                    // Every assignment this t-tuple had across all the previous solutions
+                    let seen: HashSet<Vec<i64>> = prev
+                        .iter()
+                        .map(|sol| solver_indices.iter().map(|&idx| sol[idx]).collect())
+                        .collect();
+
+                    valid_plaintexts.retain(|(pt, _)| seen.contains(pt));
+                });
+        }
+
         if table_constraints.is_empty() {
             return None;
         }
 
-        // ------------------------------------------------------------------------
-        // PHASE 2: Single Global CP-SAT Model
-        // ------------------------------------------------------------------------
+
         debug!("Mini model clone");
         let mut mini_model = self.proto_model.clone();
         info!(
@@ -571,6 +595,7 @@ impl Translator {
 
         // This calls your wrapper instead of ffi::solve_with_parameters
         mini_model.validate(&self.var_index_map);
+
         let response = mini_model.solve(self.upper, false);
 
         if response.is_none() {
@@ -579,6 +604,7 @@ impl Translator {
         }
 
         let all_global_solutions = response.unwrap();
+        self.last_solutions = Some(all_global_solutions.clone());
         debug!(
             "Finished mini-solve with {} possible reconstructions",
             all_global_solutions.len()

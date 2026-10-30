@@ -118,14 +118,10 @@ impl Solver {
 
             let orig_sol = all_solutions[0][ids.0 as usize];
 
-            if get_one {
-                orig_appear = true;
-                found_vals.push(orig_sol);
-            }
 
             for i in 0..total_solutions {
                 let extra_sol = all_solutions[i][ids.0 as usize];
-                if orig_sol == extra_sol {
+                if extra_sol == ids.1 {
                     orig_appear = true;
                 }
                 found_vals.push(extra_sol);

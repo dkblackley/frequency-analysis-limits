@@ -1,0 +1,11 @@
+{
+  "name": "Rust 1.95 Env",
+  "build": {
+    "dockerfile": "Dockerfile"
+  },
+  "customizations": {
+    "jetbrains": {
+      "backend": "RustRover"
+    }
+  }
+}

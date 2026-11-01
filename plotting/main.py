@@ -8,6 +8,7 @@ from plot_boxplots_mse import plot_mse_boxplots
 from plot_grid_mse import plot_grid_by_mse
 from plot_convex_mse import plot_convex_mse
 from plot_histograms import plot_reconstruction_histograms, plot_lama_flat_distributions
+from plot_falzon import plot_falzon_histograms
 from plot_running_time import plot_running_time_bar
 from plot_running_time_lines import plot_running_time_lines
 from globals_vars import FONT_SIZE
@@ -26,6 +27,7 @@ COLORS = {
     'even_less': '#E69F00',  # Orange / Yellow
     'remin': '#009E73',  # Green
     'reminp': '#CC79A7',  # Purple (REMIN+)
+    'falzon': '#D55E00',  # Vermilion (Falzon et al.)
 }
 
 DIST_COLORS = {
@@ -45,6 +47,7 @@ MARKERS = {
     'even_less': '*',  # Star for Even Less
     'remin': 'o',  # Circle for Remin
     'reminp': '^',  # Triangle for Remin+
+    'falzon': 'D',  # Diamond for Falzon et al.
 }
 
 LABELS = {
@@ -52,6 +55,7 @@ LABELS = {
     'even_less': 'Even Less',
     'remin': 'Remin',
     'reminp': 'Remin+',
+    'falzon': 'Falzon et al.',
 }
 
 METHOD_ORDER = ['limits', 'even_less', 'remin', 'reminp']
@@ -109,18 +113,18 @@ if __name__ == "__main__":
     #     # Pass the whole list of distributions instead of iterating one by one
     #     plot_grid_by_mse(grid_data, db, distributions, OUTPUT_DIR, METHOD_ORDER, COLORS, MARKERS, LABELS)
 
-    # ---------------------------------------------------------
-    # 2. Query Percent vs MSE (Convex Hulls)
-    # ---------------------------------------------------------
-    print("Loading nested data for Convex Hull metrics...")
-    convex_data = load_convex_mse_data(BASE_DIR, datasets, methods, distributions)
-
-    print("Generating Convex Hull Query % vs MSE plots...")
-    for db in datasets:
-        # Pass the whole list of distributions instead of iterating one by one
-        plot_convex_mse(convex_data, db, distributions, OUTPUT_DIR, METHOD_ORDER, COLORS, MARKERS, LABELS)
-
-    print(f"\nDone! All plots saved to ./{OUTPUT_DIR}/")
+    # # ---------------------------------------------------------
+    # # 2. Query Percent vs MSE (Convex Hulls)
+    # # ---------------------------------------------------------
+    # print("Loading nested data for Convex Hull metrics...")
+    # convex_data = load_convex_mse_data(BASE_DIR, datasets, methods, distributions)
+    #
+    # print("Generating Convex Hull Query % vs MSE plots...")
+    # for db in datasets:
+    #     # Pass the whole list of distributions instead of iterating one by one
+    #     plot_convex_mse(convex_data, db, distributions, OUTPUT_DIR, METHOD_ORDER, COLORS, MARKERS, LABELS)
+    #
+    # print(f"\nDone! All plots saved to ./{OUTPUT_DIR}/")
 
     # # BOX PLOTS
     # print("Generating Box Plots...")
@@ -138,6 +142,18 @@ if __name__ == "__main__":
     #     hist_json_path = f"../figures/histogram_mse_sol_num/mse_histogram_{db}_uniform.json"
     #     plot_reconstruction_histograms(hist_json_path, db, "uniform", OUTPUT_DIR, METHOD_ORDER, COLORS, LABELS)
 
+
+    # ---------------------------------------------------------
+    # LAMa vs Falzon et al. Histograms (same data as the histograms above)
+    # ---------------------------------------------------------
+    print("Generating LAMa vs Falzon et al. Histogram Plots...")
+    falzon_grid = 50
+    for db in datasets:
+        dist = "uniform"
+        hist_json_path = f"../figures/histogram_mse_sol_num/mse_histogram_{db}_{dist}.json"
+        recon_json_path = f"{BASE_DIR}/{falzon_grid}x{falzon_grid}/{db}/limits/{db}_{dist}_e0_d0.9_reconstruction.json"
+        plot_falzon_histograms(hist_json_path, recon_json_path, (falzon_grid, falzon_grid), db, dist,
+                               OUTPUT_DIR, COLORS, LABELS)
 
     # # ---------------------------------------------------------
     # # LAMa Flat Distribution Histograms

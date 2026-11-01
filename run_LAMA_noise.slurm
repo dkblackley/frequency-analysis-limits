@@ -3,7 +3,7 @@
 #SBATCH --partition=normal
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
-#SBATCH --mem=210G
+#SBATCH --mem=180G
 #SBATCH --time=0-04:30:00
 
 # Noisy distribution: the attacker knows --dist, queries really come from a

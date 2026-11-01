@@ -3,19 +3,19 @@
 #SBATCH --partition=normal
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
-#SBATCH --mem=180G
+#SBATCH --mem=480G
 #SBATCH --time=0-04:30:00
 
 # Noisy distribution: the attacker knows --dist, queries really come from a
-# distribution 1% away in total variation (--dist-noise 0.01). All queries observed.
-# 6 names * 3 dists * 10 dirs = 180 combinations (indexes 0 through 179)
-#SBATCH --array=0-179
+# distribution 1% away in total variation (--dist-noise 0.01), on the single 15x15_run_1 grid.
+# 6 names * 3 dists * 4 probs = 72 combinations (indexes 0 through 71)
+#SBATCH --array=0-71
 
 #SBATCH --output=logs/LAMA_noise_%A_%a.out
 #SBATCH --error=logs/LAMA_noise_%A_%a.err
 
-# REQUIRES the --dist-noise flag (PR #2, branch claude/project-thread-0r49b1),
-# and the binary built by run_LAMA_perfect.slurm from code that includes it.
+# Needs the binary built by run_LAMA_perfect.slurm (this script does not build).
+# Results: <db>/limits/<db>_<dist>_p<prob>_noise0.01_* so they never overwrite the noiseless runs.
 
 cd "$SLURM_SUBMIT_DIR"
 
@@ -50,22 +50,26 @@ fi
 
 NAMES=("drink" "busstop" "highway" "shopparis" "cali" "spitz")
 DISTS=("gaussian" "beta" "uniform")
-DATA_DIRS=( "${SLURM_SUBMIT_DIR}/databases/15x15_run_"{1..10} )
+DATA_DIRS=( "${SLURM_SUBMIT_DIR}/databases/15x15_run_1" )
+PROBS=("0.1" "0.2" "0.3" "1.0")
 NOISE="0.01"
-PROB="1.0"
 
 # --- PARAMETER DECODING MATH ---
 task_id=$SLURM_ARRAY_TASK_ID
 
+num_probs=${#PROBS[@]}
 num_dists=${#DISTS[@]}
 num_names=${#NAMES[@]}
 num_dirs=${#DATA_DIRS[@]}
 
-total=$((num_dists * num_names * num_dirs))
+total=$((num_probs * num_dists * num_names * num_dirs))
 if [ "$task_id" -ge "$total" ]; then
     echo "Task $task_id is outside the $total combinations, nothing to do."
     exit 0
 fi
+
+prob_idx=$((task_id % num_probs))
+task_id=$((task_id / num_probs))
 
 dist_idx=$((task_id % num_dists))
 task_id=$((task_id / num_dists))
@@ -73,6 +77,7 @@ task_id=$((task_id / num_dists))
 name_idx=$((task_id % num_names))
 dir_idx=$((task_id / num_names))
 
+prob=${PROBS[$prob_idx]}
 dist=${DISTS[$dist_idx]}
 name=${NAMES[$name_idx]}
 data_dir=${DATA_DIRS[$dir_idx]}
@@ -85,7 +90,7 @@ echo "Running configuration:"
 echo "  Data Dir: $data_dir"
 echo "  Name:     $name"
 echo "  Dist:     $dist"
-echo "  Prob:     $PROB"
+echo "  Prob:     $prob"
 echo "  Noise:    $NOISE"
 echo "========================================"
 
@@ -95,7 +100,7 @@ $SG_RUN ./target/release/frequency_analysis_limits \
     --t "$t_val" \
     --dist "$dist" \
     --padding "$padding" \
-    --query-percent "$PROB" \
+    --query-percent "$prob" \
     --dist-noise "$NOISE"
 
 if [ $? -ne 0 ]; then

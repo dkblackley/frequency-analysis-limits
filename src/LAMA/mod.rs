@@ -97,8 +97,10 @@ pub fn lama_attack(
     } else {
         None
     };
-    // With all queries observed, enumerate every database within epsilon (also with dist noise)
-    let perfect = *query_percent == 1.0;
+    // Only the noiseless 100% run is the perfect world. With dist noise at 100% the attacker sees
+    // the (noisy) frequencies in the limit and knows the exact error bound, so it takes the
+    // non-perfect path with eps = max_dist_err instead of a VC bound.
+    let perfect = *query_percent == 1.0 && *dist_noise == 0.0;
 
     debug!(
         "Working with padding: {}, low_pair: {:?}, high_pair: {:?}",

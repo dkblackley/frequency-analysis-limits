@@ -16,7 +16,8 @@ from globals_vars import FONT_SIZE
 from plot_limits_samples import print_limits_samples_latex
 
 from print_time_per_recon_table import print_time_per_recon_latex
-from print_noise_table import load_noise_data, print_noise_latex, save_noise_csv
+from print_noise_table import load_noise_data, print_noise_latex, save_noise_csv, \
+    load_noise_sweep_data, print_noise_sweep_latex, save_noise_sweep_csv
 from plot_limits_time_per_recon import plot_limits_time_per_recon
 from spatial_reconstructions import plot_3d_reconstruction, plot_spatial_reconstruction
 
@@ -173,6 +174,13 @@ if __name__ == "__main__":
     print_noise_latex(noise_data, datasets, distributions, noise=noise, metric="centroid")
     print_noise_latex(noise_data, datasets, distributions, noise=noise, metric="diameter")
     save_noise_csv(noise_data, OUTPUT_DIR, noise=noise)
+
+    # 100% of queries, distribution noise 0.01 / 0.05 / 0.1, eps = exact largest error
+    sweep_noises = (0.01, 0.05, 0.1)
+    sweep_data = load_noise_sweep_data(BASE_DIR, datasets, distributions, noises=sweep_noises, grid="15x15")
+    print_noise_sweep_latex(sweep_data, datasets, distributions, noises=sweep_noises, metric="centroid")
+    print_noise_sweep_latex(sweep_data, datasets, distributions, noises=sweep_noises, metric="diameter")
+    save_noise_sweep_csv(sweep_data, OUTPUT_DIR, noises=sweep_noises)
 
     # # ---------------------------------------------------------
     # # LAMa Flat Distribution Histograms

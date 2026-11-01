@@ -13,7 +13,7 @@
 #
 # Can also be overridden from the command line: ./local_run.sh probs_2d
 # ============================================================
-EXPERIMENT="${1:-probs_2d}"
+EXPERIMENT="${1:-noise}"
 
 export RUST_LOG="debug"
 export RUST_BACKTRACE="1"

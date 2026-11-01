@@ -44,7 +44,7 @@ if [ ! -x ./target/release/frequency_analysis_limits ]; then
     exit 1
 fi
 if ! $SG_RUN ./target/release/frequency_analysis_limits --help | grep -q -- "--dist-noise"; then
-    echo "This binary has no --dist-noise flag: merge/check out PR #2 and rebuild."
+    echo "This binary has no --dist-noise flag"
     exit 1
 fi
 

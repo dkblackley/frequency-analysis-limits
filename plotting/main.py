@@ -9,6 +9,7 @@ from plot_grid_mse import plot_grid_by_mse
 from plot_convex_mse import plot_convex_mse
 from plot_histograms import plot_reconstruction_histograms, plot_lama_flat_distributions
 from plot_falzon import plot_falzon_histograms
+from plot_falzon_any import plot_falzon_any_histograms
 from plot_running_time import plot_running_time_bar
 from plot_running_time_lines import plot_running_time_lines
 from globals_vars import FONT_SIZE
@@ -149,13 +150,17 @@ if __name__ == "__main__":
     print("Generating LAMa vs Falzon et al. Histogram Plots...")
     falzon_grid = 50
     falzon_dists = ["gaussian", "beta", "uniform"]  # left to right
+    # True: LAMa per distribution + one Falzon "Any Dist." column (plot_falzon_any.py)
+    # False: a LAMa/Falzon pair per distribution (plot_falzon.py)
+    falzon_any_dist = True
+    plot_falzon_row = plot_falzon_any_histograms if falzon_any_dist else plot_falzon_histograms
     for db in datasets:
         paths = {dist: (f"../figures/histogram_mse_sol_num/mse_histogram_{db}_{dist}.json",
                         f"{BASE_DIR}/{falzon_grid}x{falzon_grid}/{db}/limits/{db}_{dist}_e0_d0.9_reconstruction.json")
                  for dist in falzon_dists}
         # Spitz is the top row, so it carries the method/distribution titles
-        plot_falzon_histograms(paths, (falzon_grid, falzon_grid), db, OUTPUT_DIR, COLORS, LABELS,
-                               show_header=(db == "spitz"))
+        plot_falzon_row(paths, (falzon_grid, falzon_grid), db, OUTPUT_DIR, COLORS, LABELS,
+                        show_header=(db == "spitz"))
 
     # # ---------------------------------------------------------
     # # LAMa Flat Distribution Histograms

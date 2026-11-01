@@ -270,12 +270,14 @@ impl CpModel {
 
     /// Penalty for a t-tuple whose values fell outside epsilon (not a row in its table).
     pub const OUTSIDE_EPSILON: i64 = 10_000_000;
+    // true: top-k over every database any restart visits; false: only each restart's final database
+    pub const KEEP_EVERY_VISITED: bool = false;
 
     /// Sampled setting: the top-10 lowest-error databases from `min_error_lns`, keeping only those
     /// where every t-tuple is within epsilon (so they are valid LAMa solutions).
     pub fn sampled_reconstructions(&self, largest_val: i64) -> Vec<Vec<i64>> {
         debug!("About to start trying to find solutions in the imperfect world...");
-        self.min_error_lns(largest_val, 128, 100, 4, Duration::from_millis(300), 10000)
+        self.min_error_lns(largest_val, 120, 50, 4, Duration::from_millis(300), 100)
             .into_iter()
             .filter(|r| r.total_error < Self::OUTSIDE_EPSILON)
             .map(|r| r.assignment)
@@ -364,6 +366,7 @@ impl CpModel {
             ProgressStyle::with_template("{bar:40} {pos}/{len} [{elapsed_precise}<{eta_precise}]").unwrap(),
         );
 
+
         // Running top-k over every database any restart visits: (total_error, assignment), worst last.
         let best_seen: Mutex<BTreeSet<(i64, Vec<i64>)>> = Mutex::new(BTreeSet::new());
         // Offer one database to the top-k; it is only cloned if it beats the current worst.
@@ -394,7 +397,7 @@ impl CpModel {
                 }
                 let mut total_error: i64 =
                     (0..self.table_constraints.len()).map(|t| t_tuple_error(&assignment, t)).sum();
-                offer(&assignment, total_error);
+                if Self::KEEP_EVERY_VISITED { offer(&assignment, total_error); }
 
                 // 3. LNS steps.
                 for _ in 0..neighbourhoods_per_restart {
@@ -425,7 +428,7 @@ impl CpModel {
                         let error_after: i64 = touched.iter().map(|&t| t_tuple_error(&assignment, t)).sum();
                         if error_after < error_before {
                             total_error += error_after - error_before;
-                            offer(&assignment, total_error);
+                            if Self::KEEP_EVERY_VISITED { offer(&assignment, total_error); }
                         } else {
                             for (var, value) in old_values {
                                 assignment[var] = value;
@@ -434,6 +437,8 @@ impl CpModel {
                     }
                     pb.inc(1);
                 }
+            // Each restart's final database (already offered above if KEEP_EVERY_VISITED; the set drops the duplicate)
+            offer(&assignment, total_error);
         });
         pb.finish();
 

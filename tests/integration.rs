@@ -521,10 +521,10 @@ fn end_to_end_sampled() {
     let dim = 2;
 
     info!("Loading test DB ({}x{})", rows_cols, rows_cols);
-    let loaded_db: Box<dyn Searchable + Sync> = Box::new(testDB::new(dim, rows_cols, 75));
+    let loaded_db: Box<dyn Searchable + Sync> = Box::new(testDB::new(dim, rows_cols, 35));
 
-    let dist = "uniform";
-    let target_query_percentage = 0.1; // e.g., observe 10% of all possible queries
+    let dist = "gaussian";
+    let target_query_percentage = 0.2; // e.g., observe 20% of all possible queries
     let fixed_delta = 0.1; // 90% confidence that error <= epsilon
 
     // 1. Initialize a baseline selector to generate the distribution space
@@ -701,6 +701,66 @@ fn end_to_end_sampled() {
 
     let valid = find_valid_solution(&responses, &(total_responses as i32));
     info!("Valid output: {}", valid.0);
+
+    // ---- MSE of every reconstruction vs the truth (raw, and best over the 8 grid rotations/reflections) ----
+    // responses[true_enc][j] = value reconstruction j gave that record
+    let num_recons = responses.values().next().map_or(0, |v| v.len());
+    let side = high_pair[0] - low_pair[0]; // assumes a square 2D grid
+    let to_xy = |enc: i64| -> (i64, i64) {
+        let p = unflatten_nd(enc, &high_pair, &low_pair);
+        (p[0] - low_pair[0], p[1] - low_pair[1])
+    };
+    // The 8 rotations/reflections of a square grid
+    let symmetry = |(x, y): (i64, i64), k: usize| -> (i64, i64) {
+        match k {
+            0 => (x, y), 1 => (side - x, y), 2 => (x, side - y), 3 => (side - x, side - y),
+            4 => (y, x), 5 => (side - y, x), 6 => (y, side - x), _ => (side - y, side - x),
+        }
+    };
+    let mut raw_mses = Vec::with_capacity(num_recons);
+    let mut aligned_mses = Vec::with_capacity(num_recons);
+    for j in 0..num_recons {
+        // MSE of reconstruction j after applying symmetry k to it
+        let mse_under = |k: usize| -> f64 {
+            responses.iter().map(|(&true_enc, guesses)| {
+                let (tx, ty) = to_xy(true_enc);
+                let (gx, gy) = symmetry(to_xy(guesses[j]), k);
+                ((tx - gx).pow(2) + (ty - gy).pow(2)) as f64
+            }).sum::<f64>() / responses.len() as f64
+        };
+        raw_mses.push(mse_under(0));
+        aligned_mses.push((0..8).map(|k| mse_under(k)).fold(f64::INFINITY, f64::min));
+    }
+    let summary = |mses: &[f64]| -> (f64, f64, f64) {
+        let avg = mses.iter().sum::<f64>() / mses.len().max(1) as f64;
+        let best = mses.iter().copied().fold(f64::INFINITY, f64::min);
+        let worst = mses.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+        (avg, best, worst)
+    };
+    let (avg, best, worst) = summary(&raw_mses);
+    info!("MSE over {} recons (raw):     avg {:.3}, best {:.3}, worst {:.3}", num_recons, avg, best, worst);
+    let (avg, best, worst) = summary(&aligned_mses);
+    info!("MSE over {} recons (aligned): avg {:.3}, best {:.3}, worst {:.3}", num_recons, avg, best, worst);
+
+    // ---- Does the data prefer the truth? Same cost as the search: singles + pairs ----
+    let encs: Vec<i64> = responses.keys().copied().collect();
+    let cost = |enc_tuple: &[i64], pts: &[i64]| -> i64 {
+        let (valid, err) = validate_candidate(enc_tuple, pts);
+        if valid { (err.powf(2.0) * 1_000_00.0).round() as i64 } else { 1_000_000_000_000 }
+    };
+    let score = |guess: &dyn Fn(i64) -> i64| -> i64 {
+        let mut total = 0;
+        for (a, &e1) in encs.iter().enumerate() {
+            total += cost(&[e1], &[guess(e1)]);
+            for &e2 in &encs[a + 1..] {
+                total += cost(&[e1, e2], &[guess(e1), guess(e2)]);
+            }
+        }
+        total
+    };
+    let truth_error = score(&|e| e); // test DBs: encrypted id == true plaintext
+    let best_found = (0..num_recons).map(|j| score(&|e| responses[&e][j])).min().unwrap_or(i64::MAX);
+    info!("Total error: truth {}, best reconstruction {}", truth_error, best_found);
 
     info!("Test completed successfully.")
 }

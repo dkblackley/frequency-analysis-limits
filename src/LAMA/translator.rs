@@ -31,6 +31,7 @@ pub struct Translator {
     found_map: HashMap<i64, (bool, f64)>,
     // Do we have perfect knowledge? if so we don't need to truncate/try to match anythign
     perfect: bool,
+    // Store the exact, full databases that we reconstructed in the previous round.
     pub last_solutions: Option<Vec<Vec<i64>>>,
 }
 
@@ -474,21 +475,6 @@ impl Translator {
                                     }
                                 }
 
-                                // Before dumping every 3-tuple that matched into the solver, we can first ask this:
-                                // Our previous round gave us possible full DB-reconstructions. Of every possible 3-tuple
-                                // over every possible DB, did this 3-tuple ever once even appear? If not, we don't need to
-                                // bother giving it to the SAT, we know it isn't even in the previous solutions.
-                                if let (Some(prev), true) = (&self.last_solutions, self.perfect) {
-                                    let appeared = prev.iter().any(|sol| {
-                                        t_tuple.iter().zip(&candidate).all(|(rec, pt)| {
-                                            sol[self.var_index_map[&self.enc_id_to_intvar[rec]].0 as usize] == *pt
-                                        })
-                                    });
-                                    if !appeared {
-                                        continue;
-                                    }
-                                }
-
                                 mini_constrain_count.fetch_add(
                                     candidate.len(),
                                     std::sync::atomic::Ordering::Relaxed,
@@ -509,6 +495,29 @@ impl Translator {
 
         for (key, val) in temp_found.into_inner().unwrap() {
             self.found_map.insert(key, val);
+        }
+
+        // Before dumping every t-tuple that matched into the solver, we can first ask this:
+        // Our previous round gave us possible full DB-reconstructions. Of every possible t-tuple
+        // over every possible DB, did this assignment ever once even appear? If not, remove it
+        // from the table, we know it isn't even in the previous solutions.
+        if let (Some(prev), true) = (&self.last_solutions, self.perfect) {
+            table_constraints
+                .par_iter_mut()
+                .for_each(|(enc_t_tuple, valid_plaintexts)| {
+                    let solver_indices: Vec<usize> = enc_t_tuple
+                        .iter()
+                        .map(|rec| self.var_index_map[&self.enc_id_to_intvar[rec]].0 as usize)
+                        .collect();
+
+                    // Every assignment this t-tuple had across all the previous solutions
+                    let seen: HashSet<Vec<i64>> = prev
+                        .iter()
+                        .map(|sol| solver_indices.iter().map(|&idx| sol[idx]).collect())
+                        .collect();
+
+                    valid_plaintexts.retain(|(pt, _)| seen.contains(pt));
+                });
         }
 
         if table_constraints.is_empty() {
@@ -600,6 +609,7 @@ impl Translator {
         }
 
         let all_global_solutions = response.unwrap();
+        self.last_solutions = Some(all_global_solutions.clone());
         debug!(
             "Finished mini-solve with {} possible reconstructions",
             all_global_solutions.len()

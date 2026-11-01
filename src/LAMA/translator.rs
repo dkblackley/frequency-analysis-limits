@@ -597,11 +597,6 @@ impl Translator {
         mini_model.validate(&self.var_index_map);
 
         let response = mini_model.solve(self.upper, false);
-        // Don't store the last solutions for pruning in the non-perfect world. This can cause some
-        // blow-ups for the non-perfect world though...
-        if self.perfect {
-            if let Some(r) = &response { self.last_solutions = Some(r.clone()); }
-        }
 
         if response.is_none() {
             warn!("Solver returned error or Infeasible");
@@ -609,7 +604,13 @@ impl Translator {
         }
 
         let all_global_solutions = response.unwrap();
-        self.last_solutions = Some(all_global_solutions.clone());
+        // Don't store the last solutions for pruning in the non-perfect world. This can cause some
+        // blow-ups for the non-perfect world though...
+        if self.perfect {
+            self.last_solutions = Some(all_global_solutions.clone());
+        }
+
+
         debug!(
             "Finished mini-solve with {} possible reconstructions",
             all_global_solutions.len()

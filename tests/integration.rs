@@ -9,6 +9,7 @@ use frequency_analysis_limits::plotting::two_d::spatial_plot::{
 };
 use frequency_analysis_limits::LAMA::into_recon_data;
 use frequency_analysis_limits::LAMA::mini_solver::CpModel;
+use frequency_analysis_limits::LAMA::query::QueryDistribution;
 use frequency_analysis_limits::LAMA::selector::Selector;
 use frequency_analysis_limits::LAMA::solver::CpSolverStatus::{Feasible, Optimal};
 use frequency_analysis_limits::LAMA::solver::Solver;
@@ -675,6 +676,287 @@ fn end_to_end_sampled() {
         &true_cords,
         &recon_coords,
         "figures/debug_sampled.svg",
+        true,
+        0.0,
+        0.0,
+    )
+        .expect("TODO: panic message");
+
+    let mut correct = 0;
+    let mut incorrect = 0;
+
+    for (encrypted_alias, guessed_plaintext) in responses.clone() {
+        if guessed_plaintext[0] == encrypted_alias {
+            correct += 1;
+        } else {
+            incorrect += 1;
+        }
+    }
+
+    info!(
+        "Direct matches: {} correct, {} incorrect",
+        correct, incorrect
+    );
+
+    let total_responses = responses[&0].len();
+
+    let valid = find_valid_solution(&responses, &(total_responses as i32));
+    info!("Valid output: {}", valid.0);
+
+    // ---- MSE of every reconstruction vs the truth (raw, and best over the 8 grid rotations/reflections) ----
+    // responses[true_enc][j] = value reconstruction j gave that record
+    let num_recons = responses.values().next().map_or(0, |v| v.len());
+    let side = high_pair[0] - low_pair[0]; // assumes a square 2D grid
+    let to_xy = |enc: i64| -> (i64, i64) {
+        let p = unflatten_nd(enc, &high_pair, &low_pair);
+        (p[0] - low_pair[0], p[1] - low_pair[1])
+    };
+    // The 8 rotations/reflections of a square grid
+    let symmetry = |(x, y): (i64, i64), k: usize| -> (i64, i64) {
+        match k {
+            0 => (x, y), 1 => (side - x, y), 2 => (x, side - y), 3 => (side - x, side - y),
+            4 => (y, x), 5 => (side - y, x), 6 => (y, side - x), _ => (side - y, side - x),
+        }
+    };
+    let mut raw_mses = Vec::with_capacity(num_recons);
+    let mut aligned_mses = Vec::with_capacity(num_recons);
+    for j in 0..num_recons {
+        // MSE of reconstruction j after applying symmetry k to it
+        let mse_under = |k: usize| -> f64 {
+            responses.iter().map(|(&true_enc, guesses)| {
+                let (tx, ty) = to_xy(true_enc);
+                let (gx, gy) = symmetry(to_xy(guesses[j]), k);
+                ((tx - gx).pow(2) + (ty - gy).pow(2)) as f64
+            }).sum::<f64>() / responses.len() as f64
+        };
+        raw_mses.push(mse_under(0));
+        aligned_mses.push((0..8).map(|k| mse_under(k)).fold(f64::INFINITY, f64::min));
+    }
+    let summary = |mses: &[f64]| -> (f64, f64, f64) {
+        let avg = mses.iter().sum::<f64>() / mses.len().max(1) as f64;
+        let best = mses.iter().copied().fold(f64::INFINITY, f64::min);
+        let worst = mses.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+        (avg, best, worst)
+    };
+    let (avg, best, worst) = summary(&raw_mses);
+    info!("MSE over {} recons (raw):     avg {:.3}, best {:.3}, worst {:.3}", num_recons, avg, best, worst);
+    let (avg, best, worst) = summary(&aligned_mses);
+    info!("MSE over {} recons (aligned): avg {:.3}, best {:.3}, worst {:.3}", num_recons, avg, best, worst);
+
+    // ---- Does the data prefer the truth? Same cost as the search: singles + pairs ----
+    let encs: Vec<i64> = responses.keys().copied().collect();
+    let cost = |enc_tuple: &[i64], pts: &[i64]| -> i64 {
+        let (valid, err) = validate_candidate(enc_tuple, pts);
+        if valid { (err.powf(2.0) * 1_000_00.0).round() as i64 } else { 1_000_000_000_000 }
+    };
+    let score = |guess: &dyn Fn(i64) -> i64| -> i64 {
+        let mut total = 0;
+        for (a, &e1) in encs.iter().enumerate() {
+            total += cost(&[e1], &[guess(e1)]);
+            for &e2 in &encs[a + 1..] {
+                total += cost(&[e1, e2], &[guess(e1), guess(e2)]);
+            }
+        }
+        total
+    };
+    let truth_error = score(&|e| e); // test DBs: encrypted id == true plaintext
+    let best_found = (0..num_recons).map(|j| score(&|e| responses[&e][j])).min().unwrap_or(i64::MAX);
+    info!("Total error: truth {}, best reconstruction {}", truth_error, best_found);
+
+    info!("Test completed successfully.")
+}
+
+#[test]
+fn end_to_end_sampled_noisy() {
+    let _ = env_logger::builder()
+        .is_test(true)
+        .filter_level(log::LevelFilter::Debug)
+        .try_init();
+
+    // Force rayon to one thread
+    rayon::ThreadPoolBuilder::new()
+        .num_threads(0)
+        .build_global()
+        .unwrap();
+
+    let rows_cols = 8;
+    let dim = 2;
+
+    info!("Loading test DB ({}x{})", rows_cols, rows_cols);
+    let loaded_db: Box<dyn Searchable + Sync> = Box::new(testDB::new(dim, rows_cols, 35));
+
+    let dist = "gaussian";
+    let target_query_percentage = 0.2; // e.g., observe 20% of all possible queries
+    let fixed_delta = 0.1; // 90% confidence that error <= epsilon
+    let dist_noise = 0.01; // TV distance between the true and the attacker's query distribution
+
+    // 1. Initialize a baseline selector to generate the distribution space
+    // We pass 0.0 for eps/delt temporarily just to build the QueryDistribution
+    // The selector holds (and samples from) the TRUE, noisy query distribution
+    let mut selector = Selector::new_with_noise(dist, &loaded_db, dist_noise);
+    // The attacker only knows the noiseless distribution. Same pairs (same order) as the selector,
+    // since the Gaussian weights are assigned by index into this vec
+    let attacker_dist = QueryDistribution::new(
+        selector.query_distribution.pairs.clone(),
+        &loaded_db,
+        dist.parse().unwrap(),
+    );
+
+    let largest_dom = loaded_db.get_dom_pair();
+
+    // How many queries can we do? A query is a hyperrectangle, The total number of hyper rectangles
+    // in a space is n*(n+1)/2 where n is the length of a dim, then mutliply for each dim.
+    let mut total = 1;
+
+    for item in largest_dom.1 {
+        total *= ((item + 1) * (item + 2)) / 2;
+    }
+
+    let total_possible_queries = total;
+    let num_queries_to_observe =
+        ((total_possible_queries as f64) * target_query_percentage).ceil() as usize;
+
+    info!("--- Sampling Parameters ---");
+    info!(
+        "Targeting {}% of queries ({} samples).",
+        target_query_percentage * 100.0,
+        num_queries_to_observe
+    );
+
+    let all_resp = selector.get_all_possible_responses();
+
+    let (observed_queries, responses, sampling_eps) =
+        selector.sample_percent_responses(target_query_percentage, fixed_delta, &all_resp);
+    // Sampling error + distribution error
+    let eps = sampling_eps + dist_noise;
+
+    let max_dist_err = selector
+        .query_distribution
+        .mbq_to_cumulative_prob
+        .iter()
+        .map(|(mbq, p)| (p - attacker_dist.cumulative_prob_lookup(mbq)).abs())
+        .fold(0.0, f64::max);
+    info!("Sampling eps {sampling_eps}, dist noise {dist_noise}, largest actual distribution error {max_dist_err}");
+    assert!(max_dist_err <= dist_noise + 1e-9, "distribution error exceeds dist_noise");
+
+    let (low_pair, high_pair) = loaded_db.get_dom_pair();
+    let universe = loaded_db.get_universe();
+    let largest_enc_val: i64 = flatten_nd(&high_pair, &high_pair, &low_pair);
+
+    let mut translator = Translator::new(largest_enc_val, universe.clone(), &4, false);
+    let query_dist_ref = &attacker_dist;
+    let high_pair_ref = &high_pair;
+    let low_pair_ref = &low_pair;
+
+    let weight_map = Selector::get_raw_dompair_weight_map(responses.clone(), &loaded_db);
+
+    info!("4. Compiling probabilistic closures for dynamic lookups...");
+
+    let mut dom_to_enclosed_freq = FxHashMap::default();
+
+    let all_dompairs = Selector::get_dom_pairs(&loaded_db);
+
+    for pair in &all_dompairs {
+        let mut enclose_count = 0;
+        for que in &observed_queries {
+            if encloses(que, pair) {
+                enclose_count += 1;
+            }
+            dom_to_enclosed_freq.insert(
+                pair.clone(),
+                enclose_count as f64 / num_queries_to_observe as f64,
+            );
+        }
+    }
+
+    let get_observed_prob = |enc_tuple: &[i64]| -> f64 {
+        let underlying_vals: Vec<Record> = enc_tuple
+            .iter()
+            .map(|rec| unflatten_nd(*rec, high_pair_ref, low_pair_ref))
+            .collect();
+        let target_mbq = get_mbq(&underlying_vals);
+        dom_to_enclosed_freq
+            .get(&target_mbq)
+            .unwrap_or(&0.0)
+            .clone()
+    };
+
+    let get_expected_prob = |plaintexts: &[i64]| -> f64 {
+        let pt_records: Vec<Record> = plaintexts
+            .iter()
+            .map(|&v| unflatten_nd(v, high_pair_ref, low_pair_ref))
+            .collect();
+        let pt_mbq = get_mbq(&pt_records);
+
+        query_dist_ref.cumulative_prob_lookup(&pt_mbq)
+    };
+
+    let active_eps = if eps == 0.0 { 1e-9 } else { eps };
+    let validate_candidate = |enc_tuple: &[i64], proposed_plaintexts: &[i64]| -> (bool, f64) {
+        let obs_prob = get_observed_prob(enc_tuple);
+
+        let exp_prob = get_expected_prob(proposed_plaintexts);
+        (
+            (obs_prob - exp_prob).abs() <= active_eps,
+            (obs_prob - exp_prob).abs(),
+        )
+    };
+
+    info!("--> Processing Base Case (t=1)");
+    translator.process_t1(&universe, &validate_candidate);
+
+    info!("--> Processing Recursive Case (t=2) sequentially across chunk models...");
+    translator.process_t_greater_than_1(2, &universe, &validate_candidate);
+
+    // info!("--> Processing Recursive Case (t=3) sequentially across chunk models...");
+    // translator.process_t_greater_than_1(3, &universe, &validate_candidate);
+
+    let index_map = translator.get_var_index_map();
+    let mut model = translator.get_proto_model();
+
+    // brute force instead!
+
+    // let mut model = PythonCpModel::new();
+    //
+    // info!("--> Brute force up to (t=3)");
+    // let (mut model, index_map) = Translator::process_t_brute_force(
+    //     3,
+    //     largest_enc_val,
+    //     &*universe.clone(),
+    //     model,
+    //     &validate_candidate,
+    // );
+    // model.validate(&index_map);
+
+    info!("5. Building and executing the CP-SAT Solver for the final constraint graph...");
+    let mut solver = Solver::new(index_map);
+
+    // NOTE: The only change in the test is passing largest_enc_val here
+    let responses = solver.solve(&mut model, largest_enc_val, false);
+
+    let data = into_recon_data(&responses, &loaded_db);
+    let mut true_cords = Vec::new();
+    let mut recon_coords = Vec::new();
+    let mut true_done = false;
+
+    for item in data {
+        let mut current_recon = Vec::new();
+
+        for i in item {
+            if !true_done {
+                true_cords.push(i.true_points);
+            } else {
+                current_recon.push(i.reconstructed_points);
+            }
+        }
+        recon_coords.push(current_recon);
+        true_done = true;
+    }
+
+    plot_spatial_reconstruction_all_items(
+        &true_cords,
+        &recon_coords,
+        "figures/debug_sampled_noisy.svg",
         true,
         0.0,
         0.0,

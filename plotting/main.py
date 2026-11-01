@@ -152,15 +152,16 @@ if __name__ == "__main__":
     falzon_dists = ["gaussian", "beta", "uniform"]  # left to right
     # True: LAMa per distribution + one Falzon "Any Dist." column (plot_falzon_any.py)
     # False: a LAMa/Falzon pair per distribution (plot_falzon.py)
-    falzon_any_dist = True
+    falzon_any_dist = False
     plot_falzon_row = plot_falzon_any_histograms if falzon_any_dist else plot_falzon_histograms
     for db in datasets:
         paths = {dist: (f"../figures/histogram_mse_sol_num/mse_histogram_{db}_{dist}.json",
                         f"{BASE_DIR}/{falzon_grid}x{falzon_grid}/{db}/limits/{db}_{dist}_e0_d0.9_reconstruction.json")
                  for dist in falzon_dists}
-        # Spitz is the top row, so it carries the method/distribution titles
+        # Spitz is the top row, so it carries the method/distribution titles, and Paris is the
+        # bottom row, so it carries the x-axis label
         plot_falzon_row(paths, (falzon_grid, falzon_grid), db, OUTPUT_DIR, COLORS, LABELS,
-                        show_header=(db == "spitz"))
+                        show_header=(db == "spitz"), show_xlabel=(db == "shopparis"))
 
     # # ---------------------------------------------------------
     # # LAMa Flat Distribution Histograms

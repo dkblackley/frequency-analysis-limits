@@ -13,7 +13,7 @@ from globals_vars import FONT_SIZE, format_db_name, format_y_axis
 # ==========================================
 PANEL_WIDTH = 10    # width of each individual histogram
 PANEL_HEIGHT = 5  # height of each individual histogram
-PAIR_GAP = 1      # gap between the LAMa and Falzon panels of one distribution
+PAIR_GAP = 1.5      # gap between the LAMa and Falzon panels of one distribution
 DIST_GAP = 1.5       # gap between distributions (e.g. Gaussian Falzon -> Beta LAMa)
 FIG_WIDTH = None     # width of the entire row; if set, PANEL_WIDTH is ignored and the panels
                      # are stretched/shrunk so the row is exactly this wide
@@ -23,9 +23,12 @@ BOTTOM_MARGIN = 4.4  # room for the x ticks and MSE label
 TOP_MARGIN = 2.75    # room for the method titles
 NAME_X = 2.275       # dataset name, from the left edge
 NAME_Y = 0.5
-LABEL_Y = 0.4
+LABEL_Y = 0.3
 DIST_TITLE_Y = 4.07  # distribution titles, above the top of the panels
 HEADER_Y = 6.6       # "LAMa vs Falzon et al.", above the top of the panels
+XLABEL_Y = 2.5       # "Mean Squared Error (MSE)", below the bottom of the panels
+XLABEL_EVERY_ROW = False  # True: every dataset gets the big x-axis label
+                          # False: only the row called with show_xlabel=True (the bottom row)
 
 
 def load_lama_mses(hist_json_path, recon_json_path, label):
@@ -47,7 +50,8 @@ def load_lama_mses(hist_json_path, recon_json_path, label):
             for run in all_data if run]
 
 
-def plot_falzon_histograms(paths, grid, dataset, output_dir, colors, labels, show_header=False):
+def plot_falzon_histograms(paths, grid, dataset, output_dir, colors, labels, show_header=False,
+                           show_xlabel=False):
     """
     One row of MSE-by-all-reconstructions histograms: a (LAMa, Falzon et al.) pair per
     distribution, in the same style as plot_reconstruction_histograms. Falzon et al.'s output
@@ -56,6 +60,7 @@ def plot_falzon_histograms(paths, grid, dataset, output_dir, colors, labels, sho
 
     paths:       {dist: (hist_json_path, recon_json_path)}, in left-to-right order.
     show_header: draw the method/distribution titles and super header (the top row).
+    show_xlabel: draw the big x-axis label (the bottom row), see XLABEL_EVERY_ROW.
     """
     plot_methods = ['limits', 'falzon']
 
@@ -150,10 +155,6 @@ def plot_falzon_histograms(paths, grid, dataset, output_dir, colors, labels, sho
 
             ax.grid(axis='y', linestyle='--', alpha=0.7)
 
-        # One MSE label per pair, centred under the gap between its two panels
-        axes[0].set_xlabel('MSE', fontsize=FONT_SIZE + 30)
-        axes[0].xaxis.label.set_x(pair_width / 2 / panel_width)
-
         if show_header:
             fig.text((pair_x + pair_width / 2) / fig_width, panels_top + DIST_TITLE_Y / fig_height,
                      f'{dist.capitalize()} Dist.', va='center', ha='center', fontsize=FONT_SIZE + 40)
@@ -163,11 +164,20 @@ def plot_falzon_histograms(paths, grid, dataset, output_dir, colors, labels, sho
     fig.text(NAME_X / fig_width, NAME_Y, format_db_name(dataset), va='center', ha='center',
              rotation='vertical', fontsize=FONT_SIZE + 20, fontweight='bold')
 
+    # One giant x-axis label under the whole row
+    if show_xlabel or XLABEL_EVERY_ROW:
+        fig.text((LEFT_MARGIN + fig_width) / 2 / fig_width, (BOTTOM_MARGIN - XLABEL_Y) / fig_height,
+                 'Mean Squared Error (MSE)', va='center', ha='center', fontsize=FONT_SIZE + 50)
+
     if show_header:
         fig.text((LEFT_MARGIN + fig_width) / 2 / fig_width, panels_top + HEADER_Y / fig_height,
                  f"{labels['limits']} vs Falzon et al.", va='center', ha='center',
                  fontsize=FONT_SIZE + 60, fontweight='bold')
 
     filename = f'falzon_histogram_{dataset}.pdf'
-    plt.savefig(os.path.join(output_dir, filename), format='pdf', bbox_inches='tight')
+    # The tight bbox only counts the part of an axis label alongside its panel, so pass the
+    # y-labels explicitly or a long label hanging below the panel gets cropped. Passing any
+    # extra artists replaces the defaults, so the figure texts have to be listed too.
+    plt.savefig(os.path.join(output_dir, filename), format='pdf', bbox_inches='tight',
+                bbox_extra_artists=[ax.yaxis.label for ax in fig.axes] + fig.texts)
     plt.close(fig)

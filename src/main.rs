@@ -52,6 +52,11 @@ pub struct Args {
 
     #[arg(long, default_value = "1.0")]
     query_percent: f64,
+
+    /// How far (total variation distance) the true query distribution is from --dist.
+    /// The attacker only knows --dist, so this is added to epsilon
+    #[arg(long, default_value = "0.0")]
+    dist_noise: f64,
 }
 
 fn main() {
@@ -80,6 +85,7 @@ fn main() {
             &args.padding,
             &args.save,
             &args.query_percent,
+            &args.dist_noise,
         );
     }
 

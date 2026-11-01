@@ -73,16 +73,16 @@ export SINGULARITYENV_RAYON_NUM_THREADS=$SLURM_CPUS_PER_TASK
 
 SG_RUN="singularity exec --bind /scratch/dblackle --bind /scratch/dblackle/cargo:/usr/local/cargo $CONTAINER"
 
-# ---------------------------------------
-# 2. Build (no `cargo clean`: other jobs may be running the binary)
-# ---------------------------------------
-echo "Building project inside container..."
-$SG_RUN cargo rustc --bin frequency_analysis_limits --release -- -Clink-arg=-lprotobuf
-if [ $? -ne 0 ]; then
-    echo "Build failed."
-    exit 1
-fi
-echo "Build finished."
+## ---------------------------------------
+## 2. Build (no `cargo clean`: other jobs may be running the binary)
+## ---------------------------------------
+#echo "Building project inside container..."
+#$SG_RUN cargo rustc --bin frequency_analysis_limits --release -- -Clink-arg=-lprotobuf
+#if [ $? -ne 0 ]; then
+#    echo "Build failed."
+#    exit 1
+#fi
+#echo "Build finished."
 
 # ---------------------------------------
 # 3. Runs

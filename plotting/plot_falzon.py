@@ -24,6 +24,8 @@ TOP_MARGIN = 2.75    # room for the method titles
 NAME_X = 2.275       # dataset name, from the left edge
 NAME_Y = 0.5
 LABEL_Y = 0.3
+HEADER_LABEL_Y = 0.55  # "# of Solutions" on the header (Spitz) row, which has no long dataset
+                       # name below it, so the label is raised to stay inside the saved area
 DIST_TITLE_Y = 4.07  # distribution titles, above the top of the panels
 HEADER_Y = 6.6       # "LAMa vs Falzon et al.", above the top of the panels
 XLABEL_Y = 2.5       # "Mean Squared Error (MSE)", below the bottom of the panels
@@ -142,7 +144,8 @@ def plot_falzon_histograms(paths, grid, dataset, output_dir, colors, labels, sho
                 ax.set_title(f'{labels.get(method, method)}', fontsize=FONT_SIZE + 40)
 
             if d == 0 and ax == axes[0]:
-                ax.set_ylabel('# of Solutions', fontsize=FONT_SIZE + 0, y=LABEL_Y)
+                ax.set_ylabel('# of Solutions', fontsize=FONT_SIZE + 0,
+                              y=HEADER_LABEL_Y if show_header else LABEL_Y)
 
             ax.tick_params(axis='x', labelsize=FONT_SIZE - 10)
             ax.tick_params(axis='y', labelsize=FONT_SIZE - 10)
@@ -175,9 +178,5 @@ def plot_falzon_histograms(paths, grid, dataset, output_dir, colors, labels, sho
                  fontsize=FONT_SIZE + 60, fontweight='bold')
 
     filename = f'falzon_histogram_{dataset}.pdf'
-    # The tight bbox only counts the part of an axis label alongside its panel, so pass the
-    # y-labels explicitly or a long label hanging below the panel gets cropped. Passing any
-    # extra artists replaces the defaults, so the figure texts have to be listed too.
-    plt.savefig(os.path.join(output_dir, filename), format='pdf', bbox_inches='tight',
-                bbox_extra_artists=[ax.yaxis.label for ax in fig.axes] + fig.texts)
+    plt.savefig(os.path.join(output_dir, filename), format='pdf', bbox_inches='tight')
     plt.close(fig)

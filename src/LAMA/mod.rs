@@ -98,8 +98,8 @@ pub fn lama_attack(
     } else {
         None
     };
-    // Exact frequencies are only 'perfect' if the attacker also knows the exact distribution
-    let perfect = *query_percent == 1.0 && *dist_noise == 0.0;
+    // With all queries observed, enumerate every database within epsilon (also with dist noise)
+    let perfect = *query_percent == 1.0;
 
     debug!(
         "Working with padding: {}, low_pair: {:?}, high_pair: {:?}",
@@ -125,15 +125,19 @@ pub fn lama_attack(
     let query_dist_ref = &selector.query_distribution;
     let attacker_dist_ref = attacker_dist.as_ref().unwrap_or(query_dist_ref);
 
-    if *dist_noise > 0.0 {
-        // How far the attacker's expected probabilities actually are from the truth (bounded by dist_noise)
+    // How far the attacker's expected probabilities actually are from the truth (bounded by dist_noise).
+    // The attacker is assumed to know this bound, so it is added to epsilon.
+    let max_dist_err = if *dist_noise > 0.0 {
         let max_dist_err = query_dist_ref
             .mbq_to_cumulative_prob
             .iter()
             .map(|(mbq, p)| (p - attacker_dist_ref.cumulative_prob_lookup(mbq)).abs())
             .fold(0.0, f64::max);
         info!("Distribution noise {dist_noise}: largest actual error in any enclosing probability is {max_dist_err}");
-    }
+        max_dist_err
+    } else {
+        0.0
+    };
     let high_pair_ref = &high_pair;
     let low_pair_ref = &low_pair;
 
@@ -161,7 +165,7 @@ pub fn lama_attack(
             &selector.get_all_possible_responses(),
         );
         // Sampling error + distribution error
-        eps = epsil + *dist_noise;
+        eps = epsil + max_dist_err;
         num_queries = observed_queries.len();
 
         let all_dompairs = Selector::get_dom_pairs(&loaded_db);
@@ -199,7 +203,7 @@ pub fn lama_attack(
                 .unwrap_or(0.0)
         });
     } else {
-        eps = *dist_noise;
+        eps = max_dist_err;
         // How many queries can we do? A query is a hyperrectangle, The total number of hyper rectangles
         // in a space is n*(n+1)/2 where n is the length of a dim, then mutliply for each dim.
         let mut total = 1;

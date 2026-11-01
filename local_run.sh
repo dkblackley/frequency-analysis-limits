@@ -18,7 +18,7 @@ EXPERIMENT="${1:-noise}"
 export RUST_LOG="debug"
 export RUST_BACKTRACE="1"
 
-BIN=./target/release/frequency_analysis_limits
+BIN="$(cargo metadata --format-version 1 --no-deps | grep -o '"target_directory":"[^"]*"' | cut -d'"' -f4)/release/frequency_analysis_limits"
 DB_ROOT="databases"
 FAILED_RUNS=()
 

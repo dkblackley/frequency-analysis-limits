@@ -3,12 +3,12 @@
 #SBATCH --partition=normal
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
-#SBATCH --mem=210G
+#SBATCH --mem=480G
 #SBATCH --time=0-04:30:00
 
 # Probabilistic setting on every 15x15 grid (15x15_run_1 .. 15x15_run_10):
 # 6 names * 3 dists * 10 dirs * 3 probs = 540 combinations (indexes 0 through 539)
-#SBATCH --array=0-539
+#SBATCH --array=0-89
 
 #SBATCH --output=logs/LAMA_probs_2d_%A_%a.out
 #SBATCH --error=logs/LAMA_probs_2d_%A_%a.err
@@ -33,7 +33,8 @@ export SINGULARITYENV_RUST_LOG="debug"
 export SINGULARITYENV_RUST_BACKTRACE="1"
 export SINGULARITYENV_PREPEND_PATH="$CMAKE_DIR/bin"
 export SINGULARITYENV_LIBCLANG_PATH="$LLVM_DIR/lib"
-export SINGULARITYENV_RAYON_NUM_THREADS=$SLURM_CPUS_PER_TASK
+# export SINGULARITYENV_RAYON_NUM_THREADS=$SLURM_CPUS_PER_TASK
+export SINGULARITYENV_RAYON_NUM_THREADS="${SLURM_CPUS_PER_TASK:-1}"
 
 SG_RUN="singularity exec --bind /scratch/dblackle --bind /scratch/dblackle/cargo:/usr/local/cargo $CONTAINER"
 
@@ -44,8 +45,13 @@ fi
 
 NAMES=("drink" "busstop" "highway" "shopparis" "cali" "spitz")
 DISTS=("gaussian" "beta" "uniform")
-DATA_DIRS=( "${SLURM_SUBMIT_DIR}/databases/15x15_run_"{1..10} )
-PROBS=("0.3" "0.2" "0.1")
+#DATA_DIRS=( "${SLURM_SUBMIT_DIR}/databases/15x15_run_"{1..10} )
+# DATA_DIRS=( "${SLURM_SUBMIT_DIR}/databases/15x15_run_1" )
+DATA_DIRS=(
+    #"${SLURM_SUBMIT_DIR}/databases/15x15_run_1"
+    "${SLURM_SUBMIT_DIR}/databases/50x50"
+)
+PROBS=("0.3" "0.2" "0.1" "0.01" "0.05")
 
 # --- PARAMETER DECODING MATH ---
 task_id=$SLURM_ARRAY_TASK_ID

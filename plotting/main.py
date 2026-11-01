@@ -16,6 +16,7 @@ from globals_vars import FONT_SIZE
 from plot_limits_samples import print_limits_samples_latex
 
 from print_time_per_recon_table import print_time_per_recon_latex
+from print_noise_table import load_noise_data, print_noise_latex, save_noise_csv
 from plot_limits_time_per_recon import plot_limits_time_per_recon
 from spatial_reconstructions import plot_3d_reconstruction, plot_spatial_reconstruction
 
@@ -162,6 +163,16 @@ if __name__ == "__main__":
         # bottom row, so it carries the x-axis label
         plot_falzon_row(paths, (falzon_grid, falzon_grid), db, OUTPUT_DIR, COLORS, LABELS,
                         show_header=(db == "spitz"), show_xlabel=(db == "shopparis"))
+
+    # ---------------------------------------------------------
+    # Noisy query distribution (--dist-noise) table
+    # ---------------------------------------------------------
+    print("Generating noisy-distribution tables...")
+    noise = 0.01
+    noise_data = load_noise_data(BASE_DIR, datasets, distributions, noise=noise, grid="15x15")
+    print_noise_latex(noise_data, datasets, distributions, noise=noise, metric="centroid")
+    print_noise_latex(noise_data, datasets, distributions, noise=noise, metric="diameter")
+    save_noise_csv(noise_data, OUTPUT_DIR, noise=noise)
 
     # # ---------------------------------------------------------
     # # LAMa Flat Distribution Histograms

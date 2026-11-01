@@ -531,17 +531,18 @@ impl Translator {
                 .map(|rec| *self.enc_id_to_intvar.get(rec).unwrap())
                 .collect();
 
-            if !self.perfect {
-                let trunk_percent = *self.trunc_amount.get(t).unwrap_or(&10) as f64;
+            // if !self.perfect {
+            //     let trunk_percent = *self.trunc_amount.get(t).unwrap_or(&10) as f64;
+            //
+            //     // 2. Calculate the number of items that percentage represents based on the current length.
+            //     let keep_count =
+            //         ((valid_plaintexts.len() as f64) * (trunk_percent / 100.0)).round() as usize;
+            //
+            //     // 3. Sort and truncate using the calculated count.
+            //     valid_plaintexts.par_sort_unstable_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
+            //     valid_plaintexts.truncate(keep_count);
+            // }
 
-                // 2. Calculate the number of items that percentage represents based on the current length.
-                let keep_count =
-                    ((valid_plaintexts.len() as f64) * (trunk_percent / 100.0)).round() as usize;
-
-                // 3. Sort and truncate using the calculated count.
-                valid_plaintexts.par_sort_unstable_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
-                valid_plaintexts.truncate(keep_count);
-            }
 
             let just_plaintexts: Vec<Vec<i64>> =
                 valid_plaintexts.iter().map(|(pt, _)| pt.clone()).collect();
@@ -581,16 +582,17 @@ impl Translator {
             );
         }
 
-        // ------------------------------------------------------------------------
-        // PHASE 3: Solve
-        // ------------------------------------------------------------------------
-        debug!("Running mini-solve via Python");
+        debug!("Running mini-solver");
 
-        // This calls your wrapper instead of ffi::solve_with_parameters
+        // Check that there actually is a solution in here
         mini_model.validate(&self.var_index_map);
 
         let response = mini_model.solve(self.upper, false);
-        if let Some(r) = &response { self.last_solutions = Some(r.clone()); }
+        // Don't store the last solutions for pruning in the non-perfect world. This can cause some
+        // blow-ups for the non-perfect world though...
+        if self.perfect {
+            if let Some(r) = &response { self.last_solutions = Some(r.clone()); }
+        }
 
         if response.is_none() {
             warn!("Solver returned error or Infeasible");

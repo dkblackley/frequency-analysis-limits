@@ -76,7 +76,10 @@ impl Solver {
         let largest_val_i32 = largest_enc_val as i32;
 
         // Parallel Partitioning Across 64 Cores
-        let all_solutions = if get_one {
+        let all_solutions = if model.limit.is_some() {
+            // Sampled setting (limit is only Some when !perfect): best-fitting databases, no enumeration
+            model.sampled_reconstructions(largest_enc_val)
+        } else if get_one {
             // Single thread, break on first result
             Self::solve_partition(model, largest_val_i32, None, true)
         } else {

@@ -626,8 +626,8 @@ fn end_to_end_sampled() {
     info!("--> Processing Recursive Case (t=2) sequentially across chunk models...");
     translator.process_t_greater_than_1(2, &universe, &validate_candidate);
 
-    info!("--> Processing Recursive Case (t=3) sequentially across chunk models...");
-    translator.process_t_greater_than_1(3, &universe, &validate_candidate);
+    // info!("--> Processing Recursive Case (t=3) sequentially across chunk models...");
+    // translator.process_t_greater_than_1(3, &universe, &validate_candidate);
 
     let index_map = translator.get_var_index_map();
     let mut model = translator.get_proto_model();

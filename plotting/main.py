@@ -5,7 +5,7 @@ import sys
 # Adjust these imports depending on exactly how you named the functions in those files
 from spatial_plot_2d import plot_spatial_reconstruction, run_spatial_plots
 from mse_by_grid import plot_grid_by_mse
-from mse_by_all_recon import plot_histograms
+from mse_by_all_recon import plot_histograms, plot_lama_vs_falzon_histograms
 
 # Configure Python logging to mirror the Rust log crate behavior
 logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
@@ -69,6 +69,13 @@ def do_plotting():
             plot_histograms("cali", (50, 50), dist, f"../figures/cali_{dist}_histo.svg")
         except Exception as e:
             logger.warning(f"cali failed when loaded from {dir_path}:  {e}")
+
+        # LAMa vs Falzon et al. (only LAMa and Falzon panels)
+        for name, domain in [(name_spitz, (350, 50)), ("cali", (50, 50))]:
+            try:
+                plot_lama_vs_falzon_histograms(name, domain, dist, f"../figures/{name}_{dist}_falzon_histo.svg")
+            except Exception as e:
+                logger.warning(f"{name} LAMa vs Falzon failed for {dist}:  {e}")
 
 
 if __name__ == "__main__":

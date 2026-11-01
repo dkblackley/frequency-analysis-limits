@@ -55,7 +55,7 @@ LABELS = {
     'even_less': 'Even Less',
     'remin': 'Remin',
     'reminp': 'Remin+',
-    'falzon': 'Falzon et al.',
+    'falzon': 'Falzon',
 }
 
 METHOD_ORDER = ['limits', 'even_less', 'remin', 'reminp']
@@ -148,12 +148,14 @@ if __name__ == "__main__":
     # ---------------------------------------------------------
     print("Generating LAMa vs Falzon et al. Histogram Plots...")
     falzon_grid = 50
+    falzon_dists = ["gaussian", "beta", "uniform"]  # left to right
     for db in datasets:
-        dist = "uniform"
-        hist_json_path = f"../figures/histogram_mse_sol_num/mse_histogram_{db}_{dist}.json"
-        recon_json_path = f"{BASE_DIR}/{falzon_grid}x{falzon_grid}/{db}/limits/{db}_{dist}_e0_d0.9_reconstruction.json"
-        plot_falzon_histograms(hist_json_path, recon_json_path, (falzon_grid, falzon_grid), db, dist,
-                               OUTPUT_DIR, COLORS, LABELS)
+        paths = {dist: (f"../figures/histogram_mse_sol_num/mse_histogram_{db}_{dist}.json",
+                        f"{BASE_DIR}/{falzon_grid}x{falzon_grid}/{db}/limits/{db}_{dist}_e0_d0.9_reconstruction.json")
+                 for dist in falzon_dists}
+        # Spitz is the top row, so it carries the method/distribution titles
+        plot_falzon_histograms(paths, (falzon_grid, falzon_grid), db, OUTPUT_DIR, COLORS, LABELS,
+                               show_header=(db == "spitz"))
 
     # # ---------------------------------------------------------
     # # LAMa Flat Distribution Histograms

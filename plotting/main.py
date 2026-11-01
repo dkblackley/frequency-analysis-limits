@@ -1,82 +1,169 @@
-import logging
-import sys
+import os
+import matplotlib.pyplot as plt
 
-# Import the plotting functions from your newly created files
-# Adjust these imports depending on exactly how you named the functions in those files
-from spatial_plot_2d import plot_spatial_reconstruction, run_spatial_plots
-from mse_by_grid import plot_grid_by_mse
-from mse_by_all_recon import plot_histograms, plot_lama_vs_falzon_histograms
+import plot_grid_mse
+from data_loader import load_grid_mse_data, load_convex_mse_data, load_running_time_data, load_running_time_lines_data, \
+    load_limits_samples_mse
+from plot_boxplots_mse import plot_mse_boxplots
+from plot_grid_mse import plot_grid_by_mse
+from plot_convex_mse import plot_convex_mse
+from plot_histograms import plot_reconstruction_histograms, plot_lama_flat_distributions
+from plot_running_time import plot_running_time_bar
+from plot_running_time_lines import plot_running_time_lines
+from globals_vars import FONT_SIZE
+from plot_limits_samples import print_limits_samples_latex
 
-# Configure Python logging to mirror the Rust log crate behavior
-logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
-logger = logging.getLogger(__name__)
+from print_time_per_recon_table import print_time_per_recon_latex
+from plot_limits_time_per_recon import plot_limits_time_per_recon
+from spatial_reconstructions import plot_3d_reconstruction, plot_spatial_reconstruction
+
+# ==========================================
+# GLOBAL CONSTANTS & AESTHETICS
+# ==========================================
+
+COLORS = {
+    'limits': '#0072B2',  # Blue (LAMa)
+    'even_less': '#E69F00',  # Orange / Yellow
+    'remin': '#009E73',  # Green
+    'reminp': '#CC79A7',  # Purple (REMIN+)
+}
+
+DIST_COLORS = {
+    'uniform': '#56B4E9',  # Sky Blue
+    'gaussian': '#E69F00',  # Orange
+    'beta': '#009E73',  # Bluish Green
+}
+
+DIST_MARKERS = {
+    'uniform': 'o',
+    'gaussian': 's',
+    'beta': '^',
+}
+
+MARKERS = {
+    'limits': 's',  # Square for LAMa
+    'even_less': '*',  # Star for Even Less
+    'remin': 'o',  # Circle for Remin
+    'reminp': '^',  # Triangle for Remin+
+}
+
+LABELS = {
+    'limits': 'LAMa',
+    'even_less': 'Even Less',
+    'remin': 'Remin',
+    'reminp': 'Remin+',
+}
+
+METHOD_ORDER = ['limits', 'even_less', 'remin', 'reminp']
 
 
-def do_plotting():
-    datasets = ["shopparis", "busstop", "cali", "drink", "highway", "spitz"]
-    methods = ["even_less", "remin", "limits"]
-    distributions = ["uniform", "gaussian", "beta"]
-
-    # Equivalent to (20..=50).step_by(5)
-    databases = [f"../databases/{n}x{n}" for n in range(20, 51, 5)]
-
-    # Equivalent to (20..=50).step_by(10)
-    grid_sizes = [(n, f"{n}x{n}") for n in range(20, 51, 10)]
-
-    # 1. First loop: run spatial plots over uniform distribution and different grid sizes
-    for grid_val, grid_str in grid_sizes:
-        for name in datasets:
-            data_dir = f"../databases/{grid_val}x{grid_val}"
-            try:
-                run_spatial_plots(name, data_dir, "uniform", grid_val)
-            except Exception as e:
-                logger.warning(f"{name} failed when loaded from {data_dir}:  {e}")
-
-    # 2. Second loop: run spatial plots over different datasets and distributions for 50x50
-    for name in datasets:
-        for dist in distributions:
-            try:
-                run_spatial_plots(name, "../databases/50x50", dist, 50)
-            except Exception as e:
-                # Mimics .expect("SPITZ DIRECT FAILED!")
-                logger.error(f"SPITZ DIRECT FAILED! Original error: {e}")
-
-
-    # 3. Plot grid by MSE
-    # In Python, we just call the function. If it fails, it naturally throws an exception (like .unwrap())
-    plot_grid_by_mse(grid_sizes, datasets, methods, distributions)
-
-    # 4. JSUT 350x50 spitz stuff
-    dir_path = "../databases/350x50"
-    name_spitz = "spitz"
-
-    try:
-        run_spatial_plots(name_spitz, dir_path, "uniform", 350)
-    except Exception as e:
-        logger.error(f"SPITZ DIRECT FAILED! Original error: {e}")
-        sys.exit(1)
-
-    # 5. Third loop: Histograms
-    for dist in distributions:
-        # Spitz
-        try:
-            plot_histograms(name_spitz, (350, 50), dist, f"../figures/{name_spitz}_{dist}_histo.svg")
-        except Exception as e:
-            logger.warning(f"{name_spitz} failed when loaded from {dir_path}:  {e}")
-
-        # Cali
-        try:
-            plot_histograms("cali", (50, 50), dist, f"../figures/cali_{dist}_histo.svg")
-        except Exception as e:
-            logger.warning(f"cali failed when loaded from {dir_path}:  {e}")
-
-        # LAMa vs Falzon et al. (only LAMa and Falzon panels)
-        for name, domain in [(name_spitz, (350, 50)), ("cali", (50, 50))]:
-            try:
-                plot_lama_vs_falzon_histograms(name, domain, dist, f"../figures/{name}_{dist}_falzon_histo.svg")
-            except Exception as e:
-                logger.warning(f"{name} LAMa vs Falzon failed for {dist}:  {e}")
+def setup_sleek_style():
+    """Applies a modern, flat, and highly readable style to all matplotlib plots."""
+    plt.rcParams.update({
+        'font.size': FONT_SIZE,
+        'font.family': 'serif',
+        'font.serif': ['Times New Roman', 'serif'],
+        'axes.titlesize': FONT_SIZE + 5,
+        'axes.labelsize': FONT_SIZE,
+        'xtick.labelsize': FONT_SIZE - 8,
+        'ytick.labelsize': FONT_SIZE - 8,
+        'legend.fontsize': FONT_SIZE - 12,
+        'axes.linewidth': 2.0,
+        'axes.spines.top': False,
+        'axes.spines.right': False,
+        'figure.autolayout': False,  # Disabled to allow manual global legend placement
+        'grid.color': '#E5E5E5',
+        'grid.linestyle': '--',
+        'grid.alpha': 0.7,
+        'figure.figsize': (17, 11),
+        'axes.titlepad': 50,
+        'axes.labelpad': 10,
+        'lines.linewidth': 8.0,
+        'lines.markersize': 30,
+    })
 
 
 if __name__ == "__main__":
-    do_plotting()
+    setup_sleek_style()
+
+    BASE_DIR = "../databases"
+    OUTPUT_DIR = "plots"
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
+    plot_grid_mse.FONT_SIZE = FONT_SIZE
+
+    datasets = ["busstop", "shopparis", "cali", "drink", "highway", "spitz"]
+    # datasets = [ "spitz"]
+    methods = ["even_less", "remin", "limits"]
+    grid_meth = methods + ["reminp"]
+    distributions = ["uniform", "gaussian", "beta"]
+    grid_sizes = [(n, f"{n}x{n}") for n in range(20, 51, 10)]
+
+    # # ---------------------------------------------------------
+    # # 1. Grid Size vs MSE Plots
+    # # ---------------------------------------------------------
+    # print("Loading nested data for Grid Size vs MSE...")
+    # grid_data = load_grid_mse_data(BASE_DIR, datasets, grid_meth, distributions, grid_sizes)
+    #
+    # print("Generating Grid vs MSE plots...")
+    # for db in datasets:
+    #     # Pass the whole list of distributions instead of iterating one by one
+    #     plot_grid_by_mse(grid_data, db, distributions, OUTPUT_DIR, METHOD_ORDER, COLORS, MARKERS, LABELS)
+
+    # ---------------------------------------------------------
+    # 2. Query Percent vs MSE (Convex Hulls)
+    # ---------------------------------------------------------
+    print("Loading nested data for Convex Hull metrics...")
+    convex_data = load_convex_mse_data(BASE_DIR, datasets, methods, distributions)
+
+    print("Generating Convex Hull Query % vs MSE plots...")
+    for db in datasets:
+        # Pass the whole list of distributions instead of iterating one by one
+        plot_convex_mse(convex_data, db, distributions, OUTPUT_DIR, METHOD_ORDER, COLORS, MARKERS, LABELS)
+
+    print(f"\nDone! All plots saved to ./{OUTPUT_DIR}/")
+
+    # # BOX PLOTS
+    # print("Generating Box Plots...")
+    # for db in datasets:
+    #     box_json_path = f"../figures/box/{db}_mse_distribution_boxplot.json"
+    #     plot_mse_boxplots(box_json_path, db, distributions, OUTPUT_DIR, METHOD_ORDER, COLORS, LABELS)
+
+    # # HISTOGRAMS
+    # print("Generating Histogram Plots...")
+    # for db in datasets:
+    #     # for dist in distributions:
+    #     #     hist_json_path = f"../figures/histogram_mse_sol_num/mse_histogram_{db}_{dist}.json"
+    #     #     plot_reconstruction_histograms(hist_json_path, db, dist, OUTPUT_DIR, METHOD_ORDER, COLORS, LABELS)
+    #
+    #     hist_json_path = f"../figures/histogram_mse_sol_num/mse_histogram_{db}_uniform.json"
+    #     plot_reconstruction_histograms(hist_json_path, db, "uniform", OUTPUT_DIR, METHOD_ORDER, COLORS, LABELS)
+
+
+    # # ---------------------------------------------------------
+    # # LAMa Flat Distribution Histograms
+    # # ---------------------------------------------------------
+    # print("Generating LAMa Flat Distribution Plots...")
+    # for db in datasets:
+    #     plot_lama_flat_distributions(BASE_DIR, db, OUTPUT_DIR)
+
+    # print("Generating 2D Spatial Reconstruction Plots...")
+    # for db in datasets:
+    #     # Assuming you ran the 50x50 grids in Rust, updating the path accordingly
+    #     grid_size = 50
+    #     json_path = f"../figures/{grid_size}x{grid_size}_recon/{db}_uniform_spatial_data.json"
+    #
+    #     plot_spatial_reconstruction(
+    #         json_path=json_path,
+    #         dataset=db,
+    #         dist="uniform",
+    #         output_dir=OUTPUT_DIR,
+    #         method_order=METHOD_ORDER,
+    #         colors=COLORS,
+    #         labels=LABELS
+    #     )
+
+    # # ---------------------------------------------------------
+    # # 3D Spatial Reconstruction Plots
+    # # ---------------------------------------------------------
+    # print("Generating 3D Spatial Reconstruction Plots...")
+    # plot_3d_reconstruction("../figures/3d_recon/points_dump.json", OUTPUT_DIR)

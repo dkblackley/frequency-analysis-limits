@@ -278,7 +278,14 @@ impl<'a> QueryDistribution<'a> {
         noise: f64,
     ) -> (WeightedIndex<f64>, Vec<f64>, f64, FxHashMap<DomPair, f64>) {
         let mut rng = StdRng::seed_from_u64(1337);
-        let random_weights: Vec<f64> = (0..weights.len()).map(|_| rng.gen::<f64>()).collect();
+        // Hand out the random weights in sorted-pair order: `pairs` comes from get_dom_pairs (par_bridge),
+        // whose order changes per run, so indexing by position would give a different Q every run.
+        let mut order: Vec<usize> = (0..pairs.len()).collect();
+        order.sort_unstable_by(|&a, &b| pairs[a].cmp(&pairs[b]));
+        let mut random_weights = vec![0.0; weights.len()];
+        for idx in order {
+            random_weights[idx] = rng.gen::<f64>();
+        }
         let random_total: f64 = random_weights.iter().sum();
 
         let tv_pq: f64 = weights

@@ -147,7 +147,7 @@ def _load_eps(path):
         return None
 
 
-def load_noise_sweep_data(base_dir, datasets, distributions, noises=(0.01, 0.05, 0.1), grid="15x15"):
+def load_noise_sweep_data(base_dir, datasets, distributions, noises=(0.005, 0.01, 0.02), grid="15x15"):
     """
     Loads the 100%-of-queries noise sweep (run_LAMA_noise_sweep.slurm): every query seen, but the true
     distribution is `noise` away (TV) from --dist, and eps is the exact largest error (no VC bound).
@@ -172,7 +172,7 @@ def load_noise_sweep_data(base_dir, datasets, distributions, noises=(0.01, 0.05,
     return nested_data
 
 
-def print_noise_sweep_latex(sweep_data, datasets, distributions, noises=(0.01, 0.05, 0.1), metric="centroid"):
+def print_noise_sweep_latex(sweep_data, datasets, distributions, noises=(0.005, 0.01, 0.02), metric="centroid"):
     """
     Prints a LaTeX table of LAMa's MSE with all queries seen, one column per distribution noise level
     (with the exact eps the attacker used in brackets), plus the noiseless MSE as the first column.
@@ -219,7 +219,7 @@ def print_noise_sweep_latex(sweep_data, datasets, distributions, noises=(0.01, 0
     print("\\end{table}\n")
 
 
-def save_noise_sweep_csv(sweep_data, output_dir, noises=(0.01, 0.05, 0.1)):
+def save_noise_sweep_csv(sweep_data, output_dir, noises=(0.005, 0.01, 0.02)):
     """Writes every number behind the sweep tables to one CSV (one row per dataset/dist/noise; noise 0 = clean)."""
     os.makedirs(output_dir, exist_ok=True)
     path = f"{output_dir}/noise_sweep_table.csv"

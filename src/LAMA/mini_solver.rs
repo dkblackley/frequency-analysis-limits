@@ -277,7 +277,7 @@ impl CpModel {
     /// where every t-tuple is within epsilon (so they are valid LAMa solutions).
     pub fn sampled_reconstructions(&self, largest_val: i64) -> Vec<Vec<i64>> {
         debug!("About to start trying to find solutions in the imperfect world...");
-        self.min_error_lns(largest_val, 120, 50, 4, Duration::from_millis(300), 100)
+        self.min_error_lns(largest_val, 120, 50, 2, Duration::from_millis(300), 100)
             .into_iter()
             .filter(|r| r.total_error < Self::OUTSIDE_EPSILON)
             .map(|r| r.assignment)

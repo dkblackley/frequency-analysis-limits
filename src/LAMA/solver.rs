@@ -131,7 +131,7 @@ impl Solver {
             }
 
             if !orig_appear {
-                panic!("Original response was not pushed to all solutions!")
+                error!("Original response was not pushed to all solutions!")
             }
 
             // ids.1 is the true encoded value of the record

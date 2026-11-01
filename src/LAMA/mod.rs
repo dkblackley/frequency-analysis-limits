@@ -40,6 +40,7 @@ pub fn lama_attack(
     padding: &Value,
     _save: &bool,
     query_percent: &f64,
+    dist_noise: &f64,
 ) {
     let loaded_db: Box<dyn Searchable + Sync>;
     let full_datapath = format!("{0}/{1}", dir_path, db_name);
@@ -83,7 +84,22 @@ pub fn lama_attack(
 
     let (low_pair, high_pair) = loaded_db.get_dom_pair();
     let largest_possible_val: i64 = flatten_nd(&high_pair, &high_pair, &low_pair);
-    let selector = Selector::new(dist, &loaded_db);
+    // The selector holds the TRUE query distribution (noisy if dist_noise > 0)
+    let selector = Selector::new_with_noise(dist, &loaded_db, *dist_noise);
+    // The attacker's model of the distribution: the noiseless one
+    let attacker_dist = if *dist_noise > 0.0 {
+        // Same pairs (same order) as the selector: get_dom_pairs' order is not deterministic and
+        // the Gaussian/Beta weights are assigned by index into this vec
+        Some(QueryDistribution::new(
+            selector.query_distribution.pairs.clone(),
+            &loaded_db,
+            dist.parse().unwrap(),
+        ))
+    } else {
+        None
+    };
+    // Exact frequencies are only 'perfect' if the attacker also knows the exact distribution
+    let perfect = *query_percent == 1.0 && *dist_noise == 0.0;
 
     debug!(
         "Working with padding: {}, low_pair: {:?}, high_pair: {:?}",
@@ -103,10 +119,21 @@ pub fn lama_attack(
         largest_possible_val,
         loaded_db.get_universe(),
         &(t.clone() as usize),
-        *query_percent == 1.0,
+        perfect,
     );
 
     let query_dist_ref = &selector.query_distribution;
+    let attacker_dist_ref = attacker_dist.as_ref().unwrap_or(query_dist_ref);
+
+    if *dist_noise > 0.0 {
+        // How far the attacker's expected probabilities actually are from the truth (bounded by dist_noise)
+        let max_dist_err = query_dist_ref
+            .mbq_to_cumulative_prob
+            .iter()
+            .map(|(mbq, p)| (p - attacker_dist_ref.cumulative_prob_lookup(mbq)).abs())
+            .fold(0.0, f64::max);
+        info!("Distribution noise {dist_noise}: largest actual error in any enclosing probability is {max_dist_err}");
+    }
     let high_pair_ref = &high_pair;
     let low_pair_ref = &low_pair;
 
@@ -117,7 +144,7 @@ pub fn lama_attack(
             .collect();
         let pt_mbq = get_mbq(&pt_records);
 
-        query_dist_ref.cumulative_prob_lookup(&pt_mbq)
+        attacker_dist_ref.cumulative_prob_lookup(&pt_mbq)
     };
 
     let eps;
@@ -133,7 +160,8 @@ pub fn lama_attack(
             delta,
             &selector.get_all_possible_responses(),
         );
-        eps = epsil;
+        // Sampling error + distribution error
+        eps = epsil + *dist_noise;
         num_queries = observed_queries.len();
 
         let all_dompairs = Selector::get_dom_pairs(&loaded_db);
@@ -171,7 +199,7 @@ pub fn lama_attack(
                 .unwrap_or(0.0)
         });
     } else {
-        eps = 0.0;
+        eps = *dist_noise;
         // How many queries can we do? A query is a hyperrectangle, The total number of hyper rectangles
         // in a space is n*(n+1)/2 where n is the length of a dim, then mutliply for each dim.
         let mut total = 1;
@@ -248,7 +276,11 @@ pub fn lama_attack(
         return;
     }
 
-    let unique_name = format!("{db_name}_{dist}_p{query_percent}");
+    let unique_name = if *dist_noise > 0.0 {
+        format!("{db_name}_{dist}_p{query_percent}_noise{dist_noise}")
+    } else {
+        format!("{db_name}_{dist}_p{query_percent}")
+    };
 
     let mut correct = 0;
     let mut first_resp = HashMap::new();

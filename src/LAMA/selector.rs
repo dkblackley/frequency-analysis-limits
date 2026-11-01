@@ -29,13 +29,24 @@ pub struct Selector<'a> {
 
 impl<'a> Selector<'a> {
     pub fn new(dist: &str, loaded_db: &'a Box<dyn Searchable + Sync>) -> Box<Self> {
+        Self::new_with_noise(dist, loaded_db, 0.0)
+    }
+
+    /// The selector samples queries from `dist` perturbed by `noise` (total variation distance),
+    /// i.e. the true query distribution the attacker only knows approximately.
+    pub fn new_with_noise(
+        dist: &str,
+        loaded_db: &'a Box<dyn Searchable + Sync>,
+        noise: f64,
+    ) -> Box<Self> {
         let (low_pair, high_pair) = loaded_db.get_dom_pair();
         let dim = loaded_db.get_dims();
 
-        let query_distribution = QueryDistribution::new(
+        let query_distribution = QueryDistribution::new_with_noise(
             Self::get_dom_pairs(loaded_db),
             loaded_db,
             dist.parse().unwrap(),
+            noise,
         );
 
         let selector = Selector {

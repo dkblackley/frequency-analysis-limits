@@ -9,6 +9,8 @@ use itertools::Itertools;
 use log::{debug, error, info, warn};
 use plotters::prelude::*;
 use rand::distributions::WeightedIndex;
+use rand::rngs::StdRng;
+use rand::{Rng, SeedableRng};
 use rayon::prelude::*;
 use rustc_hash::FxHashMap;
 use statrs::distribution::{Beta, Continuous, Normal};
@@ -34,6 +36,18 @@ impl<'a> QueryDistribution<'a> {
         encrypted_db: &'a Box<dyn Searchable + Sync>,
         dist: DistributionType,
     ) -> Box<Self> {
+        Self::new_with_noise(pairs, encrypted_db, dist, 0.0)
+    }
+
+    /// Same as `new`, but the per-query probabilities are perturbed so that the result is exactly
+    /// `noise` away (in total variation distance) from `dist`. Every cumulative (enclosing)
+    /// probability therefore differs from the noiseless one by at most `noise`.
+    pub fn new_with_noise(
+        pairs: Vec<DomPair>,
+        encrypted_db: &'a Box<dyn Searchable + Sync>,
+        dist: DistributionType,
+        noise: f64,
+    ) -> Box<Self> {
         let (lowest_rec, largest_rec) = encrypted_db.get_dom_pair();
 
         info!("Beginning to set up {dist} distribution");
@@ -44,6 +58,12 @@ impl<'a> QueryDistribution<'a> {
                 DistributionType::Beta => Self::new_beta(&pairs),
                 DistributionType::Flat => Self::new_flat(&pairs, encrypted_db),
             };
+
+        let (sampler, weights, total_weight, dom_pair_to_known_weight) = if noise > 0.0 {
+            Self::add_noise(&pairs, &weights, total_weight, noise)
+        } else {
+            (sampler, weights, total_weight, dom_pair_to_known_weight)
+        };
 
         info!("Computing true cumulative probabilities for every MBQ");
 
@@ -247,6 +267,49 @@ impl<'a> QueryDistribution<'a> {
             .iter()
             .map(|(_, pair)| pair.clone())
             .collect()
+    }
+
+    /// Mixes the distribution `p` (from `weights`) with a random one `q`:
+    /// p' = (1 - lambda) p + lambda q, with lambda = noise / TV(p, q), so TV(p, p') = noise.
+    /// Seeded, so the same `noise` always gives the same noisy distribution.
+    fn add_noise(
+        pairs: &[DomPair],
+        weights: &[f64],
+        total_weight: f64,
+        noise: f64,
+    ) -> (WeightedIndex<f64>, Vec<f64>, f64, FxHashMap<DomPair, f64>) {
+        let mut rng = StdRng::seed_from_u64(1337);
+        let random_weights: Vec<f64> = (0..weights.len()).map(|_| rng.gen::<f64>()).collect();
+        let random_total: f64 = random_weights.iter().sum();
+
+        let tv_pq: f64 = weights
+            .iter()
+            .zip(random_weights.iter())
+            .map(|(w, r)| (w / total_weight - r / random_total).abs())
+            .sum::<f64>()
+            / 2.0;
+
+        let lambda = noise / tv_pq;
+        if lambda > 1.0 {
+            warn!("Noise {noise} is larger than TV(p, q) = {tv_pq}, using q as the distribution");
+        }
+        let lambda = lambda.min(1.0);
+        info!("Adding noise: TV(p, q) = {tv_pq}, lambda = {lambda}, TV(p, p') = {}", lambda * tv_pq);
+
+        let noisy_weights: Vec<f64> = weights
+            .iter()
+            .zip(random_weights.iter())
+            .map(|(w, r)| (1.0 - lambda) * (w / total_weight) + lambda * (r / random_total))
+            .collect();
+
+        let mut dom_to_weight = FxHashMap::default();
+        for (pair, w) in pairs.iter().zip(noisy_weights.iter()) {
+            dom_to_weight.insert(pair.clone(), *w);
+        }
+        let sampler = WeightedIndex::new(&noisy_weights).expect("Failed to create WeightedIndex");
+
+        // The noisy weights are already normalised
+        (sampler, noisy_weights, 1.0, dom_to_weight)
     }
 
     fn new_uniform_internal(

@@ -2,7 +2,6 @@ use crate::dataloader::tester::testDB;
 use crate::dataloader::three_d::ThreeDMap;
 use crate::dataloader::two_d::TwoDMap;
 use crate::dataloader::{flatten_nd, unflatten_nd, Searchable};
-use crate::plotting::two_d::spatial_plot::plot_spatial_reconstruction_all_items;
 use crate::plotting::{DbResult, ReconstructionDataPoint};
 use crate::LAMA::error::LAMAError;
 use crate::LAMA::query::QueryDistribution;
@@ -98,8 +97,8 @@ pub fn lama_attack(
     } else {
         None
     };
-    // Exact frequencies are only 'perfect' if the attacker also knows the exact distribution
-    let perfect = *query_percent == 1.0 && *dist_noise == 0.0;
+    // With all queries observed, enumerate every database within epsilon (also with dist noise)
+    let perfect = *query_percent == 1.0;
 
     debug!(
         "Working with padding: {}, low_pair: {:?}, high_pair: {:?}",
@@ -125,15 +124,19 @@ pub fn lama_attack(
     let query_dist_ref = &selector.query_distribution;
     let attacker_dist_ref = attacker_dist.as_ref().unwrap_or(query_dist_ref);
 
-    if *dist_noise > 0.0 {
-        // How far the attacker's expected probabilities actually are from the truth (bounded by dist_noise)
+    // How far the attacker's expected probabilities actually are from the truth (bounded by dist_noise).
+    // The attacker is assumed to know this bound, so it is added to epsilon.
+    let max_dist_err = if *dist_noise > 0.0 {
         let max_dist_err = query_dist_ref
             .mbq_to_cumulative_prob
             .iter()
             .map(|(mbq, p)| (p - attacker_dist_ref.cumulative_prob_lookup(mbq)).abs())
             .fold(0.0, f64::max);
         info!("Distribution noise {dist_noise}: largest actual error in any enclosing probability is {max_dist_err}");
-    }
+        max_dist_err
+    } else {
+        0.0
+    };
     let high_pair_ref = &high_pair;
     let low_pair_ref = &low_pair;
 
@@ -161,7 +164,7 @@ pub fn lama_attack(
             &selector.get_all_possible_responses(),
         );
         // Sampling error + distribution error
-        eps = epsil + *dist_noise;
+        eps = epsil + max_dist_err;
         num_queries = observed_queries.len();
 
         let all_dompairs = Selector::get_dom_pairs(&loaded_db);
@@ -199,7 +202,7 @@ pub fn lama_attack(
                 .unwrap_or(0.0)
         });
     } else {
-        eps = *dist_noise;
+        eps = max_dist_err;
         // How many queries can we do? A query is a hyperrectangle, The total number of hyper rectangles
         // in a space is n*(n+1)/2 where n is the length of a dim, then mutliply for each dim.
         let mut total = 1;
@@ -333,34 +336,6 @@ pub fn lama_attack(
     }
 
     info!("LAMA finished running on {db_name}");
-
-    let data = into_recon_data(&responses, &loaded_db);
-    let mut true_cords = Vec::new();
-    let mut recon_coords = Vec::new();
-    let mut true_done = false;
-
-    for item in data {
-        let mut current_recon = Vec::new();
-
-        for i in item {
-            if !true_done {
-                true_cords.push(i.true_points);
-            } else {
-                current_recon.push(i.reconstructed_points);
-            }
-        }
-        recon_coords.push(current_recon);
-        true_done = true;
-    }
-
-    let _ = plot_spatial_reconstruction_all_items(
-        &true_cords,
-        &recon_coords,
-        "figures/debug_last_run.svg",
-        true,
-        0.0,
-        0.0,
-    );
 }
 fn save_results(result: DbResult, file_path: &str) -> Result<(), LAMAError> {
     // Create the file and wrap it in a BufWriter for better performance

@@ -1,5 +1,4 @@
 use clap::Parser;
-use frequency_analysis_limits::plotting::do_plotting;
 use frequency_analysis_limits::plotting::post::export_to_geo_and_align;
 use frequency_analysis_limits::LAMA::lama_attack;
 use log::{debug, info};
@@ -22,7 +21,7 @@ pub struct Args {
     #[arg(short, long)]
     load: bool,
 
-    /// Run the LAMA attack or just do plotting
+    /// Skip the LAMA attack (e.g. to only run --post)
     #[arg(long)]
     skip_lama: bool,
 
@@ -33,10 +32,6 @@ pub struct Args {
     // The identifier for the specific function to load the file
     #[arg(long)]
     t: u64,
-
-    /// Make plots and save to disk
-    #[arg(long)]
-    plot: bool,
 
     #[arg(long, default_value = "5")]
     dim: usize,
@@ -107,11 +102,6 @@ fn main() {
             &args.dir_path,
             &args.name,
         );
-    }
-
-    if args.plot {
-        info!("Plotting data");
-        do_plotting();
     }
 
     info!("Moriturus te saluto");

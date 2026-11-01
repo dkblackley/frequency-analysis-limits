@@ -2,7 +2,6 @@ use crate::dataloader::tester::testDB;
 use crate::dataloader::three_d::ThreeDMap;
 use crate::dataloader::two_d::TwoDMap;
 use crate::dataloader::{flatten_nd, unflatten_nd, Searchable};
-use crate::plotting::two_d::spatial_plot::plot_spatial_reconstruction_all_items;
 use crate::plotting::{DbResult, ReconstructionDataPoint};
 use crate::LAMA::error::LAMAError;
 use crate::LAMA::query::QueryDistribution;
@@ -337,34 +336,6 @@ pub fn lama_attack(
     }
 
     info!("LAMA finished running on {db_name}");
-
-    let data = into_recon_data(&responses, &loaded_db);
-    let mut true_cords = Vec::new();
-    let mut recon_coords = Vec::new();
-    let mut true_done = false;
-
-    for item in data {
-        let mut current_recon = Vec::new();
-
-        for i in item {
-            if !true_done {
-                true_cords.push(i.true_points);
-            } else {
-                current_recon.push(i.reconstructed_points);
-            }
-        }
-        recon_coords.push(current_recon);
-        true_done = true;
-    }
-
-    let _ = plot_spatial_reconstruction_all_items(
-        &true_cords,
-        &recon_coords,
-        "figures/debug_last_run.svg",
-        true,
-        0.0,
-        0.0,
-    );
 }
 fn save_results(result: DbResult, file_path: &str) -> Result<(), LAMAError> {
     // Create the file and wrap it in a BufWriter for better performance

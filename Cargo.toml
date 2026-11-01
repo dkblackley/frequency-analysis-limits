@@ -18,14 +18,12 @@ ndarray = { version = "0.17.2", features = ["rayon"] }
 rand = "0.8.5"
 rayon = "1.11.0"
 clap = { version = "4.5", features = ["derive"] }
-plotters = "0.3.7"
 good_lp = { version = "1.15.0", features = ["highs"] }
 statrs = "0.18.0"
 rustc-hash = "2.1.2"
 mimalloc = "0.1.48"
 nalgebra = "0.33.3"
 geo = "0.32.0"
-qhull = "0.4.0"
 pumpkin-solver = "0.4.0"
 
 [dev-dependencies]

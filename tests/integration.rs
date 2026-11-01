@@ -4,10 +4,6 @@
 use frequency_analysis_limits::dataloader::tester::testDB;
 use frequency_analysis_limits::dataloader::two_d::{Location, TwoDMap};
 use frequency_analysis_limits::dataloader::{flatten_nd, unflatten_nd, Searchable};
-use frequency_analysis_limits::plotting::two_d::spatial_plot::{
-    plot_spatial_reconstruction, plot_spatial_reconstruction_all_items,
-};
-use frequency_analysis_limits::LAMA::into_recon_data;
 use frequency_analysis_limits::LAMA::mini_solver::CpModel;
 use frequency_analysis_limits::LAMA::query::QueryDistribution;
 use frequency_analysis_limits::LAMA::selector::Selector;
@@ -319,35 +315,6 @@ fn end_flat() {
 
     let total_responses = solver.num_sols;
 
-    let data = into_recon_data(&responses, &loaded_db);
-    let mut true_cords = Vec::new();
-    let mut recon_coords = Vec::new();
-    let mut true_done = false;
-
-    for item in data {
-        let mut current_recon = Vec::new();
-
-        for i in item {
-            if !true_done {
-                true_cords.push(i.true_points);
-            } else {
-                current_recon.push(i.reconstructed_points);
-            }
-        }
-        recon_coords.push(current_recon);
-        true_done = true;
-    }
-
-    plot_spatial_reconstruction_all_items(
-        &true_cords,
-        &recon_coords,
-        "figures/debug_flat.svg",
-        true,
-        0.0,
-        0.0,
-    )
-        .expect("TODO: panic message");
-
     let valid = find_valid_solution(&responses, &total_responses);
 
     assert_ne!(valid.0, -1);
@@ -653,35 +620,6 @@ fn end_to_end_sampled() {
     // NOTE: The only change in the test is passing largest_enc_val here
     let responses = solver.solve(&mut model, largest_enc_val, false);
 
-    let data = into_recon_data(&responses, &loaded_db);
-    let mut true_cords = Vec::new();
-    let mut recon_coords = Vec::new();
-    let mut true_done = false;
-
-    for item in data {
-        let mut current_recon = Vec::new();
-
-        for i in item {
-            if !true_done {
-                true_cords.push(i.true_points);
-            } else {
-                current_recon.push(i.reconstructed_points);
-            }
-        }
-        recon_coords.push(current_recon);
-        true_done = true;
-    }
-
-    plot_spatial_reconstruction_all_items(
-        &true_cords,
-        &recon_coords,
-        "figures/debug_sampled.svg",
-        true,
-        0.0,
-        0.0,
-    )
-        .expect("TODO: panic message");
-
     let mut correct = 0;
     let mut incorrect = 0;
 
@@ -933,35 +871,6 @@ fn end_to_end_sampled_noisy() {
 
     // NOTE: The only change in the test is passing largest_enc_val here
     let responses = solver.solve(&mut model, largest_enc_val, false);
-
-    let data = into_recon_data(&responses, &loaded_db);
-    let mut true_cords = Vec::new();
-    let mut recon_coords = Vec::new();
-    let mut true_done = false;
-
-    for item in data {
-        let mut current_recon = Vec::new();
-
-        for i in item {
-            if !true_done {
-                true_cords.push(i.true_points);
-            } else {
-                current_recon.push(i.reconstructed_points);
-            }
-        }
-        recon_coords.push(current_recon);
-        true_done = true;
-    }
-
-    plot_spatial_reconstruction_all_items(
-        &true_cords,
-        &recon_coords,
-        "figures/debug_sampled_noisy.svg",
-        true,
-        0.0,
-        0.0,
-    )
-        .expect("TODO: panic message");
 
     let mut correct = 0;
     let mut incorrect = 0;

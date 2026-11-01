@@ -39,7 +39,7 @@ def _load_time(path):
 
 
 def load_noise_data(base_dir, datasets, distributions, noise=0.01, query_percents=(10.0, 20.0, 30.0, 100.0),
-                    grid="15x15_run_1", clean_grid=None):
+                    grid="15x15", clean_grid=None):
     """
     Loads the noisy-distribution LAMa runs (--dist-noise) and, where it exists, the same run without noise.
     Returns: nested_data[dataset][dist] = [(query, noisy_metrics, clean_metrics, noisy_time), ...]

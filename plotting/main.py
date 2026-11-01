@@ -169,7 +169,7 @@ if __name__ == "__main__":
     # ---------------------------------------------------------
     print("Generating noisy-distribution tables...")
     noise = 0.01
-    noise_data = load_noise_data(BASE_DIR, datasets, distributions, noise=noise, grid="15x15_run_1")
+    noise_data = load_noise_data(BASE_DIR, datasets, distributions, noise=noise, grid="15x15")
     print_noise_latex(noise_data, datasets, distributions, noise=noise, metric="centroid")
     print_noise_latex(noise_data, datasets, distributions, noise=noise, metric="diameter")
     save_noise_csv(noise_data, OUTPUT_DIR, noise=noise)

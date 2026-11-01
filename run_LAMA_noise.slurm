@@ -7,7 +7,7 @@
 #SBATCH --time=0-04:30:00
 
 # Noisy distribution: the attacker knows --dist, queries really come from a
-# distribution 1% away in total variation (--dist-noise 0.01), on the single 15x15_run_1 grid.
+# distribution 1% away in total variation (--dist-noise 0.01), on the single 15x15 grid.
 # 6 names * 3 dists * 4 probs = 72 combinations (indexes 0 through 71)
 #SBATCH --array=0-71
 
@@ -50,7 +50,7 @@ fi
 
 NAMES=("drink" "busstop" "highway" "shopparis" "cali" "spitz")
 DISTS=("gaussian" "beta" "uniform")
-DATA_DIRS=( "${SLURM_SUBMIT_DIR}/databases/15x15_run_1" )
+DATA_DIRS=( "${SLURM_SUBMIT_DIR}/databases/15x15" )
 PROBS=("0.1" "0.2" "0.3" "1.0")
 NOISE="0.01"
 

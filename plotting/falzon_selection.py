@@ -333,3 +333,115 @@ def save_falzon_selection_csv(results, output_dir):
                     if isinstance(val, tuple) and rule != "lama":
                         writer.writerow([db, dist, rule, val[0], val[1], res["r"], res["sampled"]])
     print(f"Saved {path}")
+
+
+# ------------------------------------------------------------------
+# Mean matching only, with an imperfect training mean
+# ------------------------------------------------------------------
+def mean_matching(true_pts, grid, sigmas=(0.0, 2.0, 5.0, 10.0), trials=1000, seed=0):
+    """
+    Falzon et al.'s mean attack where the attacker only roughly knows where the data is centred: the
+    training mean is the true data mean plus N(0, sigma^2) per axis (sigma in grid cells). It only uses
+    the data, so the result is the same for every query distribution.
+    Returns {"random": (mse, acc), sigma: (expected_mse, accuracy, avg_num_tied), "r": r, "sampled": bool}.
+    """
+    true_pts = np.asarray(true_pts, dtype=float)
+    true_grid, to_saved = _to_grid(true_pts, grid)
+    n0, n1 = int(grid[0]) + 1, int(grid[1]) + 1
+    cands, true_idx, r, sampled = candidate_databases(true_grid, n0, n1, seed)
+    mses = np.array([calculate_mse(true_pts, to_saved(c)) for c in cands])
+    cand_means = cands.mean(axis=1)
+    mu_true = true_grid.mean(axis=0)
+
+    out = {"r": r, "sampled": sampled, "random": (float(mses.mean()), 1.0 / len(cands))}
+    rng = np.random.default_rng(seed)
+    for sigma in sigmas:
+        exp_mse, acc, tied = [], [], []
+        for _ in range(trials if sigma > 0 else 1):
+            mu_train = mu_true + rng.normal(0.0, sigma, size=2) if sigma > 0 else mu_true
+            scores = np.linalg.norm(cand_means - mu_train, axis=1)
+            best = np.isclose(scores, scores.min(), rtol=1e-9, atol=1e-12)
+            exp_mse.append(mses[best].mean())
+            acc.append(float(best[true_idx]) / best.sum() if true_idx is not None else 0.0)
+            tied.append(best.sum())
+        out[sigma] = (float(np.mean(exp_mse)), float(np.mean(acc)), float(np.mean(tied)))
+    return out
+
+
+def run_mean_matching(base_dir, datasets, distributions, grid=50, sigmas=(0.0, 2.0, 5.0, 10.0), trials=1000,
+                      lama_suffix="e0_d0.9"):
+    """results[db] = mean_matching(...) output plus "lama": {dist: avg MSE} from the LAMa JSONs."""
+    results = {}
+    for db in datasets:
+        lama, true_pts = {}, None
+        for dist in distributions:
+            path = f"{base_dir}/{grid}x{grid}/{db}/limits/{db}_{dist}_{lama_suffix}_reconstruction.json"
+            if not os.path.exists(path):
+                continue
+            with open(path, 'r') as f:
+                runs = [run for run in json.load(f) if run]
+            true_pts = true_pts or [p["true"] for p in runs[0]]
+            lama[dist] = float(np.mean([calculate_mse([p["true"] for p in run], [p["reconstructed"] for p in run])
+                                        for run in runs]))
+        if true_pts is None:
+            print(f"[SKIP] {db}: no LAMa reconstruction JSON on the {grid}x{grid} grid")
+            continue
+        res = mean_matching(true_pts, (grid, grid), sigmas, trials)
+        if res["sampled"]:
+            print(f"[WARN] {db}: E(D) has 4 x 2^{res['r']} databases, mean matching uses a sample")
+        res["lama"] = lama
+        results[db] = res
+    return results
+
+
+def print_mean_matching_latex(results, datasets, distributions, sigmas=(0.0, 2.0, 5.0, 10.0)):
+    """One row per dataset: LAMa avg MSE per query distribution, Falzon random pick, Falzon + mean matching."""
+    print("\n" + "=" * 50)
+    print("LATEX TABLE: FALZON ET AL. + MEAN MATCHING (EXPECTED MSE OF THE PICK)")
+    print("=" * 50 + "\n")
+    print("\\begin{table}[htpb]")
+    print("\\centering")
+    print("\\footnotesize")
+    print("\\setlength{\\tabcolsep}{3pt}")
+    print("\\begin{tabular}{l" + "r" * len(distributions) + "r" + "r" * len(sigmas) + "}")
+    print("\\toprule")
+    print(f" & \\multicolumn{{{len(distributions)}}}{{c}}{{\\textbf{{LAMa}}}} & "
+          f"\\multicolumn{{{1 + len(sigmas)}}}{{c}}{{\\textbf{{Falzon et al.}}}} \\\\")
+    k = len(distributions)
+    print(f"\\cmidrule(lr){{2-{1 + k}}} \\cmidrule(lr){{{2 + k}-{2 + k + len(sigmas)}}}")
+    dist_cols = " & ".join(f"\\textbf{{{d.capitalize()}}}" for d in distributions)
+    sigma_cols = " & ".join(f"\\textbf{{$\\sigma={s:g}$}}" for s in sigmas)
+    print(f"\\textbf{{Dataset}} & {dist_cols} & \\textbf{{Rand.}} & {sigma_cols} \\\\")
+    print("\\midrule")
+    for db in datasets:
+        res = results.get(db)
+        if res is None:
+            continue
+        cells = [_fmt(res["lama"].get(d)) for d in distributions] + [_fmt(res["random"][0])]
+        cells += [_fmt(res[s][0]) for s in sigmas]
+        print(f"{format_db_name(db)} & {' & '.join(cells)} \\\\")
+    print("\\bottomrule")
+    print("\\end{tabular}")
+    print("\\caption{MSE of LAMa (average over its reconstructions) under each query distribution, and the "
+          "expected MSE of the single database Falzon et al.'s attack picks from E(D): uniformly at random "
+          "(Rand.) or with their mean attack, when the attacker's training mean is the true data mean plus "
+          "Gaussian noise with standard deviation $\\sigma$ grid cells per axis. Mean matching only uses the "
+          "data, so it is the same for every query distribution.}")
+    print("\\label{tab:falzon_mean_matching}")
+    print("\\end{table}\n")
+
+
+def save_mean_matching_csv(results, output_dir):
+    os.makedirs(output_dir, exist_ok=True)
+    path = f"{output_dir}/falzon_mean_matching.csv"
+    with open(path, 'w', newline='') as f:
+        writer = csv.writer(f)
+        writer.writerow(["dataset", "rule", "sigma", "expected_mse", "accuracy", "avg_num_tied", "r", "sampled"])
+        for db, res in results.items():
+            for dist, mse in res["lama"].items():
+                writer.writerow([db, f"lama_{dist}", None, mse, None, None, res["r"], res["sampled"]])
+            writer.writerow([db, "random", None, res["random"][0], res["random"][1], None, res["r"], res["sampled"]])
+            for key, val in res.items():
+                if isinstance(key, float):
+                    writer.writerow([db, "mean", key, *val, res["r"], res["sampled"]])
+    print(f"Saved {path}")

@@ -6,8 +6,9 @@
 #SBATCH --mem=480G
 #SBATCH --time=0-04:30:00
 
-# Probabilistic setting on every 15x15 grid (15x15_run_1 .. 15x15_run_10):
-# 6 names * 3 dists * 10 dirs * 3 probs = 540 combinations (indexes 0 through 539)
+# Probabilistic setting on the 50x50 grid:
+# 6 names * 3 dists * 1 dir * 5 probs = 90 combinations (indexes 0 through 89)
+# If you add DATA_DIRS or PROBS, update the array to 0-(total-1).
 #SBATCH --array=0-89
 
 #SBATCH --output=logs/LAMA_probs_2d_%A_%a.out
@@ -92,16 +93,29 @@ echo "  Dist:     $dist"
 echo "  Prob:     $prob"
 echo "========================================"
 
-$SG_RUN ./target/release/frequency_analysis_limits \
-    --dir-path "$data_dir" \
-    --name "$name" \
-    --t "$t_val" \
-    --dist "$dist" \
-    --padding "$padding" \
-    --query-percent "$prob"
+# Try each configuration up to MAX_ATTEMPTS times (one retry). Query
+# selection uses thread_rng, so a retry draws a fresh query sample.
+# Note: a run killed by the --time limit ends the whole task, so no retry then.
+MAX_ATTEMPTS=2
+status=1
+for attempt in $(seq 1 $MAX_ATTEMPTS); do
+    echo "Attempt $attempt of $MAX_ATTEMPTS"
+    $SG_RUN ./target/release/frequency_analysis_limits \
+        --dir-path "$data_dir" \
+        --name "$name" \
+        --t "$t_val" \
+        --dist "$dist" \
+        --padding "$padding" \
+        --query-percent "$prob"
+    status=$?
+    if [ $status -eq 0 ]; then
+        break
+    fi
+    echo "Attempt $attempt failed with exit code $status."
+done
 
-if [ $? -ne 0 ]; then
-    echo "Error: run failed. Exiting with failure code."
+if [ $status -ne 0 ]; then
+    echo "Error: run failed after $MAX_ATTEMPTS attempts ($name | $dist | p=$prob). Exiting with failure code."
     exit 1
 fi
 

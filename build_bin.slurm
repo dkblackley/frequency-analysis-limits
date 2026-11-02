@@ -9,6 +9,11 @@
 #SBATCH --mem=16G
 #SBATCH --time=01:00:00
 
+# Builds ./target/release/frequency_analysis_limits inside the container made by
+# build_and_push_container.sh. All system deps (cmake, clang/libclang, protobuf,
+# CBC) are in the image, so nothing else needs to be installed in /scratch.
+
+set -euo pipefail
 
 cd "$SLURM_SUBMIT_DIR"
 
@@ -16,47 +21,40 @@ module --quiet purge
 module load hosts/hopper
 module load singularity
 
-CMAKE_DIR="/scratch/dblackle/cmake_portable"
-LLVM_DIR="/scratch/dblackle/llvm_portable"
 CONTAINER="/scratch/dblackle/rust_env.sif"
+# Writable cargo home for the crate registry/git cache (the .sif is read-only).
+CARGO_CACHE="/scratch/dblackle/cargo_home"
 
-# Reuse the toolchains installed by your existing setup.
-for required in \
-    "$ORTOOLS_DIR/lib" \
-    "$CMAKE_DIR/bin/cmake" \
-    "$LLVM_DIR/lib" \
-    "$CONTAINER"
-do
-    if [ ! -e "$required" ]; then
-        echo "Missing build dependency: $required" >&2
-        exit 1
-    fi
-done
+if [ ! -e "$CONTAINER" ]; then
+    echo "Missing container: $CONTAINER (run build_and_push_container.sh locally first)" >&2
+    exit 1
+fi
+mkdir -p "$CARGO_CACHE"
 
-export SINGULARITYENV_ORTOOLS_PREFIX="$ORTOOLS_DIR"
-export SINGULARITYENV_LD_LIBRARY_PATH="$ORTOOLS_DIR/lib"
-export SINGULARITYENV_LIBRARY_PATH="$ORTOOLS_DIR/lib"
-export SINGULARITYENV_PREPEND_PATH="$CMAKE_DIR/bin"
-export SINGULARITYENV_LIBCLANG_PATH="$LLVM_DIR/lib"
-
-source /home/dblackle/miniconda3/etc/profile.d/conda.sh
-conda activate main
-export PYTHON_EXEC="/home/dblackle/.conda/envs/main/bin/python3.10"
-
-# Limit both Cargo and CMake parallelism to the allocated CPUs.
+# .cargo/config.toml points target-dir at a local home directory; override it so the
+# binary lands in ./target/release where the run_*.slurm scripts look for it.
+export SINGULARITYENV_CARGO_TARGET_DIR="$SLURM_SUBMIT_DIR/target"
+export SINGULARITYENV_CARGO_HOME="$CARGO_CACHE"
+# Limit both Cargo and CMake (HiGHS) parallelism to the allocated CPUs.
 export SINGULARITYENV_CARGO_BUILD_JOBS="$SLURM_CPUS_PER_TASK"
 export SINGULARITYENV_CMAKE_BUILD_PARALLEL_LEVEL="$SLURM_CPUS_PER_TASK"
 
 echo "Building project inside container..."
 
+# --cleanenv keeps host module paths (LD_LIBRARY_PATH etc.) out of the build;
+# only the SINGULARITYENV_* variables above are passed in.
 singularity exec \
+    --cleanenv \
     --bind /scratch/dblackle \
-    --bind /scratch/dblackle/cargo:/usr/local/cargo \
     "$CONTAINER" \
-    cargo rustc \
+    cargo build \
         --jobs "$SLURM_CPUS_PER_TASK" \
         --bin frequency_analysis_limits \
-        --release \
-        -- -Clink-arg=-lprotobuf
+        --release
 
-echo "Build finished: $SLURM_SUBMIT_DIR/target/release/frequency_analysis_limits"
+BIN="$SLURM_SUBMIT_DIR/target/release/frequency_analysis_limits"
+if [ ! -x "$BIN" ]; then
+    echo "Build reported success but $BIN is missing." >&2
+    exit 1
+fi
+echo "Build finished: $BIN"

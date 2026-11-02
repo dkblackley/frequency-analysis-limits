@@ -175,11 +175,10 @@ if __name__ == "__main__":
     print_noise_latex(noise_data, datasets, distributions, noise=noise, metric="diameter")
     save_noise_csv(noise_data, OUTPUT_DIR, noise=noise)
 
-    # 100% of queries, distribution noise 0.01 / 0.05 / 0.1, eps = exact largest error
-    sweep_noises = (0.005, 0.01, 0.02)
+    # 100% of queries, distribution noise 1% / 2% / 3% (TV), eps = exact largest error
+    sweep_noises = (0.01, 0.02, 0.03)
     sweep_data = load_noise_sweep_data(BASE_DIR, datasets, distributions, noises=sweep_noises, grid="15x15")
-    print_noise_sweep_latex(sweep_data, datasets, distributions, noises=sweep_noises, metric="centroid")
-    print_noise_sweep_latex(sweep_data, datasets, distributions, noises=sweep_noises, metric="diameter")
+    print_noise_sweep_latex(sweep_data, datasets, distributions, noises=sweep_noises)
     save_noise_sweep_csv(sweep_data, OUTPUT_DIR, noises=sweep_noises)
 
     # # ---------------------------------------------------------

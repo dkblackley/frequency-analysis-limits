@@ -2,7 +2,7 @@
 
 # ============================================================
 # Local version of run_LAMA_noise_sweep.slurm: every 15x15 dataset,
-# 100% of queries, with the true query distribution 0 / 0.005 / 0.01 / 0.02
+# 100% of queries, with the true query distribution 0 / 0.01 / 0.02 / 0.03
 # away (TV) from --dist. With noise > 0 the attacker uses the exact
 # largest error as eps (no VC bound) and enumerates every DB within it.
 #
@@ -13,7 +13,7 @@
 # ============================================================
 NAMES=(${1:-drink busstop highway shopparis cali spitz})
 DISTS=(${2:-gaussian beta uniform})
-NOISES=(${3:-0.0 0.005 0.01 0.02})
+NOISES=(${3:-0.0 0.01 0.02 0.03})
 RUN_TIMEOUT="${RUN_TIMEOUT:-4h30m}"
 
 export RUST_LOG="debug"

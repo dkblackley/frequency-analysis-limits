@@ -10,6 +10,7 @@ from plot_convex_mse import plot_convex_mse
 from plot_histograms import plot_reconstruction_histograms, plot_lama_flat_distributions
 from plot_falzon import plot_falzon_histograms
 from plot_falzon_any import plot_falzon_any_histograms
+from falzon_selection import run_falzon_selection, print_falzon_selection_latex, save_falzon_selection_csv
 from plot_running_time import plot_running_time_bar
 from plot_running_time_lines import plot_running_time_lines
 from globals_vars import FONT_SIZE
@@ -164,6 +165,15 @@ if __name__ == "__main__":
     #     # bottom row, so it carries the x-axis label
     #     plot_falzon_row(paths, (falzon_grid, falzon_grid), db, OUTPUT_DIR, COLORS, LABELS,
     #                     show_header=(db == "spitz"), show_xlabel=(db == "shopparis"))
+
+    # ---------------------------------------------------------
+    # Falzon et al. with a selection step (their Sec. 7 + query-distribution matching)
+    # ---------------------------------------------------------
+    print("Generating Falzon et al. selection table...")
+    selection_dists = ["gaussian", "beta", "uniform"]
+    selection = run_falzon_selection(BASE_DIR, datasets, selection_dists, grid=50, train_noise=0.05)
+    print_falzon_selection_latex(selection, datasets, selection_dists)
+    save_falzon_selection_csv(selection, OUTPUT_DIR)
 
     # # ---------------------------------------------------------
     # # Noisy query distribution (--dist-noise) table

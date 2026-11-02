@@ -2,15 +2,26 @@ Bootstrap: docker
 From: rust:1.95-bookworm
 
 %post
-    # Update and install all necessary C++ build tools and bindgen dependencies
+    # Build deps for the crates we still use:
+    #   - highs-sys (good_lp "highs"): cmake + C++ toolchain, and libclang for bindgen
+    #   - coin_cbc  (good_lp default feature): coinor-libcbc-dev
+    #   - .cargo/config.toml passes `-l protobuf`: libprotobuf-dev provides libprotobuf.so
+    # Everything lives in the image, so the build job no longer needs the portable
+    # CMake / LLVM / OR-Tools downloads in /scratch.
     apt-get update
-    apt-get install -y \
+    apt-get install -y --no-install-recommends \
         cmake \
         clang \
         libclang-dev \
         build-essential \
+        pkg-config \
         protobuf-compiler \
-        wget
+        libprotobuf-dev \
+        coinor-libcbc-dev
 
     # Clean up to keep the container small
     apt-get clean
+    rm -rf /var/lib/apt/lists/*
+
+%environment
+    export LIBCLANG_PATH=/usr/lib/llvm-14/lib

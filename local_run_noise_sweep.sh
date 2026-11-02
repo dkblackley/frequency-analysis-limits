@@ -2,18 +2,18 @@
 
 # ============================================================
 # Local version of run_LAMA_noise_sweep.slurm: every 15x15 dataset,
-# 100% of queries, with the true query distribution 0 / 0.01 / 0.05 / 0.1
+# 100% of queries, with the true query distribution 0 / 0.005 / 0.01 / 0.02
 # away (TV) from --dist. With noise > 0 the attacker uses the exact
-# largest error as eps (no VC bound) and runs the non-perfect path.
+# largest error as eps (no VC bound) and enumerates every DB within it.
 #
 # Override from the command line (all optional):
-#   ./local_run_noise_sweep.sh "cali spitz" "gaussian" "0.01 0.1"
+#   ./local_run_noise_sweep.sh "cali spitz" "gaussian" "0.005 0.02"
 #     $1 = names, $2 = dists, $3 = noises
 # RUN_TIMEOUT (default 4h30m, like the slurm job) caps each run.
 # ============================================================
 NAMES=(${1:-drink busstop highway shopparis cali spitz})
 DISTS=(${2:-gaussian beta uniform})
-NOISES=(${3:-0.0 0.01 0.05 0.1})
+NOISES=(${3:-0.0 0.005 0.01 0.02})
 RUN_TIMEOUT="${RUN_TIMEOUT:-4h30m}"
 
 export RUST_LOG="debug"

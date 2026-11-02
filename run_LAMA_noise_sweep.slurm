@@ -9,7 +9,8 @@
 # Noise sweep with every query observed (--query-percent 1.0) on the single 15x15 grid.
 # The attacker knows --dist, queries really come from a distribution --dist-noise away in
 # total variation. With noise > 0 it uses the exact largest error as eps (no VC bound) and
-# runs the non-perfect (min-error) path. Noise 0.0 is the noiseless perfect-world baseline.
+# enumerates every DB within it (perfect-world path). Noise 0.0 is the noiseless baseline.
+# Above ~0.02-0.03 noise the number of DBs within eps explodes on 15x15, so keep noise small.
 # 6 names * 3 dists * 4 noises = 72 combinations (indexes 0 through 71)
 #SBATCH --array=0-71
 
@@ -53,7 +54,7 @@ fi
 NAMES=("drink" "busstop" "highway" "shopparis" "cali" "spitz")
 DISTS=("gaussian" "beta" "uniform")
 DATA_DIRS=( "${SLURM_SUBMIT_DIR}/databases/15x15" )
-NOISES=("0.0" "0.01" "0.05" "0.1")
+NOISES=("0.0" "0.005" "0.01" "0.02")
 prob="1.0"
 
 # --- PARAMETER DECODING MATH ---

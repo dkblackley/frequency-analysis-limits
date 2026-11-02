@@ -54,7 +54,7 @@ fi
 NAMES=("drink" "busstop" "highway" "shopparis" "cali" "spitz")
 DISTS=("gaussian" "beta" "uniform")
 DATA_DIRS=( "${SLURM_SUBMIT_DIR}/databases/15x15" )
-NOISES=("0.0" "0.005" "0.01" "0.02")
+NOISES=("0.0" "0.01" "0.02" "0.03")
 prob="1.0"
 
 # --- PARAMETER DECODING MATH ---

@@ -146,34 +146,34 @@ if __name__ == "__main__":
     #     plot_reconstruction_histograms(hist_json_path, db, "uniform", OUTPUT_DIR, METHOD_ORDER, COLORS, LABELS)
 
 
-    # ---------------------------------------------------------
-    # LAMa vs Falzon et al. Histograms (same data as the histograms above)
-    # ---------------------------------------------------------
-    print("Generating LAMa vs Falzon et al. Histogram Plots...")
-    falzon_grid = 50
-    falzon_dists = ["gaussian", "beta", "uniform"]  # left to right
-    # True: LAMa per distribution + one Falzon "Any Dist." column (plot_falzon_any.py)
-    # False: a LAMa/Falzon pair per distribution (plot_falzon.py)
-    falzon_any_dist = False
-    plot_falzon_row = plot_falzon_any_histograms if falzon_any_dist else plot_falzon_histograms
-    for db in datasets:
-        paths = {dist: (f"../figures/histogram_mse_sol_num/mse_histogram_{db}_{dist}.json",
-                        f"{BASE_DIR}/{falzon_grid}x{falzon_grid}/{db}/limits/{db}_{dist}_e0_d0.9_reconstruction.json")
-                 for dist in falzon_dists}
-        # Spitz is the top row, so it carries the method/distribution titles, and Paris is the
-        # bottom row, so it carries the x-axis label
-        plot_falzon_row(paths, (falzon_grid, falzon_grid), db, OUTPUT_DIR, COLORS, LABELS,
-                        show_header=(db == "spitz"), show_xlabel=(db == "shopparis"))
+    # # ---------------------------------------------------------
+    # # LAMa vs Falzon et al. Histograms (same data as the histograms above)
+    # # ---------------------------------------------------------
+    # print("Generating LAMa vs Falzon et al. Histogram Plots...")
+    # falzon_grid = 50
+    # falzon_dists = ["gaussian", "beta", "uniform"]  # left to right
+    # # True: LAMa per distribution + one Falzon "Any Dist." column (plot_falzon_any.py)
+    # # False: a LAMa/Falzon pair per distribution (plot_falzon.py)
+    # falzon_any_dist = False
+    # plot_falzon_row = plot_falzon_any_histograms if falzon_any_dist else plot_falzon_histograms
+    # for db in datasets:
+    #     paths = {dist: (f"../figures/histogram_mse_sol_num/mse_histogram_{db}_{dist}.json",
+    #                     f"{BASE_DIR}/{falzon_grid}x{falzon_grid}/{db}/limits/{db}_{dist}_e0_d0.9_reconstruction.json")
+    #              for dist in falzon_dists}
+    #     # Spitz is the top row, so it carries the method/distribution titles, and Paris is the
+    #     # bottom row, so it carries the x-axis label
+    #     plot_falzon_row(paths, (falzon_grid, falzon_grid), db, OUTPUT_DIR, COLORS, LABELS,
+    #                     show_header=(db == "spitz"), show_xlabel=(db == "shopparis"))
 
-    # ---------------------------------------------------------
-    # Noisy query distribution (--dist-noise) table
-    # ---------------------------------------------------------
-    print("Generating noisy-distribution tables...")
-    noise = 0.01
-    noise_data = load_noise_data(BASE_DIR, datasets, distributions, noise=noise, grid="15x15")
-    print_noise_latex(noise_data, datasets, distributions, noise=noise, metric="centroid")
-    print_noise_latex(noise_data, datasets, distributions, noise=noise, metric="diameter")
-    save_noise_csv(noise_data, OUTPUT_DIR, noise=noise)
+    # # ---------------------------------------------------------
+    # # Noisy query distribution (--dist-noise) table
+    # # ---------------------------------------------------------
+    # print("Generating noisy-distribution tables...")
+    # noise = 0.01
+    # noise_data = load_noise_data(BASE_DIR, datasets, distributions, noise=noise, grid="15x15")
+    # print_noise_latex(noise_data, datasets, distributions, noise=noise, metric="centroid")
+    # print_noise_latex(noise_data, datasets, distributions, noise=noise, metric="diameter")
+    # save_noise_csv(noise_data, OUTPUT_DIR, noise=noise)
 
     # 100% of queries, distribution noise 1% / 2% / 3% (TV), eps = exact largest error
     sweep_noises = (0.01, 0.02, 0.03)

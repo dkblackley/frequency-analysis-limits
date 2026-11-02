@@ -41,7 +41,7 @@ for name in "${NAMES[@]}"; do
             echo "========================================"
             echo "Experiment: $label"
             echo "========================================"
-            timeout "$RUN_TIMEOUT" $BIN \
+            $BIN \
                 --dir-path "$DATA_DIR" \
                 --name "$name" \
                 --t 2 \

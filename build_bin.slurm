@@ -9,8 +9,6 @@
 #SBATCH --mem=16G
 #SBATCH --time=01:00:00
 
-# Stop if any setup or build command fails.
-set -e
 
 cd "$SLURM_SUBMIT_DIR"
 
@@ -18,7 +16,6 @@ module --quiet purge
 module load hosts/hopper
 module load singularity
 
-ORTOOLS_DIR="/scratch/dblackle/ortools"
 CMAKE_DIR="/scratch/dblackle/cmake_portable"
 LLVM_DIR="/scratch/dblackle/llvm_portable"
 CONTAINER="/scratch/dblackle/rust_env.sif"

@@ -13,7 +13,7 @@
 #
 # Can also be overridden from the command line: ./local_run.sh probs_2d
 # ============================================================
-EXPERIMENT="${1:-noise}"
+EXPERIMENT="${1:-probs_2d}"
 
 export RUST_LOG="debug"
 export RUST_BACKTRACE="1"
@@ -73,7 +73,7 @@ run_perfect() {
 # --- Probabilistic 2D: cali @ 15x15_run_1, gaussian, 30% of queries ---
 run_probs_2d() {
     run_lama "probs_2d" \
-        --dir-path "$DB_ROOT/15x15_run_1" \
+        --dir-path "$DB_ROOT/50x50" \
         --name cali \
         --t 2 \
         --dist gaussian \

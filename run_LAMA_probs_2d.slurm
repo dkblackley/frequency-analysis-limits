@@ -4,7 +4,7 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --mem=180G
-#SBATCH --time=0-04:30:00
+#SBATCH --time=0-05:30:00
 
 # Probabilistic setting on the 50x50 grid:
 # 6 names * 3 dists * 1 dir * 5 probs = 90 combinations (indexes 0 through 89)

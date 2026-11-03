@@ -13,7 +13,7 @@
 # ============================================================
 NAMES=(${1:-drink busstop highway shopparis cali spitz})
 DISTS=(${2:-gaussian beta uniform})
-NOISES=(${3:-0.0 0.005 0.01 0.02 0.03, 0.04, 0.05})
+NOISES=(${3:-0.05})
 RUN_TIMEOUT="${RUN_TIMEOUT:-4h30m}"
 
 export RUST_LOG="debug"

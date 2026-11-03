@@ -10,6 +10,7 @@ from plot_convex_mse import plot_convex_mse
 from plot_histograms import plot_reconstruction_histograms, plot_lama_flat_distributions
 from plot_falzon import plot_falzon_histograms
 from plot_falzon_any import plot_falzon_any_histograms
+from plot_falzon_guarantees import plot_falzon_guarantees
 from plot_running_time import plot_running_time_bar
 from plot_running_time_lines import plot_running_time_lines
 from globals_vars import FONT_SIZE
@@ -165,6 +166,19 @@ if __name__ == "__main__":
     #     plot_falzon_row(paths, (falzon_grid, falzon_grid), db, OUTPUT_DIR, COLORS, LABELS,
     #                     show_header=(db == "spitz"), show_xlabel=(db == "shopparis"))
 
+    # ---------------------------------------------------------
+    # LAMa vs Falzon et al., With / Without Guarantees (one figure per distribution)
+    # ---------------------------------------------------------
+    print("Generating LAMa vs Falzon et al. With/Without Guarantees Plots...")
+    falzon_grid = 50
+    # Rows top to bottom: Spitz on top (carries the titles), Paris at the bottom (x-axis label)
+    guarantee_rows = ["spitz", "busstop", "cali", "drink", "highway", "shopparis"]
+    for dist in ["gaussian", "beta", "uniform"]:
+        paths = {db: (f"../figures/histogram_mse_sol_num/mse_histogram_{db}_{dist}.json",
+                      f"{BASE_DIR}/{falzon_grid}x{falzon_grid}/{db}/limits/{db}_{dist}_e0_d0.9_reconstruction.json")
+                 for db in guarantee_rows}
+        plot_falzon_guarantees(paths, (falzon_grid, falzon_grid), dist, OUTPUT_DIR, COLORS, LABELS)
+
     # # ---------------------------------------------------------
     # # Noisy query distribution (--dist-noise) table
     # # ---------------------------------------------------------
@@ -175,11 +189,11 @@ if __name__ == "__main__":
     # print_noise_latex(noise_data, datasets, distributions, noise=noise, metric="diameter")
     # save_noise_csv(noise_data, OUTPUT_DIR, noise=noise)
 
-    # 100% of queries, distribution noise 1% / 2% / 3% (TV), eps = exact largest error
-    sweep_noises = (0.01, 0.02, 0.03)
-    sweep_data = load_noise_sweep_data(BASE_DIR, datasets, distributions, noises=sweep_noises, grid="15x15")
-    print_noise_sweep_latex(sweep_data, datasets, distributions, noises=sweep_noises)
-    save_noise_sweep_csv(sweep_data, OUTPUT_DIR, noises=sweep_noises)
+    # # 100% of queries, distribution noise 1% / 2% / 3% (TV), eps = exact largest error
+    # sweep_noises = (0.01, 0.02, 0.03, 0.04, 0.05)
+    # sweep_data = load_noise_sweep_data(BASE_DIR, datasets, distributions, noises=sweep_noises, grid="15x15")
+    # print_noise_sweep_latex(sweep_data, datasets, distributions, noises=sweep_noises)
+    # save_noise_sweep_csv(sweep_data, OUTPUT_DIR, noises=sweep_noises)
 
     # # ---------------------------------------------------------
     # # LAMa Flat Distribution Histograms

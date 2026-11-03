@@ -3,7 +3,7 @@
 #SBATCH --partition=normal
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
-#SBATCH --mem=480G
+#SBATCH --mem=180G
 #SBATCH --time=0-04:30:00
 
 # Probabilistic setting on the 50x50 grid:

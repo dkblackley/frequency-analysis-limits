@@ -15,7 +15,7 @@ PANEL_WIDTH = 10     # width of each individual histogram
 PANEL_HEIGHT = 5     # height of each individual histogram
 PAIR_GAP = 1.5       # gap between the LAMa and Falzon panels inside one group
 GROUP_GAP = 3.0      # gap between the "With Guarantees" and "Without Guarantees" groups
-ROW_GAP = 3.5        # vertical gap between dataset rows
+ROW_GAP = 2.75        # vertical gap between dataset rows
 FIG_WIDTH = None     # width of the entire figure; if set, PANEL_WIDTH is ignored and the panels
                      # are stretched/shrunk so the figure is exactly this wide
 
@@ -147,10 +147,10 @@ def plot_falzon_guarantees(paths, grid, dist, output_dir, colors, labels):
                     ax.set_title(f'{labels.get(method, method)}', fontsize=FONT_SIZE + 40)
 
                 if g == 0 and m == 0:
-                    ax.set_ylabel('# of Solutions', fontsize=FONT_SIZE + 0, y=LABEL_Y)
+                    ax.set_ylabel('# of Solutions', fontsize=FONT_SIZE - 5, y=LABEL_Y+0.1)
 
-                ax.tick_params(axis='x', labelsize=FONT_SIZE - 10)
-                ax.tick_params(axis='y', labelsize=FONT_SIZE - 10)
+                ax.tick_params(axis='x', labelsize=FONT_SIZE + 10)
+                ax.tick_params(axis='y', labelsize=FONT_SIZE + 5)
 
                 ax.yaxis.set_major_locator(MaxNLocator(nbins=4, integer=True))
                 ax.xaxis.set_major_locator(MaxNLocator(nbins=4, integer=True))
@@ -162,7 +162,7 @@ def plot_falzon_guarantees(paths, grid, dist, output_dir, colors, labels):
 
         # Rotated dataset name for this row
         fig.text(NAME_X / fig_width, (row_bottom + PANEL_HEIGHT / 2) / fig_height, format_db_name(dataset),
-                 va='center', ha='center', rotation='vertical', fontsize=FONT_SIZE + 20, fontweight='bold')
+                 va='center', ha='center', rotation='vertical', fontsize=FONT_SIZE + 0, fontweight='bold')
 
     # One giant x-axis label under the bottom row
     fig.text((LEFT_MARGIN + fig_width) / 2 / fig_width, (BOTTOM_MARGIN - XLABEL_Y) / fig_height,

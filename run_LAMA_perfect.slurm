@@ -13,8 +13,7 @@
 # Perfect knowledge (100% of queries, exact distribution):
 #   - every 2D dataset at 50x50 with t=3, on uniform/gaussian/beta
 #   - the 3D nh dataset (16x16x14) with t=4, on uniform/gaussian/beta
-# This is also the script that BUILDS the binary. The other three scripts
-# (run_LAMA_probs_2d, run_LAMA_probs_highdim, run_LAMA_noise) only use it.
+# Needs the binary built by build_bin.slurm (this script does not build).
 
 cd "$SLURM_SUBMIT_DIR"
 
@@ -22,46 +21,7 @@ module --quiet purge
 module load hosts/hopper
 module load singularity
 
-# ---------------------------------------
-# 1. Toolchain (only downloaded if missing, so concurrent jobs don't wipe each other)
-# ---------------------------------------
-ORTOOLS_DIR="/scratch/dblackle/ortools"
-CMAKE_DIR="/scratch/dblackle/cmake_portable"
-LLVM_DIR="/scratch/dblackle/llvm_portable"
 CONTAINER="/scratch/dblackle/rust_env.sif"
-
-if [ ! -d "$ORTOOLS_DIR/lib" ]; then
-    echo "Setting up OR-Tools..."
-    mkdir -p "$ORTOOLS_DIR" && cd "$ORTOOLS_DIR"
-    wget -q https://github.com/google/or-tools/releases/download/v9.15/or-tools_amd64_debian-12_cpp_v9.15.6755.tar.gz
-    tar -xf or-tools_amd64_debian-12_cpp_v9.15.6755.tar.gz --strip-components=1
-    rm or-tools_amd64_debian-12_cpp_v9.15.6755.tar.gz
-    cd "$SLURM_SUBMIT_DIR"
-fi
-
-if [ ! -x "$CMAKE_DIR/bin/cmake" ]; then
-    echo "Setting up portable CMake..."
-    mkdir -p "$CMAKE_DIR" && cd "$CMAKE_DIR"
-    wget -q https://github.com/Kitware/CMake/releases/download/v3.29.3/cmake-3.29.3-linux-x86_64.tar.gz
-    tar -xf cmake-3.29.3-linux-x86_64.tar.gz --strip-components=1
-    rm cmake-3.29.3-linux-x86_64.tar.gz
-    cd "$SLURM_SUBMIT_DIR"
-fi
-
-if [ ! -d "$LLVM_DIR/lib" ]; then
-    echo "Setting up portable LLVM/Clang..."
-    mkdir -p "$LLVM_DIR" && cd "$LLVM_DIR"
-    wget -q https://github.com/llvm/llvm-project/releases/download/llvmorg-16.0.4/clang+llvm-16.0.4-x86_64-linux-gnu-ubuntu-22.04.tar.xz
-    tar -xf clang+llvm-16.0.4-x86_64-linux-gnu-ubuntu-22.04.tar.xz --strip-components=1
-    rm clang+llvm-16.0.4-x86_64-linux-gnu-ubuntu-22.04.tar.xz
-    cd "$SLURM_SUBMIT_DIR"
-fi
-
-export SINGULARITYENV_ORTOOLS_PREFIX="$ORTOOLS_DIR"
-export SINGULARITYENV_LD_LIBRARY_PATH="$ORTOOLS_DIR/lib"
-export SINGULARITYENV_LIBRARY_PATH="$ORTOOLS_DIR/lib"
-export SINGULARITYENV_PREPEND_PATH="$CMAKE_DIR/bin"
-export SINGULARITYENV_LIBCLANG_PATH="$LLVM_DIR/lib"
 
 source /home/dblackle/miniconda3/etc/profile.d/conda.sh
 conda activate main
@@ -71,21 +31,16 @@ export SINGULARITYENV_RUST_LOG="debug"
 export SINGULARITYENV_RUST_BACKTRACE="1"
 export SINGULARITYENV_RAYON_NUM_THREADS=$SLURM_CPUS_PER_TASK
 
-SG_RUN="singularity exec --bind /scratch/dblackle --bind /scratch/dblackle/cargo:/usr/local/cargo $CONTAINER"
+# Same container and flags as build_bin.slurm; all runtime libs are in the image.
+SG_RUN="singularity exec --cleanenv --bind /scratch/dblackle $CONTAINER"
 
-## ---------------------------------------
-## 2. Build (no `cargo clean`: other jobs may be running the binary)
-## ---------------------------------------
-#echo "Building project inside container..."
-#$SG_RUN cargo rustc --bin frequency_analysis_limits --release -- -Clink-arg=-lprotobuf
-#if [ $? -ne 0 ]; then
-#    echo "Build failed."
-#    exit 1
-#fi
-#echo "Build finished."
+if [ ! -x ./target/release/frequency_analysis_limits ]; then
+    echo "Binary not found: build it first with build_bin.slurm."
+    exit 1
+fi
 
 # ---------------------------------------
-# 3. Runs
+# Runs
 # ---------------------------------------
 padding=0
 DISTS=("uniform" "gaussian" "beta")

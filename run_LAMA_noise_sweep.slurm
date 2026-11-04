@@ -17,7 +17,7 @@
 #SBATCH --output=logs/LAMA_noise_sweep_%A_%a.out
 #SBATCH --error=logs/LAMA_noise_sweep_%A_%a.err
 
-# Needs the binary built by run_LAMA_perfect.slurm (this script does not build).
+# Needs the binary built by build_bin.slurm (this script does not build).
 # Results: <db>/limits/<db>_<dist>_p1_noise<noise>_* (noise 0.0 -> <db>_<dist>_p1_*).
 
 cd "$SLURM_SUBMIT_DIR"
@@ -26,24 +26,17 @@ module --quiet purge
 module load hosts/hopper
 module load singularity
 
-ORTOOLS_DIR="/scratch/dblackle/ortools"
-CMAKE_DIR="/scratch/dblackle/cmake_portable"
-LLVM_DIR="/scratch/dblackle/llvm_portable"
 CONTAINER="/scratch/dblackle/rust_env.sif"
 
-export SINGULARITYENV_ORTOOLS_PREFIX="$ORTOOLS_DIR"
-export SINGULARITYENV_LD_LIBRARY_PATH="$ORTOOLS_DIR/lib"
-export SINGULARITYENV_LIBRARY_PATH="$ORTOOLS_DIR/lib"
 export SINGULARITYENV_RUST_LOG="debug"
 export SINGULARITYENV_RUST_BACKTRACE="1"
-export SINGULARITYENV_PREPEND_PATH="$CMAKE_DIR/bin"
-export SINGULARITYENV_LIBCLANG_PATH="$LLVM_DIR/lib"
 export SINGULARITYENV_RAYON_NUM_THREADS=$SLURM_CPUS_PER_TASK
 
-SG_RUN="singularity exec --bind /scratch/dblackle --bind /scratch/dblackle/cargo:/usr/local/cargo $CONTAINER"
+# Same container and flags as build_bin.slurm; all runtime libs are in the image.
+SG_RUN="singularity exec --cleanenv --bind /scratch/dblackle $CONTAINER"
 
 if [ ! -x ./target/release/frequency_analysis_limits ]; then
-    echo "Binary not found: build it first (run_LAMA_perfect.slurm builds it)."
+    echo "Binary not found: build it first with build_bin.slurm."
     exit 1
 fi
 if ! $SG_RUN ./target/release/frequency_analysis_limits --help | grep -q -- "--dist-noise"; then

@@ -657,7 +657,12 @@ impl Translator {
             for survived in &surviving_assignments {
                 let (is_valid, prob) = validate_candidate(&enc_t_tuple, survived);
                 if !is_valid {
-                    panic!("Solver broken! Returned invalid assignment.");
+                    if self.perfect {
+                        panic!("Solver broken! Returned invalid assignment.");
+                    }
+                    // Non-perfect fallback databases can have t-tuples outside epsilon
+                    costs.push(CpModel::OUTSIDE_EPSILON);
+                    continue;
                 }
                 costs.push((prob.powf(2.0) * 1_000_00.0).round() as i64);
                 // valid_plaintexts.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());

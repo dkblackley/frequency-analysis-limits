@@ -277,11 +277,25 @@ impl CpModel {
     /// where every t-tuple is within epsilon (so they are valid LAMa solutions).
     pub fn sampled_reconstructions(&self, largest_val: i64) -> Vec<Vec<i64>> {
         debug!("About to start trying to find solutions in the imperfect world...");
-        self.min_error_lns(largest_val, 250, 50, 2, Duration::from_millis(300), 100)
-            .into_iter()
+        let best = self.min_error_lns(largest_val, 64, 1500, 4, Duration::from_millis(250), 100);
+        if let Some(top) = best.first() {
+            info!(
+                "Best LNS database: {} t-tuples outside epsilon, in-epsilon error {}",
+                top.total_error / Self::OUTSIDE_EPSILON,
+                top.total_error % Self::OUTSIDE_EPSILON
+            );
+        }
+        let within: Vec<Vec<i64>> = best
+            .iter()
             .filter(|r| r.total_error < Self::OUTSIDE_EPSILON)
-            .map(|r| r.assignment)
-            .collect()
+            .map(|r| r.assignment.clone())
+            .collect();
+        if !within.is_empty() {
+            return within;
+        }
+        // No database had every t-tuple within epsilon: fall back to the lowest-error ones
+        warn!("No LNS database is fully within epsilon, falling back to the {} lowest-error ones", best.len());
+        best.into_iter().map(|r| r.assignment).collect()
     }
 
     /// Min-error LAMa: Large Neighbourhood Search (LNS) where every step is a small Pumpkin solve.
@@ -371,7 +385,6 @@ impl CpModel {
         let best_seen: Mutex<BTreeSet<(i64, Vec<i64>)>> = Mutex::new(BTreeSet::new());
         // Offer one database to the top-k; it is only cloned if it beats the current worst.
         let offer = |assignment: &[i64], total_error: i64| {
-            if total_error >= Self::OUTSIDE_EPSILON { return; } // a t-tuple is outside epsilon: not a LAMa solution
             let mut best = best_seen.lock().unwrap();
             if best.len() >= top_k && total_error >= best.last().map_or(i64::MAX, |w| w.0) { return; }
             best.insert((total_error, assignment.to_vec())); // BTreeSet drops exact duplicates
@@ -398,13 +411,25 @@ impl CpModel {
                 let mut total_error: i64 =
                     (0..self.table_constraints.len()).map(|t| t_tuple_error(&assignment, t)).sum();
                 if Self::KEEP_EVERY_VISITED { offer(&assignment, total_error); }
+                // Which t-tuples are currently outside epsilon
+                let mut outside: Vec<bool> = (0..self.table_constraints.len())
+                    .map(|t| t_tuple_error(&assignment, t) >= Self::OUTSIDE_EPSILON)
+                    .collect();
 
                 // 3. LNS steps.
                 for _ in 0..neighbourhoods_per_restart {
-                    let freed: Vec<usize> = all_records
-                        .choose_multiple(&mut rng, neighbourhood_size.min(self.num_vars))
-                        .copied()
-                        .collect();
+                    // Free the records of a random t-tuple outside epsilon (none left: purely
+                    // random), topped up with random records to neighbourhood_size.
+                    let violated: Vec<usize> = (0..outside.len()).filter(|&t| outside[t]).collect();
+                    let mut freed: Vec<usize> = match violated.choose(&mut rng) {
+                        Some(&t) => self.table_constraints[t].vars.clone(),
+                        None => Vec::new(),
+                    };
+                    let target = neighbourhood_size.min(self.num_vars).max(freed.len());
+                    for &var in all_records.choose_multiple(&mut rng, target) {
+                        if freed.len() >= target { break; }
+                        if !freed.contains(&var) { freed.push(var); }
+                    }
                     // Only t-tuples touching a freed record can change cost.
                     let mut touched: Vec<usize> =
                         freed.iter().flat_map(|&var| t_tuples_of_var[var].iter().copied()).collect();
@@ -428,6 +453,9 @@ impl CpModel {
                         let error_after: i64 = touched.iter().map(|&t| t_tuple_error(&assignment, t)).sum();
                         if error_after < error_before {
                             total_error += error_after - error_before;
+                            for &t in &touched {
+                                outside[t] = t_tuple_error(&assignment, t) >= Self::OUTSIDE_EPSILON;
+                            }
                             if Self::KEEP_EVERY_VISITED { offer(&assignment, total_error); }
                         } else {
                             for (var, value) in old_values {

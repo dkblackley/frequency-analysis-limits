@@ -6,7 +6,7 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=32
-#SBATCH --mem=3200G
+#SBATCH --mem=512G
 #SBATCH --time=2-00:30:00
 
 # Probabilistic setting (30% of queries, Gaussian only) on the higher-dim data:

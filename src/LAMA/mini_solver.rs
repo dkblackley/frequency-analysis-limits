@@ -285,17 +285,10 @@ impl CpModel {
                 top.total_error % Self::OUTSIDE_EPSILON
             );
         }
-        let within: Vec<Vec<i64>> = best
-            .iter()
+        best.into_iter()
             .filter(|r| r.total_error < Self::OUTSIDE_EPSILON)
-            .map(|r| r.assignment.clone())
-            .collect();
-        if !within.is_empty() {
-            return within;
-        }
-        // No database had every t-tuple within epsilon: fall back to the lowest-error ones
-        warn!("No LNS database is fully within epsilon, falling back to the {} lowest-error ones", best.len());
-        best.into_iter().map(|r| r.assignment).collect()
+            .map(|r| r.assignment)
+            .collect()
     }
 
     /// Min-error LAMa: Large Neighbourhood Search (LNS) where every step is a small Pumpkin solve.

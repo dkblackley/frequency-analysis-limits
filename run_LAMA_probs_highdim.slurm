@@ -5,6 +5,7 @@
 #SBATCH --error=LAMA_probs_highdim.err
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
+#SBATCH --cpus-per-task=32
 #SBATCH --mem=3200G
 #SBATCH --time=2-00:30:00
 

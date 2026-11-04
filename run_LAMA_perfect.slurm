@@ -7,6 +7,7 @@
 #SBATCH --error=LAMA_perfect.err
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
+#SBATCH --cpus-per-task=32
 #SBATCH --mem=480G
 #SBATCH --time=5-00:00:00
 

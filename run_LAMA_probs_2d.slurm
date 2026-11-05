@@ -4,7 +4,7 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=32
-#SBATCH --mem=90G
+#SBATCH --mem=240G
 #SBATCH --time=0-05:30:00
 
 # Probabilistic setting on the 50x50 grid:

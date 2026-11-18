@@ -200,12 +200,13 @@ impl<'a> PairLns<'a> {
         // 1. LAMa t = 1 step, shared by every restart.
         let all: Vec<usize> = (0..self.n).collect();
         let empty = vec![-1i64; self.n];
-        let Some(start_values) = self.solve_neighbourhood(&all, &empty, None, Duration::from_secs(5), cfg.max_rows_per_pair, true)
+        let Some(start_values) = self.solve_neighbourhood(&all, &empty, None, Duration::from_secs(60), cfg.max_rows_per_pair, true)
         else {
-            warn!("Pumpkin found no all-different database from the t = 1 tables");
+            warn!("Pumpkin found no all-different database from the t = 1 tables within 60 s");
             summary.lns_seconds = started.elapsed().as_secs_f64();
             return (Vec::new(), summary);
         };
+        info!("t = 1 start found {:.1}s after the LNS began", started.elapsed().as_secs_f64());
         let mut start = empty.clone();
         for (var, value) in start_values {
             start[var] = value;

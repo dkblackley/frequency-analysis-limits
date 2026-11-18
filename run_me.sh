@@ -16,9 +16,10 @@
 #   4. refreshes logs/resource_usage.tsv from sacct/sstat: per job its state, elapsed / limit, ACTUAL peak
 #      memory vs requested, and for running jobs how far the LNS got (from the log)
 #   5. submits every config that has no new-format result and no queued/running job, sizing each job from
-#      its own history: OOM -> 2x memory (bigmem past NORMAL_MAX_GB), TIMEOUT -> 2x time, a run that hit its
-#      LNS deadline before OUTPUTS (1000) consistent databases -> rerun with 2x time, and a config that
-#      completed before asks for its real peak + 50% instead of the default. First attempts ask small
+#      its own history: OOM -> 2x memory (bigmem past NORMAL_MAX_GB), TIMEOUT (slurm killed it, no result)
+#      -> 2x time, and a config that completed before asks for its real peak + 50% instead of the default.
+#      A run that hit its LNS deadline before OUTPUTS (1000) consistent databases is rerun with the SAME
+#      time limit (more time did not help: runs converge in < 1 h or stall). First attempts ask small
 #      (10 GB, 1-8 h by dataset size) so they start quickly.
 #   6. prints the status table
 # A result counts as done only if results_*.json was written by the pair-LNS code (it has an "lns" field);
@@ -30,10 +31,11 @@ set -uo pipefail
 # ---------------------------------------------------------------- sweep definition
 GRID_2D="${GRID_2D:-50x50}"
 NAMES_2D=(drink spitz busstop cali highway shopparis)
-read -r -a DISTS <<< "${DISTS:-uniform gaussian beta}"
-read -r -a PROBS <<< "${PROBS:-0.01 0.02 0.05 0.1 0.2 0.3}"
+# (arrays get their own names: bash cannot export arrays, so reusing PROBS etc. lost them on the restart)
+read -r -a DISTS_ARR <<< "${DISTS:-uniform gaussian beta}"
+read -r -a PROBS_ARR <<< "${PROBS:-0.01 0.02 0.05 0.1 0.2 0.3}"
 HIGHDIM_DIST="${HIGHDIM_DIST:-gaussian}"
-read -r -a HIGHDIM_PROBS <<< "${HIGHDIM_PROBS:-0.3}"
+read -r -a HIGHDIM_PROBS_ARR <<< "${HIGHDIM_PROBS:-0.3}"
 
 # ---------------------------------------------------------------- resources
 # Measured: Spitz 50x50 peaks at 4.1 GB, nearly all of it the 50x50 query distribution (same for every
@@ -70,21 +72,24 @@ configs() {
     local names=("$@") n d p
     [[ ${#names[@]} -eq 0 ]] && names=("${NAMES_2D[@]}")
     for n in "${names[@]}"; do
-        for d in "${DISTS[@]}"; do
-            for p in "${PROBS[@]}"; do
+        for d in "${DISTS_ARR[@]}"; do
+            for p in "${PROBS_ARR[@]}"; do
                 echo "${n}_${d}_p${p}@${GRID_2D} $n $GRID_2D 2 $d $p $MEM_2D_GB $(time_2d "$n" "$p") $CPUS_2D"
             done
         done
     done
     if [[ "${HIGHDIM:-0}" == 1 ]]; then
-        for p in "${HIGHDIM_PROBS[@]}"; do
+        for p in "${HIGHDIM_PROBS_ARR[@]}"; do
             # nh/grid <=5D: the query distribution is <= 4M queries, a few GB. 6D is 86M queries (old runs
             # needed hundreds of GB just for that), and its search is likely too slow to converge in time.
-            echo "nh_${HIGHDIM_DIST}_p${p}@16x16x14 nh 16x16x14 3 $HIGHDIM_DIST $p 16 12 32"
+            # times from the 2026-11-17 runs: nh used all of 12 h, 4D all of 4 h (367 of 1000 outputs),
+            # 2D/3D finished in minutes; 5D/6D never got past the start solve
+            echo "nh_${HIGHDIM_DIST}_p${p}@16x16x14 nh 16x16x14 3 $HIGHDIM_DIST $p 16 24 32"
             local dim dir
             for dim in 2 3 4 5 6; do
                 dir=$(printf '6%.0s' $(seq 1 "$dim") | sed 's/./&x/g; s/x$//')
-                if [[ $dim -le 4 ]]; then echo "grid${dim}d_${HIGHDIM_DIST}_p${p}@$dir grid $dir $dim $HIGHDIM_DIST $p 8 4 16"
+                if [[ $dim -le 3 ]]; then echo "grid${dim}d_${HIGHDIM_DIST}_p${p}@$dir grid $dir $dim $HIGHDIM_DIST $p 8 4 16"
+                elif [[ $dim -eq 4 ]]; then echo "grid${dim}d_${HIGHDIM_DIST}_p${p}@$dir grid $dir $dim $HIGHDIM_DIST $p 8 12 16"
                 elif [[ $dim -eq 5 ]]; then echo "grid${dim}d_${HIGHDIM_DIST}_p${p}@$dir grid $dir $dim $HIGHDIM_DIST $p 32 24 32"
                 else echo "grid${dim}d_${HIGHDIM_DIST}_p${p}@$dir grid $dir $dim $HIGHDIM_DIST $p 600 48 48"; fi
             done
@@ -93,7 +98,7 @@ configs() {
 }
 
 # first-attempt time limit (h): the search scales with the number of records, and 1-2% queries mean
-# bigger candidate sets. A run that hits its deadline before OUTPUTS databases gets 2x next time.
+# bigger candidate sets. A run that hits its deadline before OUTPUTS databases is rerun with the same time.
 time_2d() {
     local n=$1 p=$2 h
     case "$n" in spitz) h=1 ;; drink) h=2 ;; *) h=4 ;; esac
@@ -265,8 +270,7 @@ main() {
             status_lines+=("GAVE UP  $key  $attempts attempts, last $last: see $LOGDIR/${jn}_*.err (MAX_ATTEMPTS=$MAX_ATTEMPTS)")
             continue
         fi
-        # hit its LNS deadline before OUTPUTS consistent databases: twice the time it had
-        [[ "$rstate" == more ]] && time=$(awk -v l="$lim" -v t="$time" 'BEGIN { x = 2 * l; if (t > x) x = t; printf "%d", x + 0.5 }')
+        # hit its LNS deadline before OUTPUTS consistent databases: rerun with the default time (no doubling)
         case "$last" in
             OUT_OF_MEMORY) mem=$(awk -v r="$req" -v p="$peak" -v m="$mem" 'BEGIN { x = 2 * r; if (1.5 * p > x) x = 1.5 * p; if (m > x) x = m; printf "%d", x + 0.5 }') ;;
             TIMEOUT)       time=$(awk -v l="$lim" -v t="$time" 'BEGIN { x = 2 * l; if (t > x) x = t; printf "%d", x + 0.5 }') ;;

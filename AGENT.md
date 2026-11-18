@@ -84,7 +84,16 @@ figures/                    Intermediate JSON for figures (mostly not on the lap
       re-solve in Pumpkin minimising (pairs outside eps, then error), keep only if exactly better. Pairs with
       both records freed keep at most `--lns-max-rows` (1000) lowest-cost rows (tested 500/1000/2000/20000
       on Spitz 50x50 10%: 20000 never converged in 4 min, <=2000 did; 1000 found the most distinct DBs).
-      Each restart does 1500 steps; with `--lns-hours` it continues past 1500 while still inconsistent.
+      Each restart does 1500 steps; with `--lns-hours` it continues past 1500 while still inconsistent,
+      but (since 2026-11-18) is abandoned after `--lns-stall-steps` (1500) steps without improving, and
+      new restarts (fresh seeds, past 64) keep starting until the deadline or the output target. Before
+      that, only the first #CPU restarts ever ran under a deadline (stuck ones ground until it), which is
+      why failed Nov-17 runs report 17 databases. The t = 1 start is ALWAYS a Pumpkin solve, 60 s (was 5 s: 40
+      of 132 Nov-17 jobs found no start and wrote nothing, although exit code 0 / COMPLETED). If it still
+      finds none, lama_attack returns RestartNeeded and main.rs reruns the WHOLE pipeline (new query
+      sample), up to `--max-pipeline-attempts` (10), later attempts getting what is left of --lns-hours.
+      results `lns.pipeline_attempt` says which attempt produced the result. The user wants every
+      solve to stay a Pumpkin CSP solve: do NOT add non-CSP shortcuts (e.g. a bipartite matching start).
     - phase 2: from a fully consistent database, `sample_neighbour` re-assigns a few random records to a
       DIFFERENT assignment keeping every touched pair within eps (values in shuffled order) and records
       every distinct database, until `--lns-outputs` (1000) are found or the deadline passes.
@@ -146,7 +155,9 @@ run_me.sh: git pull --ff-only -> build_bin.slurm if bin/lama is older than src (
 log) -> submits each config without a finished pair-LNS result and not queued, job name
 `LAMa_<name>_<dist>_p<q>_<grid>`, logs in `logs/lama/<jobname>_<jobid>.{out,err}`. Sizing: first attempt
 10 GB / 16 CPUs / 1 h (spitz), 2 h (drink), 4 h (others), x2 at <=2%; OOM -> 2x memory (bigmem > 170 GB);
-TIMEOUT -> 2x time; a run that hit its LNS deadline before 1000 outputs -> rerun with 2x time. The LNS gets
+TIMEOUT -> 2x time; a run that hit its LNS deadline before 1000 outputs -> rerun with the SAME time
+(runs converge in < 1 h or stall; more time did not help). High-dim limits: nh 24 h, grid 2-3D 4 h, 4D 12 h,
+5D 24 h, 6D 48 h. The LNS gets
 85% of the limit minus 15 min, so jobs normally finish and write results. Re-run run_me.sh to resubmit
 whatever failed; it never deletes results. Partitions: normal (7 days, 180 GB+ nodes), bigmem (1 TB).
 
@@ -176,6 +187,13 @@ Python needs numpy, scipy, matplotlib, tqdm (no system env has scipy; make a ven
   `plot_falzon_guarantees.py` reuses LAMa's histogram for gaussian/beta in the "Without Guarantees" panels.
 - `print_noise_table.py`: TV-noise tables (15x15, p=1, exact frequencies, one run per cell, noise seed 1337).
 - Others: grid-vs-MSE, box plots, histograms, running time, spatial reconstructions (names say what).
+
+## Nov-17 sweep outcome (checked 2026-11-18)
+
+~45 configs reached 1000 consistent DBs (mostly spitz/drink, small p; busstop/shopparis some). The rest:
+start-solve failure (fixed above) or stalled. Convergence gets HARDER with more queries (tighter eps): at
+20-30% cali/highway/shopparis best restarts were 2.5k-85k pairs outside eps. true_db_in_output is False
+everywhere. `bash run_me.sh status` only lists configs for the PROBS/HIGHDIM it is given.
 
 ## Rebuttal status (2026-11-17)
 

@@ -1,7 +1,7 @@
 use clap::Parser;
 use frequency_analysis_limits::plotting::post::export_to_geo_and_align;
-use frequency_analysis_limits::LAMA::{lama_attack, SampledSearch};
-use log::{debug, info};
+use frequency_analysis_limits::LAMA::{lama_attack, AttackOutcome, SampledSearch};
+use log::{debug, error, info};
 
 // Helps rayon when calling malloc
 #[global_allocator]
@@ -69,6 +69,16 @@ pub struct Args {
     /// Sampled setting: how many distinct databases (all pairs within epsilon) to output, lowest error first
     #[arg(long, default_value = "1000")]
     lns_outputs: usize,
+
+    /// Sampled setting with --lns-hours: a restart still outside epsilon is abandoned (and a new one
+    /// started) after this many LNS steps without improving. Restarts that become consistent never are
+    #[arg(long, default_value = "1500")]
+    lns_stall_steps: usize,
+
+    /// Sampled setting: if Pumpkin finds no t = 1 start, rerun the whole pipeline (new query sample)
+    /// up to this many times in total. Later runs get what is left of --lns-hours
+    #[arg(long, default_value = "10")]
+    max_pipeline_attempts: usize,
 }
 
 fn main() {
@@ -88,23 +98,47 @@ fn main() {
     );
 
     if !args.skip_lama {
-        lama_attack(
-            &args.name,
-            &args.dir_path,
-            &args.dist,
-            &args.t,
-            &args.dim,
-            &args.padding,
-            &args.save,
-            &args.query_percent,
-            &args.dist_noise,
-            &SampledSearch {
-                restarts: args.lns_restarts,
-                lns_hours: args.lns_hours,
-                max_rows_per_pair: args.lns_max_rows,
-                outputs: args.lns_outputs,
-            },
-        );
+        let job_start = std::time::Instant::now();
+        for attempt in 1..=args.max_pipeline_attempts.max(1) {
+            // later attempts only get what is left of the LNS budget, so the job still ends in time
+            let lns_hours = if args.lns_hours > 0.0 {
+                let left = args.lns_hours - job_start.elapsed().as_secs_f64() / 3600.0;
+                if left <= 0.0 {
+                    error!("No LNS time left for pipeline attempt {attempt}; giving up");
+                    break;
+                }
+                left
+            } else {
+                0.0
+            };
+            let outcome = lama_attack(
+                &args.name,
+                &args.dir_path,
+                &args.dist,
+                &args.t,
+                &args.dim,
+                &args.padding,
+                &args.save,
+                &args.query_percent,
+                &args.dist_noise,
+                &SampledSearch {
+                    restarts: args.lns_restarts,
+                    lns_hours,
+                    max_rows_per_pair: args.lns_max_rows,
+                    outputs: args.lns_outputs,
+                    stall_steps: args.lns_stall_steps,
+                    pipeline_attempt: attempt,
+                },
+            );
+            if outcome != AttackOutcome::RestartNeeded {
+                break;
+            }
+            if attempt == args.max_pipeline_attempts.max(1) {
+                error!("Pumpkin found no t = 1 start in {attempt} pipeline attempts; giving up (nothing written)");
+            } else {
+                info!("Restarting the whole pipeline (attempt {} of {})", attempt + 1, args.max_pipeline_attempts);
+            }
+        }
     }
 
     // Do post-processing - export to GeoJSON and align

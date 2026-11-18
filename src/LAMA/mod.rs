@@ -30,6 +30,15 @@ pub mod solver;
 pub mod translator;
 pub mod utility;
 
+/// What lama_attack did. RestartNeeded: Pumpkin found no t = 1 start (sampled setting); the caller
+/// reruns the whole pipeline, which draws a new query sample.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AttackOutcome {
+    Finished,
+    RestartNeeded,
+    Failed,
+}
+
 /// Knobs for the sampled (query_percent < 1) search, see lazy_lns::LnsConfig.
 #[derive(Clone, Debug)]
 pub struct SampledSearch {
@@ -40,11 +49,15 @@ pub struct SampledSearch {
     pub max_rows_per_pair: usize,
     /// How many distinct databases to output
     pub outputs: usize,
+    /// With lns_hours: abandon a still-inconsistent restart after this many steps without improving
+    pub stall_steps: usize,
+    /// Which run of the whole pipeline this is (recorded in the results; main.rs reruns on start failure)
+    pub pipeline_attempt: usize,
 }
 
 impl Default for SampledSearch {
     fn default() -> Self {
-        Self { restarts: 64, lns_hours: 0.0, max_rows_per_pair: 1_000, outputs: 1000 }
+        Self { restarts: 64, lns_hours: 0.0, max_rows_per_pair: 1_000, outputs: 1000, stall_steps: 1500, pipeline_attempt: 1 }
     }
 }
 
@@ -121,7 +134,7 @@ pub fn lama_attack(
     query_percent: &f64,
     dist_noise: &f64,
     sampled_search: &SampledSearch,
-) {
+) -> AttackOutcome {
     let loaded_db: Box<dyn Searchable + Sync>;
     let full_datapath = format!("{0}/{1}", dir_path, db_name);
 
@@ -322,14 +335,20 @@ pub fn lama_attack(
             restarts: sampled_search.restarts,
             max_rows_per_pair: sampled_search.max_rows_per_pair,
             target_outputs: sampled_search.outputs,
+            stall_steps: sampled_search.stall_steps,
             deadline: (sampled_search.lns_hours > 0.0)
                 .then(|| Instant::now() + Duration::from_secs_f64(sampled_search.lns_hours * 3600.0)),
             ..LnsConfig::default()
         };
-        let (found, summary) = lns.run(&cfg);
+        let (found, mut summary) = lns.run(&cfg);
+        summary.pipeline_attempt = sampled_search.pipeline_attempt;
+        if summary.start_failed {
+            error!("Pumpkin found no t = 1 start: restart needed (nothing written)");
+            return AttackOutcome::RestartNeeded;
+        }
         if found.is_empty() {
             error!("Pair LNS found no reconstruction at all");
-            return;
+            return AttackOutcome::Failed;
         }
         translator.metadata.recons_per_t.insert(2, found.len());
         responses = enc_of_var
@@ -372,7 +391,7 @@ pub fn lama_attack(
             trace!("Intvars workings: {:?}", solver);
             trace!("CPModel: {:?}", model);
             debug!("Solver Status: {:?}", solver.solution_stat);
-            return;
+            return AttackOutcome::Failed;
         }
     }
     let end = Instant::now();
@@ -431,6 +450,7 @@ pub fn lama_attack(
     }
 
     info!("LAMA finished running on {db_name}");
+    AttackOutcome::Finished
 }
 fn save_results(result: DbResult, file_path: &str) -> Result<(), LAMAError> {
     // Create the file and wrap it in a BufWriter for better performance

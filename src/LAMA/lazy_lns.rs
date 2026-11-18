@@ -13,7 +13,13 @@
 //!     per restart before, the Pumpkin brancher is deterministic);
 //!   * a pair with BOTH records freed keeps at most `max_rows_per_pair` lowest-cost rows in the
 //!     Pumpkin model (at 1% queries a pair can have ~10^5 valid rows);
-//!   * an optional wall-clock deadline, after which restarts stop and report what they have.
+//!   * an optional wall-clock deadline, after which restarts stop and report what they have;
+//!   * with a deadline, a restart that is still outside epsilon after `steps_per_restart` steps is
+//!     abandoned once it has gone `stall_steps` steps without improving, and new restarts (fresh seeds,
+//!     past `restarts` if needed) keep starting until the deadline or `target_outputs` databases.
+//!     Restarts that reach consistency are never abandoned (phase 2 is unchanged);
+//!   * if Pumpkin finds no t = 1 start within 60 s, `start_failed` is set and main.rs reruns the whole
+//!     pipeline (new query sample) instead of giving up.
 
 use crate::LAMA::mini_solver::{CpModel, ScoredReconstruction};
 use log::{debug, info, warn};
@@ -46,6 +52,8 @@ pub struct LnsConfig {
     /// How many distinct databases to output (see `sample_neighbour`)
     pub target_outputs: usize,
     pub deadline: Option<Instant>,
+    /// With a deadline: abandon a still-inconsistent restart after this many steps without improving
+    pub stall_steps: usize,
 }
 
 impl Default for LnsConfig {
@@ -58,6 +66,7 @@ impl Default for LnsConfig {
             max_rows_per_pair: 1_000,
             target_outputs: 1000,
             deadline: None,
+            stall_steps: 1500,
         }
     }
 }
@@ -84,6 +93,15 @@ pub struct LnsSummary {
     pub true_db_t1_missing: usize,
     pub true_db_in_output: bool,
     pub restarts_finished: usize,
+    /// Restarts given up while still outside epsilon (no improvement in stall_steps steps)
+    #[serde(default)]
+    pub restarts_abandoned: usize,
+    /// Pumpkin found no t = 1 start within 60 s (the pipeline is then restarted from scratch)
+    #[serde(default)]
+    pub start_failed: bool,
+    /// Which run of the whole pipeline produced this result (1 = first; >1 after start failures)
+    #[serde(default)]
+    pub pipeline_attempt: usize,
     pub lns_steps: usize,
     pub hit_deadline: bool,
     pub lns_seconds: f64,
@@ -202,7 +220,9 @@ impl<'a> PairLns<'a> {
         let empty = vec![-1i64; self.n];
         let Some(start_values) = self.solve_neighbourhood(&all, &empty, None, Duration::from_secs(60), cfg.max_rows_per_pair, true)
         else {
-            warn!("Pumpkin found no all-different database from the t = 1 tables within 60 s");
+            // The caller restarts the whole pipeline (new query sample) when this is set
+            warn!("Pumpkin found no all-different database from the t = 1 tables within 60 s: restart needed");
+            summary.start_failed = true;
             summary.lns_seconds = started.elapsed().as_secs_f64();
             return (Vec::new(), summary);
         };
@@ -226,17 +246,20 @@ impl<'a> PairLns<'a> {
         // Every distinct fully consistent database found (phase 2), with its total error
         let pool: Mutex<FxHashMap<Vec<i64>, i64>> = Mutex::new(FxHashMap::default());
         let restarts_consistent = AtomicUsize::new(0);
+        let restarts_abandoned = AtomicUsize::new(0);
+        let restarts_started = AtomicUsize::new(0);
         let attempts_per_restart = 20 * cfg.target_outputs.div_ceil(cfg.restarts.max(1)) + 50;
         let pb = indicatif::ProgressBar::new((cfg.restarts * cfg.steps_per_restart) as u64);
         let last_log = Mutex::new(Instant::now());
 
-        (0..cfg.restarts).into_par_iter().for_each(|restart| {
+        let run_restart = |restart: usize| {
             let mut rng = rand::rngs::StdRng::seed_from_u64(restart as u64);
             let mut assignment = start.clone();
             let mut viol = start_viol.clone();
             let mut total = start_err;
 
             let mut step = 0usize;
+            let mut steps_since_improvement = 0usize;
             loop {
                 if cfg.deadline.is_some_and(|d| Instant::now() >= d) {
                     hit_deadline.store(true, Ordering::Relaxed);
@@ -251,7 +274,18 @@ impl<'a> PairLns<'a> {
                 if step >= cfg.steps_per_restart && (cfg.deadline.is_none() || total < Self::OUTSIDE_EPSILON) {
                     break;
                 }
+                // ...but one that has stopped improving is abandoned, so a fresh restart gets the thread
+                if step >= cfg.steps_per_restart && steps_since_improvement >= cfg.stall_steps {
+                    restarts_abandoned.fetch_add(1, Ordering::Relaxed);
+                    info!(
+                        "Restart {restart} abandoned after {step} steps: {} pairs outside epsilon, no improvement in {} steps",
+                        total / Self::OUTSIDE_EPSILON,
+                        steps_since_improvement
+                    );
+                    break;
+                }
                 step += 1;
+                steps_since_improvement += 1;
                 // Free a random violated pair (none left: purely random), topped up with random records.
                 let violated_vars: Vec<usize> = (0..self.n).filter(|&v| viol[v] > 0).collect();
                 let mut freed: Vec<usize> = Vec::new();
@@ -288,6 +322,7 @@ impl<'a> PairLns<'a> {
                     // Re-score exactly; keep the change only if it is better.
                     let after = self.local_error(&freed, &assignment);
                     if after.0 < before.0 {
+                        steps_since_improvement = 0;
                         total += after.0 - before.0;
                         for &(i, j) in &before.1 {
                             viol[i] -= 1;
@@ -324,7 +359,9 @@ impl<'a> PairLns<'a> {
                     );
                 }
             }
-            finals.lock().unwrap().insert((total, assignment.clone()));
+            if step > 0 {
+                finals.lock().unwrap().insert((total, assignment.clone()));
+            }
 
             // Phase 2: from a fully consistent database, walk to neighbouring fully consistent
             // databases (sample_neighbour) and keep every distinct one, until the pool is full.
@@ -367,8 +404,29 @@ impl<'a> PairLns<'a> {
                 }
             }
             restarts_finished.fetch_add(1, Ordering::Relaxed);
+        };
+        // One worker per thread pulls restart ids. Without a deadline: exactly cfg.restarts restarts (as
+        // before). With one: new restarts keep starting until the deadline or the pool is full.
+        let next_restart = AtomicUsize::new(0);
+        (0..rayon::current_num_threads().max(1)).into_par_iter().for_each(|_| loop {
+            if pool.lock().unwrap().len() >= cfg.target_outputs || cfg.deadline.is_some_and(|d| Instant::now() >= d) {
+                break;
+            }
+            let restart = next_restart.fetch_add(1, Ordering::Relaxed);
+            if cfg.deadline.is_none() && restart >= cfg.restarts {
+                break;
+            }
+            restarts_started.fetch_add(1, Ordering::Relaxed);
+            run_restart(restart);
         });
         pb.finish();
+        if cfg.deadline.is_some_and(|d| Instant::now() >= d) {
+            hit_deadline.store(true, Ordering::Relaxed);
+        }
+        // every restart started too late to take a step: report the t = 1 start
+        if finals.lock().unwrap().is_empty() {
+            finals.lock().unwrap().insert((start_err, start.clone()));
+        }
 
         let finals: Vec<ScoredReconstruction> = finals
             .into_inner()
@@ -378,6 +436,13 @@ impl<'a> PairLns<'a> {
             .collect();
 
         summary.restarts_finished = restarts_finished.load(Ordering::Relaxed);
+        summary.restarts_abandoned = restarts_abandoned.load(Ordering::Relaxed);
+        info!(
+            "{} restarts started, {} abandoned (stalled), {} reached consistency",
+            restarts_started.load(Ordering::Relaxed),
+            summary.restarts_abandoned,
+            restarts_consistent.load(Ordering::Relaxed)
+        );
         summary.lns_steps = steps_done.load(Ordering::Relaxed);
         summary.hit_deadline = hit_deadline.load(Ordering::Relaxed);
         summary.fully_consistent = finals.iter().filter(|r| r.total_error < Self::OUTSIDE_EPSILON).count();

@@ -78,13 +78,15 @@ configs() {
     done
     if [[ "${HIGHDIM:-0}" == 1 ]]; then
         for p in "${HIGHDIM_PROBS[@]}"; do
-            echo "nh_${HIGHDIM_DIST}_p${p}@16x16x14 nh 16x16x14 3 $HIGHDIM_DIST $p 48 24 32"
+            # nh/grid <=5D: the query distribution is <= 4M queries, a few GB. 6D is 86M queries (old runs
+            # needed hundreds of GB just for that), and its search is likely too slow to converge in time.
+            echo "nh_${HIGHDIM_DIST}_p${p}@16x16x14 nh 16x16x14 3 $HIGHDIM_DIST $p 16 12 32"
             local dim dir
             for dim in 2 3 4 5 6; do
                 dir=$(printf '6%.0s' $(seq 1 "$dim") | sed 's/./&x/g; s/x$//')
-                if [[ $dim -le 4 ]]; then echo "grid${dim}d_${HIGHDIM_DIST}_p${p}@$dir grid $dir $dim $HIGHDIM_DIST $p 32 24 32"
-                elif [[ $dim -eq 5 ]]; then echo "grid${dim}d_${HIGHDIM_DIST}_p${p}@$dir grid $dir $dim $HIGHDIM_DIST $p 96 48 32"
-                else echo "grid${dim}d_${HIGHDIM_DIST}_p${p}@$dir grid $dir $dim $HIGHDIM_DIST $p 700 96 48"; fi
+                if [[ $dim -le 4 ]]; then echo "grid${dim}d_${HIGHDIM_DIST}_p${p}@$dir grid $dir $dim $HIGHDIM_DIST $p 8 4 16"
+                elif [[ $dim -eq 5 ]]; then echo "grid${dim}d_${HIGHDIM_DIST}_p${p}@$dir grid $dir $dim $HIGHDIM_DIST $p 32 24 32"
+                else echo "grid${dim}d_${HIGHDIM_DIST}_p${p}@$dir grid $dir $dim $HIGHDIM_DIST $p 600 48 48"; fi
             done
         done
     fi

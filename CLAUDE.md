@@ -1,4 +1,4 @@
-# AGENT.md: how this repository works
+# CLAUDE.md: how this repository works
 
 Read this first. It describes what each file does, where results live, how experiments are run, and the
 non-obvious things that have bitten people before. Last updated 2026-11-17 (NDSS rebuttal, Reviewer 356A).
@@ -49,6 +49,8 @@ tests/integration.rs        End-to-end tests on small DBs. NOTE: end_to_end_samp
 plotting/                   Python plots/tables for the paper (see "Plotting" below).
 run_me.sh                   Cluster driver (hopper): pull, build, submit missing configs, track resources.
 run_lama_one.slurm          One LAMa config; submitted by run_me.sh with all sizes on the command line.
+merge_runs.py               Merges the runs <grid>_run0..N of one config round-robin (dedup, cut at 1000)
+                            into <grid>/<name>/limits/ (results JSON gets "merged_from"). Called by run_me.sh.
 build_bin.slurm             Builds in the singularity container; snapshots to bin/lama_<ts>_<hash>, bin/lama symlink.
 run_LAMA_*.slurm            Older array scripts (perfect, probs_2d, probs_highdim, noise, noise_sweep).
 local_run.sh, local_run_noise_sweep.sh   Local equivalents of the slurm scripts.
@@ -85,7 +87,9 @@ figures/                    Intermediate JSON for figures (mostly not on the lap
       both records freed keep at most `--lns-max-rows` (1000) lowest-cost rows (tested 500/1000/2000/20000
       on Spitz 50x50 10%: 20000 never converged in 4 min, <=2000 did; 1000 found the most distinct DBs).
       Each restart does 1500 steps; with `--lns-hours` it continues past 1500 while still inconsistent,
-      but (since 2026-11-18) is abandoned after `--lns-stall-steps` (1500) steps without improving, and
+      but (since 2026-11-18) is abandoned after `--lns-stall-steps` (5000; 4x that for a restart at most
+      `--lns-near-pairs` (20) pairs outside eps; 1500 flat was too short: drink/spitz restarts were dropped
+      1-5 pairs from consistent) steps without improving, and
       new restarts (fresh seeds, past 64) keep starting until the deadline or the output target. Before
       that, only the first #CPU restarts ever ran under a deadline (stuck ones ground until it), which is
       why failed Nov-17 runs report 17 databases. The t = 1 start is ALWAYS a Pumpkin solve, 60 s (was 5 s: 40
@@ -99,7 +103,11 @@ figures/                    Intermediate JSON for figures (mostly not on the lap
       every distinct database, until `--lns-outputs` (1000) are found or the deadline passes.
     - output: the distinct fully consistent databases sorted by total error (index 0 = lowest error). If
       none were found: the restarts' best databases, flagged `output_is_consistent: false`.
-    - also scores the TRUE database under the same objective (`true_db_*` fields).
+    - also scores the TRUE database under the same objective (`true_db_*` fields), and records
+      `centroid_mse` / `mean_db_mse` / `first_db_mse` to the truth (info only, no alignment).
+    - keep-better: if results_<...>.json already exists in the output dir, the better of old/new by
+      `sampled_rank` (consistent, #consistent DBs, -pairs outside, -error: attacker-side only, NEVER the
+      truth/MSE) stays; the other goes to limits/archive_other_runs/<ts>/.
     Why: the old sampled path built every t=2 table (1.4e9 rows for Shanghai 50x50 30%) and OOMed at 240 GB
     for every dataset except Amsterdam/Spitz; 1% OOMed/timed out; 5% panicked when no consistent DB was found.
     Measured new: Spitz 50x50 10% uniform: 1000 consistent DBs, 1.5 GB peak, ~6 min on 16 laptop threads.
@@ -121,6 +129,11 @@ figures/                    Intermediate JSON for figures (mostly not on the lap
   - sampled: `<name>_<dist>_p<q>_reconstruction.json` and `results_<name>_<dist>_p<q>.json`, q in Rust f64
     Display (0.01, 0.1, 0.3; 1.0 -> "1").
   - noisy distribution: `..._p1_noise<tv>...` (15x15 TV sweep).
+  - 2D sampled (since 2026-11-18): 3 independent runs in `databases/50x50_run{1,2,3}/<name>/limits/`
+    (input json symlinked from 50x50), `50x50_run0` = best earlier single run; the MERGE is what sits in
+    `50x50/<name>/limits/` (`merged_from` = DBs used per run). Runs draw their own query samples, so a
+    merged DB is consistent with its own run's sample. High-dim stays single runs.
+  - `archive_other_runs/<ts>/`: displaced results (keep-better, or a merge replacing what was there);
   - `archive_pre_lns/`: results from the old sampled code, copied by run_me.sh before rerunning;
     `archive_short_runs/<ts>/`: pair-LNS runs that hit their deadline before 1000 outputs.
 - Reconstruction JSON: list of databases; each a list of {"true": [...], "reconstructed": [...],
@@ -159,7 +172,9 @@ TIMEOUT -> 2x time; a run that hit its LNS deadline before 1000 outputs -> rerun
 (runs converge in < 1 h or stall; more time did not help). High-dim limits: nh 24 h, grid 2-3D 4 h, 4D 12 h,
 5D 24 h, 6D 48 h. The LNS gets
 85% of the limit minus 15 min, so jobs normally finish and write results. Re-run run_me.sh to resubmit
-whatever failed; it never deletes results. Partitions: normal (7 days, 180 GB+ nodes), bigmem (1 TB).
+whatever failed; it never deletes results. 2D configs: RUNS=3 one-shot runs each (only runs with no result
+are resubmitted), merged when all are finished; a config whose 50x50 result already has 1000 consistent
+DBs gets no runs; merged < 100 consistent shows LOW in the status. RUNS=4 adds a run4. Partitions: normal (7 days, 180 GB+ nodes), bigmem (1 TB).
 
 Old (pre-2026-11-17) failure history, from sacct: job 3275393 (probs_2d array) and 3275408 (highdim).
 

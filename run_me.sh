@@ -21,7 +21,13 @@
 #      A run that hit its LNS deadline before OUTPUTS (1000) consistent databases is rerun with the SAME
 #      time limit (more time did not help: runs converge in < 1 h or stall). First attempts ask small
 #      (10 GB, 1-8 h by dataset size) so they start quickly.
-#   6. prints the status table
+#   6. 2D configs run RUNS (3) independent times into databases/<grid>_run<k>/ (one shot each: a run with
+#      any pair-LNS result is finished; only failures without a result are resubmitted). When all runs of
+#      a config are finished, merge_runs.py combines them round-robin (deduplicated, cut at OUTPUTS) into
+#      databases/<grid>/<name>/limits/, the place the plots read. A config whose result there already has
+#      OUTPUTS consistent databases gets no runs. More runs later: RUNS=4 bash run_me.sh adds a run4.
+#      High-dim configs (HIGHDIM=1) stay single runs in their own dir (queue time).
+#   7. prints the status table
 # A result counts as done only if results_*.json was written by the pair-LNS code (it has an "lns" field);
 # older results are copied to limits/archive_pre_lns/ before their config is rerun.
 # Everything it prints is also saved in logs/run_me/<timestamp>.log.
@@ -42,7 +48,9 @@ read -r -a HIGHDIM_PROBS_ARR <<< "${HIGHDIM_PROBS:-0.3}"
 # dataset); the old 240 GB was the t = 2 tables, gone now. Ask small so jobs start fast: an OOM doubles it.
 CPUS_2D="${CPUS_2D:-16}"
 MEM_2D_GB="${MEM_2D_GB:-10}"
-OUTPUTS="${OUTPUTS:-1000}"   # distinct consistent databases per run (--lns-outputs)
+OUTPUTS="${OUTPUTS:-1000}"   # distinct consistent databases per run (--lns-outputs) and per merged config
+RUNS="${RUNS:-3}"            # independent runs per 2D config, merged by merge_runs.py
+MIN_OUTPUTS=100              # a merged config with fewer consistent databases is flagged LOW in the status
 NORMAL_MAX_GB=170      # normal nodes have 180 GB; above this go to bigmem
 BIGMEM_MAX_GB=1000
 MAX_TIME_H=160         # partitions allow 7 days
@@ -68,13 +76,16 @@ to_hours() { # [D-]HH:MM:SS -> hours
 }
 
 # config line: key name dir dim dist prob default_mem_gb default_time_h cpus
+# (2D: one line per run, dir <grid>_run<k>; the merged result lives in <grid>)
 configs() {
-    local names=("$@") n d p
+    local names=("$@") n d p k
     [[ ${#names[@]} -eq 0 ]] && names=("${NAMES_2D[@]}")
     for n in "${names[@]}"; do
         for d in "${DISTS_ARR[@]}"; do
             for p in "${PROBS_ARR[@]}"; do
-                echo "${n}_${d}_p${p}@${GRID_2D} $n $GRID_2D 2 $d $p $MEM_2D_GB $(time_2d "$n" "$p") $CPUS_2D"
+                for k in $(seq 1 "$RUNS"); do
+                    echo "${n}_${d}_p${p}@${GRID_2D}_run$k $n ${GRID_2D}_run$k 2 $d $p $MEM_2D_GB $(time_2d "$n" "$p") $CPUS_2D"
+                done
             done
         done
     done
@@ -129,6 +140,17 @@ d = json.load(open(sys.argv[1])); l = d["lns"]
 print(f"{l['returned']} DBs ({'all consistent' if l['output_is_consistent'] else 'NOT consistent: best found'}), "
       f"true DB in output={l['true_db_in_output']}, true DB pairs outside eps={l['true_db_pairs_outside']}, "
       f"{d['time_taken'] / 3600:.2f}h{', hit deadline' if l['hit_deadline'] else ''}")
+PY
+}
+
+merged_note() { # results file -> ", merged: run1 300, run2 ..." (and LOW if < MIN_OUTPUTS)
+    python3 - "$1" "$MIN_OUTPUTS" <<'PY'
+import json, sys
+d = json.load(open(sys.argv[1])); m = d.get("merged_from")
+if m:
+    n = d.get("number_of_databases") or 0
+    low = "  LOW (< %s)" % sys.argv[2] if n < int(sys.argv[2]) or not d["lns"].get("output_is_consistent") else ""
+    print(", merged: " + " ".join(f"{k} {v['used']}" for k, v in m.items()) + low)
 PY
 }
 
@@ -245,12 +267,31 @@ main() {
 
     # 5. submit
     local n_done=0 n_queued=0 n_sub=0 n_giveup=0
-    local status_lines=()
+    local status_lines=() to_merge=()
     while read -r key name dir dim dist prob mem time cpus; do
         local jn; jn=$(job_name "$key")
         local res; res=$(result_file "$key" "$name" "$dir" "$dim" "$dist" "$prob")
         local rstate; rstate=$(result_state "$key" "$name" "$dir" "$dim" "$dist" "$prob")
-        if [[ "$rstate" == done || "$rstate" == exhausted ]]; then
+        if [[ "$dir" =~ ^(.+)_run([0-9]+)$ ]]; then
+            local base=${BASH_REMATCH[1]} run=${BASH_REMATCH[2]} bkey=${key%_run*}
+            local fstate; fstate=$(result_state "$bkey" "$name" "$base" "$dim" "$dist" "$prob")
+            # the result in <grid>/ (single run or merge) already has OUTPUTS consistent databases
+            if [[ "$fstate" == done ]]; then
+                [[ $run == 1 ]] && { n_done=$((n_done + 1)); status_lines+=("DONE     $bkey  $(result_line "$bkey" "$name" "$base" "$dim" "$dist" "$prob")$(merged_note "$(result_file "$bkey" "$name" "$base" "$dim" "$dist" "$prob")")"); }
+                continue
+            fi
+            [[ $run == 1 ]] && to_merge+=("$bkey $name $base $dim $dist $prob")
+            # one shot per run: any pair-LNS result (even with few consistent databases) finishes it
+            if [[ "$rstate" != none ]]; then
+                status_lines+=("RUN DONE $key  $(result_line "$key" "$name" "$dir" "$dim" "$dist" "$prob")")
+                continue
+            fi
+            # the run dir reads the input from <grid>/<name>/<name>.json
+            if [[ -z "${DRY_RUN:-}" && ! -e "$DB_ROOT/$dir/$name/$name.json" ]]; then
+                mkdir -p "$DB_ROOT/$dir/$name"
+                ln -s "../../$base/$name/$name.json" "$DB_ROOT/$dir/$name/$name.json"
+            fi
+        elif [[ "$rstate" == done || "$rstate" == exhausted ]]; then
             n_done=$((n_done + 1))
             status_lines+=("DONE     $key  $(result_line "$key" "$name" "$dir" "$dim" "$dist" "$prob")")
             continue
@@ -309,7 +350,25 @@ main() {
         status_lines+=("SUBMIT   $key  job $jid: $desc")
     done < <(configs "$@")
 
-    # 6. summary
+    # 6. merge the runs of every 2D config whose runs are all finished (merge_runs.py skips up-to-date ones)
+    if [[ -z "${DRY_RUN:-}" && ${#to_merge[@]} -gt 0 ]]; then
+        echo
+        echo "== merging runs ($RUNS per config) into $GRID_2D"
+        local m bkey name base dim dist prob k busy
+        for m in "${to_merge[@]}"; do
+            read -r bkey name base dim dist prob <<< "$m"
+            busy=0
+            for k in $(seq 1 "$RUNS"); do
+                grep -qx "$(job_name "${bkey}_run$k")" <<< "$queued" && busy=1
+                [[ -f "$(result_file "" "$name" "${base}_run$k" "$dim" "$dist" "$prob")" ]] || busy=1
+            done
+            (( busy )) && continue
+            echo "   $(python3 merge_runs.py --root "$DB_ROOT" --grid "$base" --name "$name" --dist "$dist" --prob "$prob" --runs "$RUNS" --outputs "$OUTPUTS" 2>&1 | tail -1)"
+            status_lines+=("MERGED   $bkey  $(result_line "$bkey" "$name" "$base" "$dim" "$dist" "$prob")$(merged_note "$(result_file "$bkey" "$name" "$base" "$dim" "$dist" "$prob")")")
+        done
+    fi
+
+    # 7. summary
     echo
     echo "== status ($n_done done, $n_queued queued/running, $n_sub submitted now, $n_giveup gave up)"
     printf '%s\n' "${status_lines[@]}" | sort

@@ -72,8 +72,12 @@ pub struct Args {
 
     /// Sampled setting with --lns-hours: a restart still outside epsilon is abandoned (and a new one
     /// started) after this many LNS steps without improving. Restarts that become consistent never are
-    #[arg(long, default_value = "1500")]
+    #[arg(long, default_value = "5000")]
     lns_stall_steps: usize,
+
+    /// Sampled setting: a restart at most this many pairs outside epsilon gets 4x --lns-stall-steps
+    #[arg(long, default_value = "20")]
+    lns_near_pairs: i64,
 
     /// Sampled setting: if Pumpkin finds no t = 1 start, rerun the whole pipeline (new query sample)
     /// up to this many times in total. Later runs get what is left of --lns-hours
@@ -127,6 +131,7 @@ fn main() {
                     max_rows_per_pair: args.lns_max_rows,
                     outputs: args.lns_outputs,
                     stall_steps: args.lns_stall_steps,
+                    near_pairs: args.lns_near_pairs,
                     pipeline_attempt: attempt,
                 },
             );

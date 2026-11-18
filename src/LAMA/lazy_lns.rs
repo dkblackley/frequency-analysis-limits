@@ -54,6 +54,8 @@ pub struct LnsConfig {
     pub deadline: Option<Instant>,
     /// With a deadline: abandon a still-inconsistent restart after this many steps without improving
     pub stall_steps: usize,
+    /// A restart at most this many pairs outside epsilon gets 4x stall_steps (it is close to consistent)
+    pub near_pairs: i64,
 }
 
 impl Default for LnsConfig {
@@ -66,7 +68,8 @@ impl Default for LnsConfig {
             max_rows_per_pair: 1_000,
             target_outputs: 1000,
             deadline: None,
-            stall_steps: 1500,
+            stall_steps: 5000,
+            near_pairs: 20,
         }
     }
 }
@@ -102,6 +105,17 @@ pub struct LnsSummary {
     /// Which run of the whole pipeline produced this result (1 = first; >1 after start failures)
     #[serde(default)]
     pub pipeline_attempt: usize,
+    /// For information only (uses the TRUE database; never used to choose or keep results):
+    /// per record, squared distance between its true point and the mean of its reconstructions,
+    /// averaged over records. No alignment (LAMa outputs are in the true frame).
+    #[serde(default)]
+    pub centroid_mse: Option<f64>,
+    /// For information only: per-database MSE (mean squared distance to the truth), averaged over databases
+    #[serde(default)]
+    pub mean_db_mse: Option<f64>,
+    /// For information only: MSE of database 0 (the lowest-error output)
+    #[serde(default)]
+    pub first_db_mse: Option<f64>,
     pub lns_steps: usize,
     pub hit_deadline: bool,
     pub lns_seconds: f64,
@@ -275,7 +289,8 @@ impl<'a> PairLns<'a> {
                     break;
                 }
                 // ...but one that has stopped improving is abandoned, so a fresh restart gets the thread
-                if step >= cfg.steps_per_restart && steps_since_improvement >= cfg.stall_steps {
+                let patience = if total / Self::OUTSIDE_EPSILON <= cfg.near_pairs { 4 * cfg.stall_steps } else { cfg.stall_steps };
+                if step >= cfg.steps_per_restart && steps_since_improvement >= patience {
                     restarts_abandoned.fetch_add(1, Ordering::Relaxed);
                     info!(
                         "Restart {restart} abandoned after {step} steps: {} pairs outside epsilon, no improvement in {} steps",

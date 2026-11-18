@@ -51,13 +51,15 @@ pub struct SampledSearch {
     pub outputs: usize,
     /// With lns_hours: abandon a still-inconsistent restart after this many steps without improving
     pub stall_steps: usize,
+    /// Restarts at most this many pairs outside epsilon get 4x stall_steps
+    pub near_pairs: i64,
     /// Which run of the whole pipeline this is (recorded in the results; main.rs reruns on start failure)
     pub pipeline_attempt: usize,
 }
 
 impl Default for SampledSearch {
     fn default() -> Self {
-        Self { restarts: 64, lns_hours: 0.0, max_rows_per_pair: 1_000, outputs: 1000, stall_steps: 1500, pipeline_attempt: 1 }
+        Self { restarts: 64, lns_hours: 0.0, max_rows_per_pair: 1_000, outputs: 1000, stall_steps: 5000, near_pairs: 20, pipeline_attempt: 1 }
     }
 }
 
@@ -336,6 +338,7 @@ pub fn lama_attack(
             max_rows_per_pair: sampled_search.max_rows_per_pair,
             target_outputs: sampled_search.outputs,
             stall_steps: sampled_search.stall_steps,
+            near_pairs: sampled_search.near_pairs,
             deadline: (sampled_search.lns_hours > 0.0)
                 .then(|| Instant::now() + Duration::from_secs_f64(sampled_search.lns_hours * 3600.0)),
             ..LnsConfig::default()
@@ -410,13 +413,54 @@ pub fn lama_attack(
     let num_dbs = responses.values().next().map_or(0, Vec::len);
 
     debug!("{correct} correct out of {} total", responses.len());
-    info!("Saving correct solutions to {full_datapath}/limits/{unique_name}_reconstruction.json");
-    save_reconstruction_data(
-        &responses,
-        &format!("{full_datapath}/limits"),
-        &unique_name,
-        &loaded_db,
-    );
+
+    // Sampled setting: MSE to the truth, for information only (see LnsSummary::centroid_mse)
+    if let Some(summary) = lns_summary.as_mut() {
+        let (centroid, mean_db, first_db) = mse_summary(&into_recon_data(&responses, &loaded_db));
+        summary.centroid_mse = centroid;
+        summary.mean_db_mse = mean_db;
+        summary.first_db_mse = first_db;
+        info!("MSE to the truth (info only): centroid {centroid:?}, mean per database {mean_db:?}, database 0 {first_db:?}");
+    }
+
+    // Sampled setting: an earlier result for this config may be better (reruns are random). Keep the
+    // better one in limits/ and put the other in limits/archive_other_runs/<timestamp>/. "Better" uses
+    // only what the attacker sees, never the truth: see sampled_rank.
+    let limits_dir = format!("{full_datapath}/limits");
+    let results_path = format!("{limits_dir}/results_{unique_name}.json");
+    let mut save_dir = limits_dir.clone();
+    if let Some(new) = lns_summary.as_ref() {
+        let ts = chrono_like_timestamp();
+        let other_dir = format!("{limits_dir}/archive_other_runs/{ts}");
+        let existing: Option<DbResult> =
+            fs::read_to_string(&results_path).ok().and_then(|s| serde_json::from_str(&s).ok());
+        let existing_rank = existing.as_ref().map(|e| sampled_rank(e.lns.as_ref()));
+        let new_rank = sampled_rank(Some(new));
+        match existing_rank {
+            Some(old_rank) if old_rank > new_rank => {
+                warn!(
+                    "The existing result is better ({old_rank:?} > {new_rank:?}: consistent, #consistent DBs, \
+                     -pairs outside, -error); keeping it and writing this run to {other_dir}"
+                );
+                save_dir = other_dir;
+            }
+            Some(old_rank) => {
+                info!("This run beats the existing result ({new_rank:?} >= {old_rank:?}); moving the old one to {other_dir}");
+                if fs::create_dir_all(&other_dir).is_ok() {
+                    for f in [results_path.clone(), format!("{limits_dir}/{unique_name}_reconstruction.json")] {
+                        let to = format!("{other_dir}/{}", f.rsplit('/').next().unwrap_or_default());
+                        if let Err(e) = fs::rename(&f, &to) {
+                            warn!("could not move {f} to {to}: {e}");
+                        }
+                    }
+                }
+            }
+            None => {}
+        }
+    }
+
+    info!("Saving correct solutions to {save_dir}/{unique_name}_reconstruction.json");
+    save_reconstruction_data(&responses, &save_dir, &unique_name, &loaded_db);
 
     info!(
         "LAMa completely finished in {}",
@@ -442,16 +486,71 @@ pub fn lama_attack(
         lns: lns_summary,
     };
 
-    if let Err(e) = save_results(
-        final_res,
-        &format!("{full_datapath}/limits/results_{unique_name}.json"),
-    ) {
-        error!("failed writing to {full_datapath}/limits/results_{unique_name}.json: {e}");
+    if let Err(e) = save_results(final_res, &format!("{save_dir}/results_{unique_name}.json")) {
+        error!("failed writing to {save_dir}/results_{unique_name}.json: {e}");
     }
 
     info!("LAMA finished running on {db_name}");
     AttackOutcome::Finished
 }
+/// How good a sampled-setting result is, from what the ATTACKER sees only (never the true database):
+/// (output is fully consistent, number of distinct consistent databases, -pairs outside epsilon of the
+/// best database, -its total error). Larger is better. A result without an "lns" field (old code) is worst.
+pub fn sampled_rank(lns: Option<&crate::LAMA::lazy_lns::LnsSummary>) -> (bool, bool, usize, i64, i64) {
+    match lns {
+        None => (false, false, 0, i64::MIN, i64::MIN),
+        Some(l) => (
+            true,
+            l.output_is_consistent,
+            if l.output_is_consistent { l.returned } else { 0 },
+            -l.best_pairs_outside,
+            -l.best_total_error,
+        ),
+    }
+}
+
+/// (centroid MSE, mean per-database MSE, MSE of database 0); squared Euclidean distance, no alignment.
+fn mse_summary(data: &[Vec<ReconstructionDataPoint>]) -> (Option<f64>, Option<f64>, Option<f64>) {
+    let sq = |a: &[f64], b: &[f64]| a.iter().zip(b).map(|(x, y)| (x - y) * (x - y)).sum::<f64>();
+    let db_mse = |db: &Vec<ReconstructionDataPoint>| {
+        db.iter().map(|p| sq(&p.true_points, &p.reconstructed_points)).sum::<f64>() / db.len().max(1) as f64
+    };
+    if data.is_empty() || data[0].is_empty() {
+        return (None, None, None);
+    }
+    let n_rec = data[0].len();
+    let dims = data[0][0].true_points.len();
+    let mut centroid_err = 0.0;
+    for r in 0..n_rec {
+        let mut mean = vec![0.0; dims];
+        for db in data {
+            for (m, x) in mean.iter_mut().zip(&db[r].reconstructed_points) {
+                *m += x / data.len() as f64;
+            }
+        }
+        centroid_err += sq(&data[0][r].true_points, &mean);
+    }
+    let mean_db = data.iter().map(db_mse).sum::<f64>() / data.len() as f64;
+    (Some(centroid_err / n_rec as f64), Some(mean_db), Some(db_mse(&data[0])))
+}
+
+/// YYYYmmdd_HHMMSS (UTC) from the system clock, without a date crate.
+fn chrono_like_timestamp() -> String {
+    let secs = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs()) as i64;
+    let (days, rem) = (secs.div_euclid(86_400), secs.rem_euclid(86_400));
+    // civil-from-days (Howard Hinnant)
+    let z = days + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y = yoe + era * 400 + i64::from(m <= 2);
+    format!("{y:04}{m:02}{d:02}_{:02}{:02}{:02}", rem / 3600, rem % 3600 / 60, rem % 60)
+}
+
 fn save_results(result: DbResult, file_path: &str) -> Result<(), LAMAError> {
     // Create the file and wrap it in a BufWriter for better performance
     let file = File::create(file_path)?;

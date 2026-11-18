@@ -367,12 +367,15 @@ impl<'a> Selector<'a> {
         }
 
         // 3. Calculate Empirical VC Dimension (Fixing Issue A)
-        let responses = self.get_responses_from_queries(observed_queries.clone());
         // let emp_vc_dim = self.get_emp_vc_sukp_bound(responses.clone(), all_possible_responses);
 
-        // A simple bound as per corollary 2
-        let vc_dim =
-            Selector::simple_bound_corollary2(&responses, &self.encrypted_db.get_universe());
+        // A simple bound as per corollary 2. With the capacity simple_bound_corollary2 passes (the
+        // total number of record/response incidences) its SUKP optimum is always every response, so
+        // the bound only depends on how many queries were sampled: computed in closed form here.
+        // (The LP had one row per incidence: 6D overflowed HiGHS' i32 row index, and the responses
+        // alone did not fit in memory.)
+        let vc_dim = Selector::simple_bound_corollary2_closed_form(num_queries_to_observe);
+        let responses: Vec<Vec<Value>> = Vec::new();
 
         let eps_reg = Selector::calculate_epsilon_real_vc(vc_dim, num_queries_to_observe, delta);
 
@@ -385,6 +388,13 @@ impl<'a> Selector<'a> {
         info!("Using {} for epsilon", eps);
 
         return (observed_queries, responses, eps);
+    }
+
+    /// `simple_bound_corollary2` without the LP. Its SUKP capacity is the total number of
+    /// incidences, which is at least the number of distinct records, so x = y = 1 is feasible and
+    /// optimal: q = number of responses (sampled queries, with repeats).
+    pub fn simple_bound_corollary2_closed_form(num_responses: usize) -> f64 {
+        (num_responses as f64).log2().floor() + 1.0
     }
 
     pub fn simple_bound_corollary2(responses: &Vec<Vec<Value>>, universe: &Vec<Value>) -> f64 {
@@ -635,6 +645,21 @@ mod tests {
     use serde::Serialize;
     use std::fs::File;
     use std::io::BufWriter;
+
+    #[test]
+    fn corollary2_closed_form_matches_lp() {
+        let db: Box<dyn Searchable + Sync> = Box::new(testDB::new(2, 6, 35));
+        let selector = Selector::new("gaussian", &db);
+        let mut rng = rand::thread_rng();
+        for m in [1usize, 2, 3, 7, 8, 9, 31, 64, 100, 257] {
+            let queries: Vec<_> = (0..m)
+                .map(|_| selector.query_distribution.pairs[rng.gen_range(0..selector.query_distribution.pairs.len())].clone())
+                .collect();
+            let responses = selector.get_responses_from_queries(queries);
+            let lp = Selector::simple_bound_corollary2(&responses, &db.get_universe());
+            assert_eq!(lp, Selector::simple_bound_corollary2_closed_form(m), "m = {m}");
+        }
+    }
 
     #[cfg(test)]
     mod statistical_bounds_tests {

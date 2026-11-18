@@ -15,8 +15,8 @@ use std::sync::Mutex;
 
 #[derive(Default, Deserialize, Serialize, Debug, Clone)]
 pub struct TranslatorMeta {
-    constraints_per_t: HashMap<usize, usize>,
-    recons_per_t: HashMap<usize, usize>,
+    pub constraints_per_t: HashMap<usize, usize>,
+    pub recons_per_t: HashMap<usize, usize>,
 }
 
 /// Translator: One Formula from All Matching Pairs.
@@ -93,6 +93,11 @@ impl Translator {
 
     pub fn get_enc_id_to_intvar(&self) -> HashMap<i64, IntVar> {
         return self.enc_id_to_intvar.clone();
+    }
+
+    /// The model as it stands (after process_t1: one singleton table per record).
+    pub fn proto_model_ref(&self) -> &CpModel {
+        &self.proto_model
     }
 
     pub fn get_proto_model(self) -> CpModel {

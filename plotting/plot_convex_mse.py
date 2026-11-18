@@ -7,7 +7,8 @@ import matplotlib.pyplot as plt
 from globals_vars import FONT_SIZE, format_db_name
 
 
-def plot_convex_mse(convex_data, dataset, distributions, output_dir, method_order, colors, markers, labels):
+def plot_convex_mse(convex_data, dataset, distributions, output_dir, method_order, colors, markers, labels,
+                    grid_tag=""):
     db_data = convex_data.get(dataset, {})
     if not db_data:
         return
@@ -103,6 +104,6 @@ def plot_convex_mse(convex_data, dataset, distributions, output_dir, method_orde
     # Add the single, centered global x-label
     fig.text(0.55, 0.12, 'Query Percent', va='center', ha='center', fontsize=FONT_SIZE + 30)
 
-    filename = f'{dataset}_convex_mse_combined.pdf'
+    filename = f'{dataset}_convex_mse_combined{grid_tag}.pdf'
     plt.savefig(os.path.join(output_dir, filename), format='pdf', bbox_inches='tight')
     plt.close(fig)

@@ -56,4 +56,10 @@ pub struct DbResult {
     pub eps: Option<f64>,
     pub delt: Option<f64>,
     pub translator_meta: TranslatorMeta,
+    /// Number of reconstructed databases ('number_of_reconstructions' is the number of records)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub number_of_databases: Option<usize>,
+    /// Sampled setting only: what the pair LNS found, and how the true database scores
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lns: Option<crate::LAMA::lazy_lns::LnsSummary>,
 }

@@ -130,6 +130,17 @@ if __name__ == "__main__":
     #
     # print(f"\nDone! All plots saved to ./{OUTPUT_DIR}/")
 
+    # # ---------------------------------------------------------
+    # # 2b. Query Percent vs MSE (Convex Hulls) on the 50x50 grid (rebuttal)
+    # # NOTE: only drink/spitz have LAMa p0.1-0.3 at 50x50, and Even Less / Remin have no
+    # # prob10/20/30 runs at 50x50 yet, so most series will be empty until those are run.
+    # # ---------------------------------------------------------
+    # convex_50 = load_convex_mse_data(BASE_DIR, datasets, methods, distributions,
+    #                                  grid="50x50", limits_grid="50x50")
+    # for db in datasets:
+    #     plot_convex_mse(convex_50, db, distributions, OUTPUT_DIR, METHOD_ORDER, COLORS, MARKERS, LABELS,
+    #                     grid_tag="_50x50")
+
     # # BOX PLOTS
     # print("Generating Box Plots...")
     # for db in datasets:

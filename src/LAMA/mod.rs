@@ -4,31 +4,111 @@ use crate::dataloader::two_d::TwoDMap;
 use crate::dataloader::{flatten_nd, unflatten_nd, Searchable};
 use crate::plotting::{DbResult, ReconstructionDataPoint};
 use crate::LAMA::error::LAMAError;
+use crate::LAMA::lazy_lns::{LnsConfig, PairLns};
 use crate::LAMA::query::QueryDistribution;
 use crate::LAMA::selector::Selector;
 use crate::LAMA::solver::CpSolverStatus::{Feasible, Optimal};
 use crate::LAMA::solver::Solver;
 use crate::LAMA::translator::Translator;
-use crate::LAMA::utility::{encloses, get_mbq};
-use crate::{DomPair, Frequency, Record, Value};
+use crate::LAMA::utility::get_mbq;
+use crate::{DomPair, Record, Value};
 use log::{debug, error, info, trace, warn};
-use rand::distributions::Distribution;
-use rayon::iter::ParallelIterator;
-use rayon::prelude::IntoParallelRefIterator;
+use rayon::prelude::*;
 use rustc_hash::FxHashMap;
 use std::collections::HashMap;
 use std::fs;
 use std::fs::File;
 use std::io::BufWriter;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 mod error;
+pub mod lazy_lns;
 pub mod mini_solver;
 pub mod query;
 pub mod selector;
 pub mod solver;
 pub mod translator;
 pub mod utility;
+
+/// Knobs for the sampled (query_percent < 1) search, see lazy_lns::LnsConfig.
+#[derive(Clone, Debug)]
+pub struct SampledSearch {
+    pub restarts: usize,
+    /// Wall-clock budget for the LNS in hours (0 = none). Restarts that run out stop and report
+    /// what they have, so a job writes results instead of hitting the slurm time limit.
+    pub lns_hours: f64,
+    pub max_rows_per_pair: usize,
+    /// How many distinct databases to output
+    pub outputs: usize,
+}
+
+impl Default for SampledSearch {
+    fn default() -> Self {
+        Self { restarts: 64, lns_hours: 0.0, max_rows_per_pair: 1_000, outputs: 1000 }
+    }
+}
+
+/// For every pair p in `pairs`: the sum of `weights[q]` over every q in `pairs` that encloses p
+/// (q.0 <= p.0 and q.1 >= p.1 in every dimension). The same prefix-sum sweep as
+/// QueryDistribution::precompute_cumulative_results, but on indices, so no DomPair is cloned.
+/// `pairs` must hold every valid query of the grid [low, high].
+pub fn enclosing_sums(pairs: &[DomPair], weights: &[f64], low: &[Value], high: &[Value]) -> Vec<f64> {
+    let index: FxHashMap<&DomPair, usize> = pairs.iter().enumerate().map(|(i, p)| (p, i)).collect();
+    let mut dp = weights.to_vec();
+    let dims = low.len();
+    let mut order: Vec<usize> = (0..pairs.len()).collect();
+    let mut key: DomPair = (vec![0; dims], vec![0; dims]);
+
+    // 1. lower bounds: dp[l, u] += dp[l - e_d, u], ascending in l[d]
+    for d in 0..dims {
+        order.par_sort_unstable_by_key(|&i| pairs[i].0[d]);
+        for &i in &order {
+            let p = &pairs[i];
+            if p.0[d] > low[d] {
+                key.0.clone_from(&p.0);
+                key.1.clone_from(&p.1);
+                key.0[d] -= 1;
+                if let Some(&j) = index.get(&key) {
+                    dp[i] += dp[j];
+                }
+            }
+        }
+    }
+    // 2. upper bounds: dp[l, u] += dp[l, u + e_d], descending in u[d]
+    for d in 0..dims {
+        order.par_sort_unstable_by_key(|&i| std::cmp::Reverse(pairs[i].1[d]));
+        for &i in &order {
+            let p = &pairs[i];
+            if p.1[d] < high[d] {
+                key.0.clone_from(&p.0);
+                key.1.clone_from(&p.1);
+                key.1[d] += 1;
+                if let Some(&j) = index.get(&key) {
+                    dp[i] += dp[j];
+                }
+            }
+        }
+    }
+    dp
+}
+
+/// Minimum bounding query of some flattened plaintexts, from a precomputed coordinate table.
+#[inline]
+fn mbq_of(vals: &[i64], coords: &[Record]) -> DomPair {
+    let mut lo = coords[vals[0] as usize].clone();
+    let mut hi = lo.clone();
+    for &v in &vals[1..] {
+        for (d, &x) in coords[v as usize].iter().enumerate() {
+            if x < lo[d] {
+                lo[d] = x;
+            }
+            if x > hi[d] {
+                hi[d] = x;
+            }
+        }
+    }
+    (lo, hi)
+}
 
 pub fn lama_attack(
     db_name: &String,
@@ -40,6 +120,7 @@ pub fn lama_attack(
     _save: &bool,
     query_percent: &f64,
     dist_noise: &f64,
+    sampled_search: &SampledSearch,
 ) {
     let loaded_db: Box<dyn Searchable + Sync>;
     let full_datapath = format!("{0}/{1}", dir_path, db_name);
@@ -139,69 +220,53 @@ pub fn lama_attack(
     } else {
         0.0
     };
-    let high_pair_ref = &high_pair;
-    let low_pair_ref = &low_pair;
+
+    // Coordinates of every flattened value, so validating a candidate doesn't unflatten/allocate per record
+    let coords: Vec<Record> = (0..=largest_possible_val)
+        .map(|v| unflatten_nd(v, &high_pair, &low_pair))
+        .collect();
+    let coords_ref = &coords;
 
     let get_expected_prob = |plaintexts: &[i64]| -> f64 {
-        let pt_records: Vec<Record> = plaintexts
-            .iter()
-            .map(|&v| unflatten_nd(v, high_pair_ref, low_pair_ref))
-            .collect();
-        let pt_mbq = get_mbq(&pt_records);
-
-        attacker_dist_ref.cumulative_prob_lookup(&pt_mbq)
+        attacker_dist_ref.cumulative_prob_lookup(&mbq_of(plaintexts, coords_ref))
     };
 
     let eps;
     let delta = 0.1; // fix to 90% confidence
     let num_queries;
 
-    let get_observed_prob: Box<dyn Sync + Send + Fn(&[i64]) -> f64>;
+    let get_observed_prob: Box<dyn Sync + Send + Fn(&[i64]) -> f64 + '_>;
 
     if *query_percent != 1.0 {
-        // we're going to sample.
-        let (observed_queries, responses, epsil) = selector.sample_percent_responses(
-            *query_percent,
-            delta,
-            &selector.get_all_possible_responses(),
-        );
+        // we're going to sample. (The all-possible-responses argument is unused by the sampler and
+        // was the single biggest allocation in high dimensions, so it is no longer computed.)
+        let (observed_queries, _responses, epsil) =
+            selector.sample_percent_responses(*query_percent, delta, &Vec::new());
         // Sampling error + distribution error
         eps = epsil + max_dist_err;
         num_queries = observed_queries.len();
 
-        let all_dompairs = Selector::get_dom_pairs(&loaded_db);
         info!("Making observed mapping to frequency");
-
+        // Observed frequency of an MBQ = fraction of the sampled queries enclosing it. Exactly the old
+        // per-pair count, but as one prefix sum over the histogram of sampled queries
+        // (O(#pairs * dims) instead of O(#pairs * #sampled queries)).
+        let all_dompairs = &query_dist_ref.pairs;
+        let pair_index: FxHashMap<&DomPair, usize> =
+            all_dompairs.iter().enumerate().map(|(i, p)| (p, i)).collect();
+        let mut hist = vec![0.0; all_dompairs.len()];
+        for q in &observed_queries {
+            hist[pair_index[q]] += 1.0;
+        }
         let queries_len = observed_queries.len() as f64;
-
-        let dom_to_enclosed_freq: FxHashMap<_, _> = all_dompairs
-            .par_iter() // 1. Iterate over all_dompairs in parallel
-            .map(|pair| {
-                // 2. Count enclosures (safe to read observed_queries across threads)
-                let enclose_count = observed_queries
-                    .iter()
-                    .filter(|que| encloses(que, pair))
-                    .count();
-
-                let freq = enclose_count as f64 / queries_len;
-
-                // 3. Return the key-value pair tuple
-                (pair.clone(), freq)
-            })
+        let observed: Vec<f64> = enclosing_sums(all_dompairs, &hist, &low_pair, &high_pair)
+            .into_iter()
+            .map(|c| c / queries_len)
             .collect();
+        drop(observed_queries);
 
-        // 3. Box the closure and use 'move' to take ownership of the HashMap
         get_observed_prob = Box::new(move |enc_tuple: &[i64]| -> f64 {
-            let underlying_vals: Vec<Record> = enc_tuple
-                .iter()
-                .map(|rec| unflatten_nd(*rec, high_pair_ref, low_pair_ref))
-                .collect();
-            let target_mbq = get_mbq(&underlying_vals);
-
-            dom_to_enclosed_freq
-                .get(&target_mbq)
-                .copied() // Cleaner than .unwrap_or(&0.0).clone()
-                .unwrap_or(0.0)
+            let target_mbq = mbq_of(enc_tuple, coords_ref);
+            pair_index.get(&target_mbq).map_or(0.0, |&i| observed[i])
         });
     } else {
         eps = max_dist_err;
@@ -214,15 +279,8 @@ pub fn lama_attack(
         }
         num_queries = total as usize;
 
-        // 4. Box the else closure as well to match types
         get_observed_prob = Box::new(move |enc_tuple: &[i64]| -> f64 {
-            let true_point: Vec<Record> = enc_tuple
-                .iter()
-                .map(|rec| unflatten_nd(*rec, high_pair_ref, low_pair_ref))
-                .collect();
-            let dom_pair = get_mbq(&true_point);
-
-            query_dist_ref.cumulative_prob_lookup(&dom_pair)
+            query_dist_ref.cumulative_prob_lookup(&mbq_of(enc_tuple, coords_ref))
         });
     }
 
@@ -244,42 +302,80 @@ pub fn lama_attack(
     let start = Instant::now();
     translator.process_t1(&universe, &validate_candidate);
 
-    for i in 2..(*t as usize + 1) {
-        let start_t = Instant::now();
-        info!("Recursively computing frequencies for {i} tuples");
+    let mut lns_summary = None;
+    let responses: HashMap<i64, Vec<i64>>;
+    let translater_met;
 
-        translator.process_t_greater_than_1(i, &universe, &validate_candidate);
+    if !perfect && *t >= 2 {
+        // Sampled setting: min-error LNS straight from the t = 1 tables, scoring pairs on demand
+        // (the t = 2 tables are never built; they were what ran out of memory at 50x50).
+        if *t > 2 {
+            warn!("Sampled setting searches t = 2 (pairs) only; --t {t} is treated as 2");
+        }
+        let var_index_map = translator.get_var_index_map();
+        let mut enc_of_var = vec![0i64; var_index_map.len()];
+        for (idx, enc) in var_index_map.values() {
+            enc_of_var[*idx as usize] = *enc;
+        }
+        let lns = PairLns::new(translator.proto_model_ref(), enc_of_var.clone(), largest_possible_val, &validate_candidate);
+        let cfg = LnsConfig {
+            restarts: sampled_search.restarts,
+            max_rows_per_pair: sampled_search.max_rows_per_pair,
+            target_outputs: sampled_search.outputs,
+            deadline: (sampled_search.lns_hours > 0.0)
+                .then(|| Instant::now() + Duration::from_secs_f64(sampled_search.lns_hours * 3600.0)),
+            ..LnsConfig::default()
+        };
+        let (found, summary) = lns.run(&cfg);
+        if found.is_empty() {
+            error!("Pair LNS found no reconstruction at all");
+            return;
+        }
+        translator.metadata.recons_per_t.insert(2, found.len());
+        responses = enc_of_var
+            .iter()
+            .enumerate()
+            .map(|(idx, &enc)| (enc, found.iter().map(|r| r.assignment[idx]).collect()))
+            .collect();
+        lns_summary = Some(summary);
+        translater_met = translator.metadata.clone();
+    } else {
+        for i in 2..(*t as usize + 1) {
+            let start_t = Instant::now();
+            info!("Recursively computing frequencies for {i} tuples");
 
-        let end_t = Instant::now();
-        debug!(
-            "Round {i} took {} seconds",
-            end_t.duration_since(start_t).as_secs()
-        )
+            translator.process_t_greater_than_1(i, &universe, &validate_candidate);
+
+            let end_t = Instant::now();
+            debug!(
+                "Round {i} took {} seconds",
+                end_t.duration_since(start_t).as_secs()
+            )
+        }
+
+        info!("Building and executing the CP-SAT Solver for the final constraint graph...");
+        let mut solver = Solver::new(translator.get_var_index_map());
+        translater_met = translator.metadata.clone();
+
+        let mut model = translator.get_proto_model();
+
+        // NOTE: The only change in the test is passing largest_enc_val here
+        responses = solver.solve(&mut model, largest_possible_val, false);
+        if solver.solution_stat != Optimal && solver.solution_stat != Feasible {
+            // minimum number of expected reconstructions
+            warn!(
+                "Solver did not return the expected number of reconstructions. No solutions were found."
+            );
+
+            debug!("Solver failed to reconstruct full universe!!");
+            trace!("'encrypted/encoded' universe of plaintexts: {universe:?}");
+            trace!("Intvars workings: {:?}", solver);
+            trace!("CPModel: {:?}", model);
+            debug!("Solver Status: {:?}", solver.solution_stat);
+            return;
+        }
     }
-
-    info!("Building and executing the CP-SAT Solver for the final constraint graph...");
-    let mut solver = Solver::new(translator.get_var_index_map());
-    let translater_met = translator.metadata.clone();
-
-    let mut model = translator.get_proto_model();
-
-    // NOTE: The only change in the test is passing largest_enc_val here
-    let responses = solver.solve(&mut model, largest_possible_val, false);
     let end = Instant::now();
-    if solver.solution_stat != Optimal && solver.solution_stat != Feasible {
-        // minimum number of expected reconstructions
-        warn!(
-            "Solver did not return the expected number of reconstructions. No solutions were found."
-        );
-
-        debug!("Solver failed to reconstruct full universe!!");
-        //debug!("Known frequency-to-plaintext 2-tuple mappings: {freq_to_t_tuple:?}");
-        trace!("'encrypted/encoded' universe of plaintexts: {universe:?}");
-        trace!("Intvars workings: {:?}", solver);
-        trace!("CPModel: {:?}", model);
-        debug!("Solver Status: {:?}", solver.solution_stat);
-        return;
-    }
 
     let unique_name = if *dist_noise > 0.0 {
         format!("{db_name}_{dist}_p{query_percent}_noise{dist_noise}")
@@ -288,16 +384,11 @@ pub fn lama_attack(
     };
 
     let mut correct = 0;
-    let mut first_resp = HashMap::new();
-
-    for (key, val) in responses.clone() {
-        first_resp.insert(key, val[0]); // just pretend first resp is the correct one.
-        for i in 0..val.len() {
-            if key == val[i] {
-                correct += 1;
-            }
-        }
+    for (key, val) in &responses {
+        correct += val.iter().filter(|v| *v == key).count();
     }
+    // Number of reconstructed DATABASES (responses has one entry per record)
+    let num_dbs = responses.values().next().map_or(0, Vec::len);
 
     debug!("{correct} correct out of {} total", responses.len());
     info!("Saving correct solutions to {full_datapath}/limits/{unique_name}_reconstruction.json");
@@ -328,6 +419,8 @@ pub fn lama_attack(
         eps: Some(eps),
         delt: Some(delta),
         translator_meta: translater_met,
+        number_of_databases: Some(num_dbs),
+        lns: lns_summary,
     };
 
     if let Err(e) = save_results(
@@ -398,6 +491,35 @@ fn save_reconstruction_data(
     serde_json::to_writer_pretty(writer, &data).unwrap();
 }
 
+
+#[cfg(test)]
+mod enclosing_sums_tests {
+    use super::*;
+    use crate::LAMA::utility::encloses;
+    use rand::Rng;
+
+    /// The prefix sum must give exactly the old brute-force count of enclosing sampled queries.
+    #[test]
+    fn enclosing_sums_match_brute_force() {
+        for dim in [1usize, 2, 3] {
+            let db: Box<dyn Searchable + Sync> = Box::new(testDB::new(dim, 5, 35));
+            let (low, high) = db.get_dom_pair();
+            let pairs = Selector::get_dom_pairs(&db);
+            let mut rng = rand::thread_rng();
+            let sampled: Vec<DomPair> = (0..500).map(|_| pairs[rng.gen_range(0..pairs.len())].clone()).collect();
+            let index: FxHashMap<&DomPair, usize> = pairs.iter().enumerate().map(|(i, p)| (p, i)).collect();
+            let mut hist = vec![0.0; pairs.len()];
+            for q in &sampled {
+                hist[index[q]] += 1.0;
+            }
+            let fast = enclosing_sums(&pairs, &hist, &low, &high);
+            for (i, p) in pairs.iter().enumerate() {
+                let brute = sampled.iter().filter(|q| encloses(q, p)).count() as f64;
+                assert_eq!(fast[i], brute, "dim {dim}, pair {p:?}");
+            }
+        }
+    }
+}
 
 #[cfg(test)]
 mod metadata_tests {

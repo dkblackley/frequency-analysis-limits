@@ -27,3 +27,9 @@ target
 /databases/
 /figures
 __pycache__/
+
+# run_me.sh outputs (binary snapshots, slurm logs, resource_usage.tsv)
+/bin/
+/logs/
+LAMA_*.out
+LAMA_*.err

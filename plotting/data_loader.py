@@ -173,10 +173,15 @@ def compute_dataset_metrics(point_clouds, true_pts):
 from concurrent.futures import ProcessPoolExecutor
 from tqdm import tqdm
 
-def load_convex_mse_data(base_dir, datasets, methods, distributions):
+def load_convex_mse_data(base_dir, datasets, methods, distributions, grid="15x15",
+                         limits_grid="15x15_average", query_percents=(10.0, 20.0, 30.0)):
+    """
+    grid:        folder (and file-name suffix) of the Even Less / Remin runs, e.g. "15x15" or "50x50".
+    limits_grid: folder of the LAMa runs. The paper's 15x15 numbers came from "15x15_average" (not on this
+                 machine); the 50x50 runs live in "50x50", the newer 15x15 runs in "15x15".
+    """
     nested_data = {db: {dist: {meth: [] for meth in methods} for dist in distributions} for db in datasets}
-    query_percents = [10.0, 20.0, 30.0]
-    data_dir = f"{base_dir}/15x15"
+    data_dir = f"{base_dir}/{grid}"
 
     target_cores = max(1, os.cpu_count() - 4)
 
@@ -185,7 +190,7 @@ def load_convex_mse_data(base_dir, datasets, methods, distributions):
     for db in datasets:
         for dist in distributions:
             for query in query_percents:
-                tasks.append((db, dist, query, base_dir, data_dir, methods))
+                tasks.append((db, dist, query, base_dir, data_dir, methods, grid, limits_grid))
 
     # 2. Spin up the pool ONCE and process all tasks concurrently
     with ProcessPoolExecutor(max_workers=target_cores) as executor:
@@ -206,13 +211,13 @@ def load_convex_mse_data(base_dir, datasets, methods, distributions):
 
 def _process_single_configuration(args):
     """Worker function to process one specific dataset/distribution/query combination."""
-    db, dist, query, base_dir, data_dir, methods = args
+    db, dist, query, base_dir, data_dir, methods, grid, limits_grid = args
     results = []
 
     # Even Less Setup
     if "even_less" in methods:
         try:
-            path = f"{data_dir}/{db}/even_less/{db}_prob{int(query)}.0_{dist}_15x15_even_less.json"
+            path = f"{data_dir}/{db}/even_less/{db}_prob{float(query)}_{dist}_{grid}_even_less.json"
             with open(path, 'r') as f:
                 data = json.load(f)
             point_clouds, true_pts = generate_sampled_reconstructions(data)
@@ -225,7 +230,7 @@ def _process_single_configuration(args):
     # Remin Setup
     if "remin" in methods:
         try:
-            path = f"{data_dir}/{db}/remin/{db}_prob{int(query)}.0_{dist}_15x15_classic.json"
+            path = f"{data_dir}/{db}/remin/{db}_prob{float(query)}_{dist}_{grid}_classic.json"
             with open(path, 'r') as f:
                 data = json.load(f)
             point_clouds, true_pts = generate_sampled_reconstructions(data)
@@ -237,8 +242,8 @@ def _process_single_configuration(args):
     # LAMa Limits Setup
     if "limits" in methods:
         try:
-            limits_query = query / 100.0
-            path = f"{base_dir}/15x15_average/{db}/limits/{db}_{dist}_p{limits_query}_reconstruction.json"
+            limits_query = f"{query / 100.0:g}"  # Rust Display: 0.1, 0.05, 0.01
+            path = f"{base_dir}/{limits_grid}/{db}/limits/{db}_{dist}_p{limits_query}_reconstruction.json"
             with open(path, 'r') as f:
                 multi_run_data = json.load(f)
 

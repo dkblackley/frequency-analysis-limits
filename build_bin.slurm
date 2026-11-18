@@ -58,3 +58,12 @@ if [ ! -x "$BIN" ]; then
     exit 1
 fi
 echo "Build finished: $BIN"
+
+# Snapshot the binary for run_me.sh's jobs: each build gets its own file in bin/ and bin/lama is a
+# symlink switched atomically, so a rebuild never replaces a file a running job is paging in
+# (on NFS that kills it with SIGBUS). Old snapshots stay until you delete them.
+mkdir -p bin
+SNAP="lama_$(date +%Y%m%d_%H%M%S)_$(git rev-parse --short HEAD 2>/dev/null || echo nogit)"
+cp "$BIN" "bin/$SNAP"
+ln -sfn "$SNAP" bin/lama.tmp && mv -T bin/lama.tmp bin/lama
+echo "Snapshot: bin/$SNAP (bin/lama -> it)"

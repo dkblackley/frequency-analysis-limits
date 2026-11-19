@@ -1,8 +1,9 @@
 import os
+import json
 import matplotlib.pyplot as plt
 
 import plot_grid_mse
-from data_loader import load_grid_mse_data, load_convex_mse_data, load_running_time_data, load_running_time_lines_data, \
+from data_loader import build_box_data, load_grid_mse_data, load_convex_mse_data, load_running_time_data, load_running_time_lines_data, \
     load_limits_samples_mse
 from plot_boxplots_mse import plot_mse_boxplots
 from plot_grid_mse import plot_grid_by_mse
@@ -117,35 +118,33 @@ if __name__ == "__main__":
     #     # Pass the whole list of distributions instead of iterating one by one
     #     plot_grid_by_mse(grid_data, db, distributions, OUTPUT_DIR, METHOD_ORDER, COLORS, MARKERS, LABELS)
 
-    # # ---------------------------------------------------------
-    # # 2. Query Percent vs MSE (Convex Hulls)
-    # # ---------------------------------------------------------
-    # print("Loading nested data for Convex Hull metrics...")
-    # convex_data = load_convex_mse_data(BASE_DIR, datasets, methods, distributions)
-    #
-    # print("Generating Convex Hull Query % vs MSE plots...")
-    # for db in datasets:
-    #     # Pass the whole list of distributions instead of iterating one by one
-    #     plot_convex_mse(convex_data, db, distributions, OUTPUT_DIR, METHOD_ORDER, COLORS, MARKERS, LABELS)
-    #
-    # print(f"\nDone! All plots saved to ./{OUTPUT_DIR}/")
+    # ---------------------------------------------------------
+    # 2. Query Percent vs MSE (Convex Hulls), 50x50 grid
+    # LAMa: databases/50x50/<db>/limits (merged runs); Even Less / Remin: databases/50x50/<db>/{even_less,remin}.
+    # (The paper's original figure used 15x15: grid="15x15", limits_grid="15x15_average",
+    #  query_percents=(10.0, 20.0, 30.0) and plot_convex_mse's default axes.)
+    # ---------------------------------------------------------
+    print("Loading nested data for Convex Hull metrics (50x50)...")
+    query_percents_50 = (1.0, 2.0, 5.0, 10.0, 20.0, 30.0)
+    convex_50 = load_convex_mse_data(BASE_DIR, datasets, methods, distributions,
+                                     grid="50x50", limits_grid="50x50", query_percents=query_percents_50)
+    print("Generating Convex Hull Query % vs MSE plots (50x50)...")
+    for db in datasets:
+        plot_convex_mse(convex_50, db, distributions, OUTPUT_DIR, METHOD_ORDER, COLORS, MARKERS, LABELS,
+                        grid_tag="_50x50", xticks=query_percents_50, ylim=None, yticks=None, xscale="category")
 
-    # # ---------------------------------------------------------
-    # # 2b. Query Percent vs MSE (Convex Hulls) on the 50x50 grid (rebuttal)
-    # # NOTE: only drink/spitz have LAMa p0.1-0.3 at 50x50, and Even Less / Remin have no
-    # # prob10/20/30 runs at 50x50 yet, so most series will be empty until those are run.
-    # # ---------------------------------------------------------
-    # convex_50 = load_convex_mse_data(BASE_DIR, datasets, methods, distributions,
-    #                                  grid="50x50", limits_grid="50x50")
-    # for db in datasets:
-    #     plot_convex_mse(convex_50, db, distributions, OUTPUT_DIR, METHOD_ORDER, COLORS, MARKERS, LABELS,
-    #                     grid_tag="_50x50")
-
-    # # BOX PLOTS
+    # # BOX PLOTS (50x50): MSE of every database in each method's reconstruction space.
+    # # Every method told its orientation (data_loader ORIENTATION ORACLE): LAMa = its output DBs, each in its
+    # # best grid symmetry; Even Less / Remin = oriented_box_space (Procrustes rotation, then 1000 draws over
+    # # every box size / shift). build_box_data(..., oriented=False) = raw appendix version. JSON rebuilt each run.
     # print("Generating Box Plots...")
+    # os.makedirs("../figures/box", exist_ok=True)
     # for db in datasets:
-    #     box_json_path = f"../figures/box/{db}_mse_distribution_boxplot.json"
-    #     plot_mse_boxplots(box_json_path, db, distributions, OUTPUT_DIR, METHOD_ORDER, COLORS, LABELS)
+    #     box_json_path = f"../figures/box/{db}_50x50_mse_distribution_boxplot.json"
+    #     with open(box_json_path, "w") as f:
+    #         json.dump(build_box_data(BASE_DIR, db, distributions, methods, query_percents_50), f)
+    #     plot_mse_boxplots(box_json_path, db, distributions, OUTPUT_DIR, METHOD_ORDER, COLORS, LABELS,
+    #                       queries=query_percents_50, tag="_50x50")
 
     # # HISTOGRAMS
     # print("Generating Histogram Plots...")

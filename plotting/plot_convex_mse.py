@@ -8,7 +8,10 @@ from globals_vars import FONT_SIZE, format_db_name
 
 
 def plot_convex_mse(convex_data, dataset, distributions, output_dir, method_order, colors, markers, labels,
-                    grid_tag=""):
+                    grid_tag="", xticks=(10, 20, 30), ylim=(-2, 85), yticks=(0, 40, 80), xscale="linear"):
+    """xticks: query percents on the x-axis. ylim/yticks: None = matplotlib's automatic range
+    (the defaults are the 15x15 paper figure; 50x50 MSEs are on a larger scale). xscale="category" puts
+    the query percents at evenly spaced positions, so 1/2/5% stay readable next to 10-30%."""
     db_data = convex_data.get(dataset, {})
     if not db_data:
         return
@@ -35,6 +38,8 @@ def plot_convex_mse(convex_data, dataset, distributions, output_dir, method_orde
 
             method_runs.sort(key=lambda x: x[0])
             x_vals = [r[0] for r in method_runs]
+            if xscale == "category":
+                x_vals = [list(xticks).index(q) for q in x_vals]
             cent_y = [r[1] for r in method_runs]
             diam_y = [r[2] for r in method_runs]
 
@@ -74,12 +79,21 @@ def plot_convex_mse(convex_data, dataset, distributions, output_dir, method_orde
         if ax == axes[0]:
             ax.set_ylabel('MSE', fontsize=FONT_SIZE + 30)
 
-        # Force strict 10-20-30 axis labels
-        ax.set_xticks([10, 20, 30])
-        ax.set_xlim(9, 31)
-        ax.set_ylim(-2, 85)
-        ax.set_xticklabels(['10%', '20%', '30%'], fontsize=FONT_SIZE - 10)
-        ax.set_yticks([0, 40, 80])
+        # Fixed query-percent axis labels
+        if xscale == "category":
+            ax.set_xlim(-0.3, len(xticks) - 0.7)
+            ax.set_xticks(list(range(len(xticks))))
+        else:
+            ax.set_xlim(min(xticks) - 1, max(xticks) + 1)
+            ax.set_xticks(list(xticks))
+        if len(xticks) > 3:  # many ticks: no % sign (the axis title says Query Percent), smaller font
+            ax.set_xticklabels([f'{q:g}' for q in xticks], fontsize=FONT_SIZE - 16)
+        else:
+            ax.set_xticklabels([f'{q:g}%' for q in xticks], fontsize=FONT_SIZE - 10)
+        if ylim is not None:
+            ax.set_ylim(*ylim)
+        if yticks is not None:
+            ax.set_yticks(list(yticks))
         ax.tick_params(axis='y', labelsize=FONT_SIZE - 10, pad=40)
 
         ax.set_title(f'{dist.capitalize()}', fontsize=FONT_SIZE + 40)  # Removed " Dist."

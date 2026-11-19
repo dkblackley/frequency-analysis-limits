@@ -49,7 +49,11 @@ read -r -a HIGHDIM_PROBS_ARR <<< "${HIGHDIM_PROBS:-0.3}"
 CPUS_2D="${CPUS_2D:-16}"
 MEM_2D_GB="${MEM_2D_GB:-10}"
 OUTPUTS="${OUTPUTS:-1000}"   # distinct consistent databases per run (--lns-outputs) and per merged config
-RUNS="${RUNS:-3}"            # independent runs per 2D config, merged by merge_runs.py
+# independent runs per 2D config, merged by merge_runs.py. Default: 3, or the highest databases/<grid>_run<k>
+# that exists (so a plain run after RUNS=4 still merges run4 in)
+RUNS="${RUNS:-$(ls -d databases/"${GRID_2D:-50x50}"_run* 2>/dev/null | sed -E 's/.*_run([0-9]+)$/\1/' | sort -n | tail -1)}"
+(( ${RUNS:-0} < 3 )) && RUNS=3
+ONLY_LOW="${ONLY_LOW:-}"     # 1: runs beyond the 3rd are only submitted for configs flagged LOW (< MIN_OUTPUTS consistent)
 MIN_OUTPUTS=100              # a merged config with fewer consistent databases is flagged LOW in the status
 NORMAL_MAX_GB=170      # normal nodes have 180 GB; above this go to bigmem
 BIGMEM_MAX_GB=1000
@@ -140,6 +144,17 @@ d = json.load(open(sys.argv[1])); l = d["lns"]
 print(f"{l['returned']} DBs ({'all consistent' if l['output_is_consistent'] else 'NOT consistent: best found'}), "
       f"true DB in output={l['true_db_in_output']}, true DB pairs outside eps={l['true_db_pairs_outside']}, "
       f"{d['time_taken'] / 3600:.2f}h{', hit deadline' if l['hit_deadline'] else ''}")
+PY
+}
+
+is_low() { # results file -> exit 0 if LOW (fewer than MIN_OUTPUTS databases, or not consistent)
+    python3 - "$1" "$MIN_OUTPUTS" <<'PY'
+import json, sys
+d = json.load(open(sys.argv[1])); l = d.get("lns")
+if not l:
+    sys.exit(1)  # not a pair-LNS result: never flagged
+n = d.get("number_of_databases") or l.get("returned") or 0
+sys.exit(0 if n < int(sys.argv[2]) or not l.get("output_is_consistent") else 1)
 PY
 }
 
@@ -286,6 +301,13 @@ main() {
                 status_lines+=("RUN DONE $key  $(result_line "$key" "$name" "$dir" "$dim" "$dist" "$prob")")
                 continue
             fi
+            # ONLY_LOW=1: an extra run (beyond the 3rd) only for configs whose merged result is LOW
+            if [[ -n "$ONLY_LOW" && $run -gt 3 ]]; then
+                local fres; fres=$(result_file "$bkey" "$name" "$base" "$dim" "$dist" "$prob")
+                if [[ -f "$fres" ]] && ! is_low "$fres"; then
+                    continue
+                fi
+            fi
             # the run dir reads the input from <grid>/<name>/<name>.json
             if [[ -z "${DRY_RUN:-}" && ! -e "$DB_ROOT/$dir/$name/$name.json" ]]; then
                 mkdir -p "$DB_ROOT/$dir/$name"
@@ -359,13 +381,20 @@ main() {
         local m bkey name base dim dist prob k busy
         for m in "${to_merge[@]}"; do
             read -r bkey name base dim dist prob <<< "$m"
+            # runs this config has: 1..3 always, plus any later run with a result or a queued job
+            # (ONLY_LOW skips run4+ for configs that are not LOW, so those merge over 3 runs)
+            local nruns=3
+            for k in $(seq 4 "$RUNS"); do
+                if grep -qx "$(job_name "${bkey}_run$k")" <<< "$queued" || \
+                   [[ -f "$(result_file "" "$name" "${base}_run$k" "$dim" "$dist" "$prob")" ]]; then nruns=$k; fi
+            done
             busy=0
-            for k in $(seq 1 "$RUNS"); do
+            for k in $(seq 1 "$nruns"); do
                 grep -qx "$(job_name "${bkey}_run$k")" <<< "$queued" && busy=1
                 [[ -f "$(result_file "" "$name" "${base}_run$k" "$dim" "$dist" "$prob")" ]] || busy=1
             done
             (( busy )) && continue
-            echo "   $(python3 merge_runs.py --root "$DB_ROOT" --grid "$base" --name "$name" --dist "$dist" --prob "$prob" --runs "$RUNS" --outputs "$OUTPUTS" 2>&1 | tail -1)"
+            echo "   $(python3 merge_runs.py --root "$DB_ROOT" --grid "$base" --name "$name" --dist "$dist" --prob "$prob" --runs "$nruns" --outputs "$OUTPUTS" 2>&1 | tail -1)"
             status_lines+=("MERGED   $bkey  $(result_line "$bkey" "$name" "$base" "$dim" "$dist" "$prob")$(merged_note "$(result_file "$bkey" "$name" "$base" "$dim" "$dist" "$prob")")")
         done
     fi

@@ -27,4 +27,6 @@ def format_y_axis(value, tick_number):
             return f"{value / 1000:.1f}K"
         return f"{int(value / 1000)}K"
 
+    if 0 < value < 1:  # 0.1, 0.01 (log axes reaching near-exact reconstructions)
+        return f"{value:g}"
     return f"{int(value)}"

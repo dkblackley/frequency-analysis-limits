@@ -107,8 +107,56 @@ def load_grid_mse_data(base_dir, datasets, methods, distributions, grid_sizes):
 # CONVEX HULL METRICS LOGIC
 # =========================================================
 
+def grid_placement_space(embedding, n, num_samples=1000, seed=0, keep_aspect=False):
+    """
+    A baseline's (Even Less / Remin) reconstruction space on an n x n grid, without using any plaintext:
+    num_samples databases drawn uniformly from every placement of its embedding that lies on the grid.
+
+    A placement = (box size w x h, reflection r, rotation theta, shift):
+      1. the embedding's bounding box is scaled to a w x h box of grid cells, w, h in 1..n (keep_aspect=True:
+         h follows w by the embedding's aspect ratio); w = h = 1 puts every record in one cell,
+         w = h = n fills the grid;
+      2. optionally reflected (x -> -x), then rotated by theta in {0, 1, ..., 359} degrees about the box
+         centre. Reflection + the 360 rotations also give the horizontal, vertical and both diagonal flips
+         (e.g. vertical flip = reflection + 180 degrees), so all flips are covered;
+      3. shifted by whole cells, then every coordinate rounded to its grid cell.
+    A placement with any record outside [1, n]^2 is not used. Draw: (w, h, r, theta) uniformly, accepted with
+    probability (#in-grid shifts) / n^2 (rejection sampling: redrawn otherwise), then a uniform in-grid
+    shift, i.e. uniform over all (w, h, r, theta, shift) that stay on the grid.
+    Returns a list of (len(embedding), 2) float arrays with integer values in 1..n.
+    """
+    e = np.asarray(embedding, dtype=float)
+    lo, hi = e.min(axis=0), e.max(axis=0)
+    span = np.where(hi - lo > 0, hi - lo, 1.0)
+    unit = (e - lo) / span - 0.5  # bounding box -> [-0.5, 0.5]^2, centred
+    aspect = span[1] / span[0]
+    rng = np.random.default_rng(seed)
+    clouds = []
+    while len(clouds) < num_samples:
+        w = int(rng.integers(1, n + 1))
+        h = max(1, min(n, int(round(1 + (w - 1) * aspect)))) if keep_aspect else int(rng.integers(1, n + 1))
+        refl = rng.integers(0, 2)
+        rad = np.radians(rng.integers(0, 360))
+        x, y = unit[:, 0] * (w - 1), unit[:, 1] * (h - 1)
+        if refl:
+            x = -x
+        c, s = np.cos(rad), np.sin(rad)
+        px, py = x * c - y * s, x * s + y * c
+        px, py = px - px.min(), py - py.min()  # rotated shape's lower-left corner at 0
+        # in-grid shifts ox, oy (whole cells): 1 + o + extent <= n after rounding
+        nx = n - int(np.round(px).max())
+        ny = n - int(np.round(py).max())
+        if nx <= 0 or ny <= 0 or rng.random() >= nx * ny / (n * n):
+            continue  # does not fit / rejected so the draw stays uniform over all placements
+        ox, oy = rng.integers(0, nx), rng.integers(0, ny)
+        clouds.append(np.column_stack((1 + ox + np.round(px), 1 + oy + np.round(py))))
+    return clouds
+
+
 def generate_sampled_reconstructions(data, num_samples=10000):
-    """Mimics Rust's `generate_sampled_reconstructions` sweep behavior for Remin/Even Less"""
+    """LEGACY (the paper's Table II): sweeps the RAW embedding coordinates, which are NOT on the grid
+    (Remin ~ +-15, Even Less ~ +-1), so its centroid/diameter MSE is just the distance of the truth to the
+    origin. Use grid_placement_space instead. Kept only for working_rebuttal.py --original-sweep."""
     point_clouds = []
     true_pts = np.array([p['true'] for p in data])
     recon_pts = np.array([p['reconstructed'] for p in data])
@@ -170,12 +218,138 @@ def compute_dataset_metrics(point_clouds, true_pts):
     return total_cent_mse / valid_count, total_diam_mse / valid_count
 
 
+def mass_centroid_mse(point_clouds, true_pts):
+    """Per record: mean position over ALL databases (centre of mass, every database weighted equally, unlike
+    the hull centroid which only uses the hull's vertices); squared distance to the truth divided by the
+    number of dimensions (same convention as compute_dataset_metrics), averaged over records."""
+    true_pts = np.asarray(true_pts, dtype=float)
+    mean_pos = np.mean(np.stack([np.asarray(c, dtype=float) for c in point_clouds]), axis=0)
+    return float(np.mean(np.sum((mean_pos - true_pts) ** 2, axis=1) / true_pts.shape[1]))
+
+
+# =========================================================
+# ORIENTATION ORACLE (default for the box plots, convex-hull figure and rebuttal tables 2b/4)
+# Every method is told its orientation, then scored. Why: the 8 symmetries of the square grid (4 rotations x
+# reflection) cannot be told apart from the leakage (identical frequencies under uniform; at low query % the
+# mirror images also fit within eps), so without this, MSE mostly measures which mirror image a method landed
+# in. LAMa: each output database in its best of the 8 grid symmetries (one of 8 choices, uses the truth).
+# Baselines: MORE than that, their exact rotation/reflection from Procrustes (any angle, uses the truth), then
+# every scale and shift is still sampled (oriented_box_space). Scale and shift never come from the truth.
+# =========================================================
+
+def grid_symmetries(a, n):
+    """a (..., k, 2) on [1, n]^2 -> (8, ..., k, 2): the 8 symmetries of the grid (4 rotations x reflection)."""
+    a = np.asarray(a, dtype=float)
+    x, y, m = a[..., 0], a[..., 1], n + 1
+    orients = [(x, y), (m - y, x), (m - x, m - y), (y, m - x), (y, x), (m - x, y), (m - y, m - x), (x, m - y)]
+    return np.stack([np.stack(o, axis=-1) for o in orients])
+
+
+def orient_to_truth(true, dbs, n):
+    """Each database in whichever of the 8 grid symmetries is closest to the truth."""
+    s = grid_symmetries(np.stack(dbs), n)  # (8, #dbs, k, 2)
+    best = ((s - np.asarray(true, dtype=float)) ** 2).sum(-1).mean(-1).argmin(0)
+    return list(s[best, np.arange(len(dbs))])
+
+
+def procrustes_rotation_only(true, emb):
+    """Embedding rotated/reflected by orthogonal Procrustes against the truth; no scale or shift from it."""
+    t = np.asarray(true, dtype=float); e = np.asarray(emb, dtype=float)
+    t, e = t - t.mean(0), e - e.mean(0)
+    U, _, Vt = np.linalg.svd(e.T @ t)
+    return e @ (U @ Vt)
+
+
+def oriented_box_space(true, embedding, n, num_samples=1000, seed=0):
+    """
+    A baseline's reconstruction space when told its orientation: the embedding rotated/reflected by
+    procrustes_rotation_only, then its bounding box scaled to any w x h cells (w, h = 1..n, from one cell to
+    the full grid) at any whole-cell position inside [1, n]^2, rounded to cells. Every such placement is on
+    the grid; drawn uniformly over all of them (w with weight n+1-w = its number of positions, h likewise).
+    """
+    r = procrustes_rotation_only(true, embedding)
+    lo, hi = r.min(0), r.max(0)
+    u = (r - lo) / np.where(hi - lo > 0, hi - lo, 1.0)
+    rng = np.random.default_rng(seed)
+    sizes = np.arange(1, n + 1)
+    p = (n + 1 - sizes) / (n + 1 - sizes).sum()
+    ws, hs = rng.choice(sizes, num_samples, p=p), rng.choice(sizes, num_samples, p=p)
+    x0s, y0s = rng.integers(1, n + 2 - ws), rng.integers(1, n + 2 - hs)
+    return [np.column_stack((x0 + np.round(u[:, 0] * (w - 1)), y0 + np.round(u[:, 1] * (h - 1))))
+            for w, h, x0, y0 in zip(ws, hs, x0s, y0s)]
+
+
+def baseline_path(base_dir, grid, db, dist, method, query_pct):
+    tag = "even_less" if method == "even_less" else "classic"
+    return f"{base_dir}/{grid}/{db}/{method}/{db}_prob{float(query_pct)}_{dist}_{grid}_{tag}.json"
+
+
+def baseline_space(base_dir, grid, db, dist, method, query_pct, num_samples=1000, keep_aspect=False,
+                   oriented=True):
+    """(true (n,2), reconstruction space of the baseline's embedding), or (None, None) if the file is missing.
+    oriented=True (default): oriented_box_space (told its orientation). False: grid_placement_space (every
+    rotation/flip/scale/shift, no truth used). Seeded from the config name, so reruns are identical."""
+    try:
+        with open(baseline_path(base_dir, grid, db, dist, method, query_pct)) as f:
+            data = json.load(f)
+    except FileNotFoundError:
+        return None, None
+    if not data:
+        return None, None
+    seed = int.from_bytes(f"{grid} {db} {dist} {method} {query_pct}".encode(), "little") % (2 ** 32)
+    true = np.array([p["true"] for p in data], dtype=float)
+    emb, n = [p["reconstructed"] for p in data], int(grid.split("x")[0])
+    if oriented:
+        space = oriented_box_space(true, emb, n, num_samples=num_samples, seed=seed)
+    else:
+        space = grid_placement_space(emb, n, num_samples=num_samples, seed=seed, keep_aspect=keep_aspect)
+    return true, space
+
+
+def lama_space(base_dir, grid, db, dist, query_pct, oriented=True):
+    """(true, [every database LAMa output]) for a sampled run, or (None, None) if missing.
+    oriented=True (default): each database in its best of the 8 grid symmetries (orient_to_truth)."""
+    path = f"{base_dir}/{grid}/{db}/limits/{db}_{dist}_p{query_pct / 100.0:g}_reconstruction.json"
+    try:
+        with open(path) as f:
+            runs = json.load(f)
+    except FileNotFoundError:
+        return None, None
+    if not runs:
+        return None, None
+    true = np.array([p["true"] for p in runs[0]], dtype=float)
+    dbs = [np.array([p["reconstructed"] for p in run], dtype=float) for run in runs if run]
+    return true, (orient_to_truth(true, dbs, int(grid.split("x")[0])) if oriented else dbs)
+
+
+def build_box_data(base_dir, db, distributions, methods, query_percents, grid="50x50", num_samples=1000,
+                   oriented=True):
+    """Box-plot JSON for plot_mse_boxplots: {dist: {method: [[query, [MSE of every database]], ...]}}.
+    MSE = calculate_mse to the truth. LAMa: every output database; baselines: num_samples from their space.
+    oriented: see the ORIENTATION ORACLE note above (False = raw, the appendix version)."""
+    out = {}
+    for dist in distributions:
+        out[dist] = {m: [] for m in methods}
+        for q in query_percents:
+            for m in methods:
+                if m == "limits":
+                    true, space = lama_space(base_dir, grid, db, dist, q, oriented=oriented)
+                else:
+                    true, space = baseline_space(base_dir, grid, db, dist, m, q, num_samples, oriented=oriented)
+                if space is None:
+                    print(f"[SKIP] {db} {dist} {m} {q}%: no file")
+                    continue
+                out[dist][m].append([q, [float(calculate_mse(true, x)) for x in space]])
+    return out
+
+
 from concurrent.futures import ProcessPoolExecutor
 from tqdm import tqdm
 
 def load_convex_mse_data(base_dir, datasets, methods, distributions, grid="15x15",
-                         limits_grid="15x15_average", query_percents=(10.0, 20.0, 30.0)):
+                         limits_grid="15x15_average", query_percents=(10.0, 20.0, 30.0), oriented=True):
     """
+    oriented:    see the ORIENTATION ORACLE note above (False = raw, the appendix version).
     grid:        folder (and file-name suffix) of the Even Less / Remin runs, e.g. "15x15" or "50x50".
     limits_grid: folder of the LAMa runs. The paper's 15x15 numbers came from "15x15_average" (not on this
                  machine); the 50x50 runs live in "50x50", the newer 15x15 runs in "15x15".
@@ -190,7 +364,7 @@ def load_convex_mse_data(base_dir, datasets, methods, distributions, grid="15x15
     for db in datasets:
         for dist in distributions:
             for query in query_percents:
-                tasks.append((db, dist, query, base_dir, data_dir, methods, grid, limits_grid))
+                tasks.append((db, dist, query, base_dir, data_dir, methods, grid, limits_grid, oriented))
 
     # 2. Spin up the pool ONCE and process all tasks concurrently
     with ProcessPoolExecutor(max_workers=target_cores) as executor:
@@ -211,49 +385,23 @@ def load_convex_mse_data(base_dir, datasets, methods, distributions, grid="15x15
 
 def _process_single_configuration(args):
     """Worker function to process one specific dataset/distribution/query combination."""
-    db, dist, query, base_dir, data_dir, methods, grid, limits_grid = args
+    db, dist, query, base_dir, data_dir, methods, grid, limits_grid, oriented = args
     results = []
 
-    # Even Less Setup
-    if "even_less" in methods:
-        try:
-            path = f"{data_dir}/{db}/even_less/{db}_prob{float(query)}_{dist}_{grid}_even_less.json"
-            with open(path, 'r') as f:
-                data = json.load(f)
-            point_clouds, true_pts = generate_sampled_reconstructions(data)
-            c_mse, d_mse = compute_dataset_metrics(point_clouds, true_pts)
-            # Append a tuple with the identifiers and the metrics
-            results.append((db, dist, "even_less", query, c_mse, d_mse))
-        except FileNotFoundError:
-            pass
-
-    # Remin Setup
-    if "remin" in methods:
-        try:
-            path = f"{data_dir}/{db}/remin/{db}_prob{float(query)}_{dist}_{grid}_classic.json"
-            with open(path, 'r') as f:
-                data = json.load(f)
-            point_clouds, true_pts = generate_sampled_reconstructions(data)
-            c_mse, d_mse = compute_dataset_metrics(point_clouds, true_pts)
-            results.append((db, dist, "remin", query, c_mse, d_mse))
-        except FileNotFoundError:
-            pass
-
-    # LAMa Limits Setup
-    if "limits" in methods:
-        try:
-            limits_query = f"{query / 100.0:g}"  # Rust Display: 0.1, 0.05, 0.01
-            path = f"{base_dir}/{limits_grid}/{db}/limits/{db}_{dist}_p{limits_query}_reconstruction.json"
-            with open(path, 'r') as f:
-                multi_run_data = json.load(f)
-
-            if multi_run_data:
-                true_pts = [p['true'] for p in multi_run_data[0]]
-                point_clouds = [np.array([p['reconstructed'] for p in run]) for run in multi_run_data]
+    # Even Less / Remin: oriented_box_space (or grid_placement_space if not oriented)
+    for meth in ("even_less", "remin"):
+        if meth in methods:
+            true_pts, point_clouds = baseline_space(base_dir, grid, db, dist, meth, query, oriented=oriented)
+            if point_clouds is not None:
                 c_mse, d_mse = compute_dataset_metrics(point_clouds, true_pts)
-                results.append((db, dist, "limits", query, c_mse, d_mse))
-        except FileNotFoundError:
-            pass
+                results.append((db, dist, meth, query, c_mse, d_mse))
+
+    # LAMa: every output database (oriented: each in its best grid symmetry)
+    if "limits" in methods:
+        true_pts, point_clouds = lama_space(base_dir, limits_grid, db, dist, query, oriented=oriented)
+        if point_clouds is not None:
+            c_mse, d_mse = compute_dataset_metrics(point_clouds, true_pts)
+            results.append((db, dist, "limits", query, c_mse, d_mse))
 
     return results
 
@@ -296,10 +444,11 @@ def load_limits_samples_mse(base_dir, datasets, distributions, target_query=10.0
 
     return nested_data
 
-def load_running_time_lines_data(base_dir, datasets, methods, distributions):
-    """Loads running time data for 10%, 20%, and 30% queries."""
+def load_running_time_lines_data(base_dir, datasets, methods, distributions, grid="50x50", limits_grid="50x50",
+                                 query_percents=(10.0, 20.0, 30.0)):
+    """Loads running time data per query percent. Even Less / Remin from <grid>/<db>/{even_less,remin},
+    LAMa from <limits_grid>/<db>/limits. (The paper's 15x15 version: grid="15x15", limits_grid="15x15_run_1".)"""
     nested_data = {db: {dist: {meth: [] for meth in methods} for dist in distributions} for db in datasets}
-    query_percents = [10.0, 20.0, 30.0]
 
     for db in datasets:
         for dist in distributions:
@@ -311,7 +460,7 @@ def load_running_time_lines_data(base_dir, datasets, methods, distributions):
 
                 # 1. Even Less
                 if "even_less" in methods:
-                    method_dir = f"{base_dir}/15x15/{db}/even_less"
+                    method_dir = f"{base_dir}/{grid}/{db}/even_less"
                     if os.path.exists(method_dir):
                         for fname in os.listdir(method_dir):
                             if "results" in fname and dist in fname and query_str_whole in fname:
@@ -325,7 +474,7 @@ def load_running_time_lines_data(base_dir, datasets, methods, distributions):
 
                 # 2. Remin
                 if "remin" in methods:
-                    method_dir = f"{base_dir}/15x15/{db}/remin"
+                    method_dir = f"{base_dir}/{grid}/{db}/remin"
                     if os.path.exists(method_dir):
                         for fname in os.listdir(method_dir):
                             if "results" in fname and dist in fname and query_str_whole in fname:
@@ -339,7 +488,7 @@ def load_running_time_lines_data(base_dir, datasets, methods, distributions):
 
                 # 3. LAMa Limits
                 if "limits" in methods:
-                    method_dir = f"{base_dir}/15x15_run_1/{db}/limits"
+                    method_dir = f"{base_dir}/{limits_grid}/{db}/limits"
                     if os.path.exists(method_dir):
                         for fname in os.listdir(method_dir):
                             if "results" in fname and dist in fname and (

@@ -12,6 +12,34 @@ MSE conventions (same as the rest of plotting/):
                      hull of that record's position over all candidate databases, then the squared distance
                      of the hull centroid / diameter midpoint to the truth, divided by the number of
                      dimensions, averaged over records.
+  * "mean MSE"     = mean of calculate_mse over every database in a method's reconstruction space
+                     (the expected error of picking one of its databases at random).
+  * "mass centroid MSE" = data_loader.mass_centroid_mse: per record, its MEAN position over all databases
+                     (every database weighted equally, not just the hull vertices), squared distance to the
+                     truth divided by the number of dimensions, averaged over records.
+  NOTE: mean MSE is NOT divided by dims, the three centroid-type columns are; compare methods within a column.
+
+Reconstruction space in the probabilistic (sampled-query) tables, items 2b and 4:
+  * LAMa: every database it output (up to 1000; fewer if that is all the run produced).
+  * DEFAULT (--baseline-space oriented): every method is told its orientation (data_loader's ORIENTATION
+    ORACLE note): each LAMa database in its best of the 8 grid symmetries; Even Less / Remin rotated/reflected
+    by Procrustes (exact angle, more than LAMa gets), then SWEEP_SAMPLES (1000) databases drawn uniformly
+    over every w x h box (w, h = 1..N) and whole-cell position (data_loader.oriented_box_space). Scale and
+    shift never come from the truth. Without it (the other options) LAMa's databases are scored raw.
+  * --baseline-space grid: Even Less / Remin: SWEEP_SAMPLES (1000) databases drawn uniformly from every placement of the
+    embedding on the N x N grid (data_loader.grid_placement_space):
+    bounding box scaled to any w x h cells (w, h = 1..N), optionally reflected, rotated by any whole degree
+    0..359 (reflection + rotation covers the horizontal / vertical / diagonal flips), shifted by whole cells,
+    rounded to cells; placements with any record off the grid are not used (rejection sampling).
+    --baseline-space boxes (older): only the 8 axis-aligned orientations, any of the 8 axis-aligned orientations (4 rotations x
+    reflection) of its bounding box, squeezed into any w x h box (w, h = 1..N) at any position inside
+    [1, N]^2, rounded to grid cells: 8 * (N(N+1)/2)^2 placements (13,005,000 at 50x50). Drawn without
+    enumerating them: w with weight N+1-w, h likewise, then a uniform position and orientation.
+    --baseline-space sweep instead draws like data_loader.generate_sampled_reconstructions (shift dx, dy in
+    {-5,-2,0,2,5}, rotation in 30-degree steps, scale in {0.9, 1, 1.1}: 900 configurations) on the grid
+    placement (bounding box -> [1, N]^2), about the grid centre. (generate_sampled_reconstructions itself
+    sweeps the RAW embedding coordinates, which are not on the grid: Remin ~ +-15, Even Less ~ +-1.)
+    Both are seeded per config, so reruns are identical.
 """
 import argparse
 import itertools
@@ -19,17 +47,19 @@ import json
 import os
 import random
 import time
+from concurrent.futures import ProcessPoolExecutor
 
 import numpy as np
 
-from data_loader import calculate_mse, compute_dataset_metrics, generate_sampled_reconstructions
+from data_loader import (calculate_mse, compute_dataset_metrics, generate_sampled_reconstructions,
+                         grid_placement_space, mass_centroid_mse, oriented_box_space, orient_to_truth)
 from falzon import falzon_mse_distribution
 from globals_vars import format_db_name
 
 BASE_DIR = "../databases"
 HIST_DIR = "../figures/histogram_mse_sol_num"
-DATASETS = ["busstop", "shopparis", "cali", "drink", "highway", "spitz"]
-DISTS = ["uniform", "gaussian", "beta"]
+DATASETS = os.environ.get("REBUTTAL_DATASETS", "busstop,shopparis,cali,drink,highway,spitz").split(",")
+DISTS = os.environ.get("REBUTTAL_DISTS", "uniform,gaussian,beta").split(",")
 BASELINES = ["even_less", "remin"]
 LABEL = {"limits": "LAMa", "even_less": "Even Less", "remin": "Remin", "reminp": "Remin+"}
 MISSING = "MISSING"
@@ -81,8 +111,17 @@ def md_table(header, rows, range_cols=None):
     print()
 
 
+def parallel_rows(fn, tasks):
+    """fn(*task) for every task on several CPUs (each config is independent); results in task order."""
+    workers = max(1, min(len(tasks), (os.cpu_count() or 2) - 1, int(os.environ.get("REBUTTAL_WORKERS", 6))))
+    if workers == 1:
+        return [fn(*t) for t in tasks]
+    with ProcessPoolExecutor(max_workers=workers) as ex:
+        return list(ex.map(fn, *zip(*tasks)))
+
+
 def h(title):
-    print("\n" + "#" * 3 + " " + title + "\n")
+    print("\n" + "#" * 3 + " " + title + "\n", flush=True)
 
 
 def runs_to_arrays(runs):
@@ -132,6 +171,95 @@ def bbox_align_candidates(embedding, n):
         (y, x), (m - x, y), (m - y, m - x), (x, m - y),          # the same, reflected
     ]
     return [np.column_stack(o) for o in orients]
+
+
+SWEEP_SAMPLES = 1000
+SWEEP_SHIFTS = [-5.0, -2.0, 0.0, 2.0, 5.0]
+SWEEP_ANGLES = [0, 30, 60, 90, 120, 150, 180, 210, 240, 270, 300, 330]
+SWEEP_SCALES = [1.0, 0.9, 1.1]
+
+
+def sweep_reconstruction_space(embedding, n, seed, num_samples=SWEEP_SAMPLES):
+    """
+    A baseline's reconstruction space: num_samples databases, each the plaintext-free grid placement of the
+    embedding (bounding box -> [1, n]^2, as in bbox_align_candidates, not rounded) scaled and rotated about
+    the grid centre and shifted, with the transformation drawn like generate_sampled_reconstructions.
+    """
+    e = np.asarray(embedding, dtype=float)
+    lo, hi = e.min(axis=0), e.max(axis=0)
+    span = np.where(hi - lo > 0, hi - lo, 1.0)
+    placed = 1 + (e - lo) / span * (n - 1)
+    centre = (n + 1) / 2.0
+    rng = random.Random(seed)
+    clouds = []
+    for _ in range(num_samples):
+        dx, dy = rng.choice(SWEEP_SHIFTS), rng.choice(SWEEP_SHIFTS)
+        rad = np.radians(rng.choice(SWEEP_ANGLES))
+        s = rng.choice(SWEEP_SCALES)
+        x, y = (placed[:, 0] - centre) * s, (placed[:, 1] - centre) * s
+        c, sn = np.cos(rad), np.sin(rad)
+        clouds.append(np.column_stack((x * c - y * sn + centre + dx, x * sn + y * c + centre + dy)))
+    return clouds
+
+
+def box_reconstruction_space(embedding, n, seed, num_samples=SWEEP_SAMPLES):
+    """
+    num_samples databases drawn uniformly from every placement of the embedding on the n x n grid: one of the
+    8 axis-aligned orientations of its bounding box, scaled into a w x h box (w, h in 1..n) at any position
+    inside [1, n]^2, rounded to grid cells. A uniform draw over all 8 * (n(n+1)/2)^2 placements = w with
+    weight n+1-w (its number of positions), h likewise, then a uniform position and orientation.
+    """
+    e = np.asarray(embedding, dtype=float)
+    lo, hi = e.min(axis=0), e.max(axis=0)
+    span = np.where(hi - lo > 0, hi - lo, 1.0)
+    u, v = ((e - lo) / span).T  # unit square
+    orients = [(u, v), (1 - v, u), (1 - u, 1 - v), (v, 1 - u), (v, u), (1 - u, v), (1 - v, 1 - u), (u, 1 - v)]
+    rng = np.random.default_rng(seed)
+    sizes = np.arange(1, n + 1)
+    p = (n + 1 - sizes) / (n + 1 - sizes).sum()
+    ws, hs = rng.choice(sizes, num_samples, p=p), rng.choice(sizes, num_samples, p=p)
+    x0s = rng.integers(1, n + 2 - ws)  # upper bound exclusive: x0 in 1..n+1-w
+    y0s = rng.integers(1, n + 2 - hs)
+    os_ = rng.integers(0, 8, num_samples)
+    clouds = []
+    for w, h, x0, y0, o in zip(ws, hs, x0s, y0s, os_):
+        ou, ov = orients[o]
+        clouds.append(np.column_stack((x0 + np.round(ou * (w - 1)), y0 + np.round(ov * (h - 1)))))
+    return clouds
+
+
+BASELINE_SPACE = os.environ.get("REBUTTAL_BASELINE_SPACE", "oriented")  # set from --baseline-space
+
+
+def config_seed(*parts):
+    """Stable seed from the config name (Python's hash() of a str changes between runs)."""
+    return int.from_bytes(" ".join(map(str, parts)).encode(), "little") % (2 ** 32)
+
+
+def load_baseline_space(grid, db, dist, method, query_pct, n):
+    """(true, reconstruction space) of a baseline run, or (None, None) if the file is missing."""
+    data = load_json(baseline_path(grid, db, dist, method, query_pct))
+    if not data:
+        return None, None
+    true = np.array([p["true"] for p in data], dtype=float)
+    emb, seed = [p["reconstructed"] for p in data], config_seed(grid, db, dist, method, query_pct)
+    if BASELINE_SPACE == "oriented":
+        return true, oriented_box_space(true, emb, n, seed=seed)
+    make = {"grid": grid_placement_space, "boxes": box_reconstruction_space,
+            "sweep": sweep_reconstruction_space}[BASELINE_SPACE]
+    return true, make(emb, n, seed=seed)
+
+
+def lama_scored(true, recons, n):
+    """LAMa's databases as scored in items 2b/4: with --baseline-space oriented (default) every method is told
+    its orientation, so each LAMa database is put in its best of the 8 grid symmetries; else raw."""
+    return orient_to_truth(true, recons, n) if BASELINE_SPACE == "oriented" else recons
+
+
+def space_metrics(true, space):
+    """[mean MSE over the space, hull centroid MSE, hull diameter MSE, mass centroid MSE] (module docstring)."""
+    c, d = compute_dataset_metrics(space, true)
+    return [float(np.mean([calculate_mse(true, x) for x in space])), c, d, mass_centroid_mse(space, true)]
 
 
 def load_baseline_candidates(grid, db, dist, method, query_pct, n):
@@ -247,6 +375,33 @@ def item1():
 # Items 2 & 3
 # =========================================================
 
+def table2_row(grid, n, q, db, dist, original_sweep):
+    row = [format_db_name(db), dist]
+    runs = load_json(lama_paths(grid, db, dist, q / 100)[0])
+    if runs:
+        true, recons = runs_to_arrays(runs)
+        row += [len(recons)] + space_metrics(true, lama_scored(true, recons, n))
+    else:
+        row += [None] * 5
+    for m in BASELINES:
+        true, space = load_baseline_space(grid, db, dist, m, q, n)
+        if space is None:
+            row += [None] * (6 if original_sweep else 4)
+            continue
+        row += space_metrics(true, space)
+        if original_sweep:
+            data = load_json(baseline_path(grid, db, dist, m, q))
+            random.seed(0)
+            clouds, t = generate_sampled_reconstructions(data)
+            oc, od = compute_dataset_metrics(clouds, t)
+            row += [oc, od]
+    return row
+
+
+def item4_row(grid, n, q, db, dist):
+    return [f"{q:g}%", format_db_name(db), dist] + realistic_row(grid, n, db, dist, q)
+
+
 def item2_and_3(original_sweep=False):
     grid, n = "50x50", 50
     h("Item 2a — Plaintext-free alignment (bbox -> [1,N]^2, round, 8 orientations): ideal case, 50x50")
@@ -287,44 +442,23 @@ def item2_and_3(original_sweep=False):
     print("Baselines use the item-2 alignment (mean over the 8 candidates). Remin+ included for reference.\n")
     md_table(["Dataset", "Dist", "LAMa", "Even Less", "Remin", "Remin+"], exp_rows, range_cols=[2, 3, 4, 5])
 
-    grid, n, q = "15x15", 15, 30.0
-    h("Item 2b — Table II eps with item-2 alignment: 15x15, 30% queries")
-    print("Centroid / diameter MSE of the per-record convex hull over the candidate set. LAMa: its sampled "
-          "reconstructions (file *_p0.3_reconstruction.json). Baselines: the 8 bbox-aligned candidates.")
+    grid, n, q = "50x50", 50, 30.0
+    h("Item 2b — Table II eps with item-2 alignment: 50x50, 30% queries")
+    print("Mean MSE over the reconstruction space, and centroid / diameter MSE of the per-record convex hull "
+          "over it. LAMa: every database it output (*_p0.3_reconstruction.json). Even Less / Remin: "
+          f"{SWEEP_SAMPLES} databases from their reconstruction space ('{BASELINE_SPACE}', module docstring).")
     if original_sweep:
         print("'orig' columns: the paper's Table II procedure (random rotation/scale/translation sweep, 10000 "
               "samples, random.seed(0)), recomputed here for reference.")
     print()
-    rows = []
-    for db in DATASETS:
-        for dist in DISTS:
-            row = [format_db_name(db), dist]
-            runs = load_json(lama_paths(grid, db, dist, q / 100)[0])
-            if runs:
-                true, recons = runs_to_arrays(runs)
-                c, d = compute_dataset_metrics(recons, true)
-                row += [len(recons), c, d]
-            else:
-                row += [None] * 3
-            for m in BASELINES:
-                true, cands, data = load_baseline_candidates(grid, db, dist, m, q, n)
-                if cands is None:
-                    row += [None] * (4 if original_sweep else 2)
-                    continue
-                c, d = compute_dataset_metrics(cands, true)
-                row += [c, d]
-                if original_sweep:
-                    random.seed(0)
-                    clouds, t = generate_sampled_reconstructions(data)
-                    oc, od = compute_dataset_metrics(clouds, t)
-                    row += [oc, od]
-            rows.append(row)
-    hdr = ["Dataset", "Dist", "LAMa #", "LAMa cent.", "LAMa diam."]
+    rows = parallel_rows(table2_row, [(grid, n, q, db, dist, original_sweep) for db in DATASETS for dist in DISTS])
+    hdr = ["Dataset", "Dist", "LAMa #", "LAMa mean MSE", "LAMa cent.", "LAMa diam.", "LAMa mass cent."]
     for m in BASELINES:
-        hdr += [f"{LABEL[m]} cent.", f"{LABEL[m]} diam."]
+        hdr += [f"{LABEL[m]} mean MSE", f"{LABEL[m]} cent.", f"{LABEL[m]} diam.", f"{LABEL[m]} mass cent."]
         if original_sweep:
             hdr += [f"{LABEL[m]} cent. (orig)", f"{LABEL[m]} diam. (orig)"]
     md_table(hdr, rows, range_cols=list(range(3, len(hdr))))
+    print_wins(rows, hdr, key_cols=2)
 
 
 # =========================================================
@@ -332,47 +466,68 @@ def item2_and_3(original_sweep=False):
 # =========================================================
 
 def realistic_row(grid, n, db, dist, q_pct):
-    """[LAMa #, true in out, median MSE, centroid MSE, eps, time] + per baseline [median MSE, centroid MSE]."""
+    """LAMa [#DBs, true in out, mean MSE, cent., diam., eps, time, consistent, true pairs outside] +
+    per baseline [mean MSE, cent., diam.] over its swept reconstruction space."""
     row = []
     runs = load_json(lama_paths(grid, db, dist, q_pct / 100)[0])
     res = load_json(lama_paths(grid, db, dist, q_pct / 100)[1])
     if runs:
         true, recons = runs_to_arrays(runs)
-        mses = [calculate_mse(true, r) for r in recons]
-        c, _ = compute_dataset_metrics(recons, true)
         lns = (res or {}).get("lns")  # only in results from the pair-LNS code
-        row += [len(recons), "yes" if lama_true_in_output(true, recons) else "NO", float(np.median(mses)), c,
-                res["eps"] if res else None, res["time_taken"] if res else None,
+        row += [len(recons), "yes" if lama_true_in_output(true, recons) else "NO"] + space_metrics(true, lama_scored(true, recons, n)) + [
+                f"{res['eps']:.4f}" if res else None, res["time_taken"] if res else None,
                 ("yes" if lns["output_is_consistent"] else "NO (best found)") if lns else "n/a (old code)",
                 lns["true_db_pairs_outside"] if lns else "n/a"]
     else:
-        row += [None] * 8
+        row += [None] * 10
     for m in BASELINES:
-        true, cands, _ = load_baseline_candidates(grid, db, dist, m, q_pct, n)
-        if cands is None:
-            row += [None, None]
-            continue
-        mses = [calculate_mse(true, cnd) for cnd in cands]
-        c, _ = compute_dataset_metrics(cands, true)
-        row += [float(np.median(mses)), c]
+        true, space = load_baseline_space(grid, db, dist, m, q_pct, n)
+        row += space_metrics(true, space) if space is not None else [None] * 4
     return row
 
 
+METRICS = ["mean MSE", "cent.", "diam.", "mass cent."]
+
+
+def print_wins(rows, hdr, key_cols):
+    """Per metric: in how many configs LAMa is strictly lower than BOTH baselines, plus the configs where it
+    is not (lower = better). Configs missing a method are not counted."""
+    print("**Does LAMa win?** (lower is better; LAMa must beat both Even Less and Remin)\n")
+    out = []
+    for metric in METRICS:
+        li = hdr.index(f"LAMa {metric}")
+        bi = [hdr.index(f"{LABEL[m]} {metric}") for m in BASELINES]
+        wins, total, losses = 0, 0, []
+        for r in rows:
+            vals = [r[li]] + [r[i] for i in bi]
+            if any(not isinstance(v, (float, int, np.floating)) for v in vals):
+                continue
+            total += 1
+            if vals[0] < min(vals[1:]):
+                wins += 1
+            else:
+                losses.append(" ".join(str(c) for c in r[:key_cols]) +
+                              f" (LAMa {vals[0]:.1f} vs " + ", ".join(f"{v:.1f}" for v in vals[1:]) + ")")
+        out.append([metric, f"{wins}/{total}", "; ".join(losses) if losses else "none"])
+    md_table(["Metric", "LAMa wins", "Configs where LAMa does not win"], out)
+
+
 def item4():
-    hdr_tail = ["LAMa #DBs", "true DB in out", "LAMa median MSE", "LAMa cent.", "eps", "LAMa time (s)",
-                "all pairs within eps", "true DB pairs outside eps",
-                "EL median MSE", "EL cent.", "Remin median MSE", "Remin cent."]
-    for grid, qs in [("15x15", [1.0, 2.0, 5.0, 10.0, 20.0, 30.0]), ("30x30", [10.0, 20.0, 30.0]),
-                     ("50x50", [1.0, 2.0, 5.0, 10.0, 20.0, 30.0])]:
+    hdr_tail = ["LAMa #DBs", "true DB in out", "LAMa mean MSE", "LAMa cent.", "LAMa diam.", "LAMa mass cent.", "eps", "LAMa time (s)",
+                "all pairs within eps", "true DB pairs outside eps"]
+    for m in BASELINES:
+        hdr_tail += [f"{LABEL[m]} mean MSE", f"{LABEL[m]} cent.", f"{LABEL[m]} diam.", f"{LABEL[m]} mass cent."]
+    numeric = {"LAMa #DBs", "LAMa time (s)", "true DB pairs outside eps"}
+    for grid, qs in [("50x50", [1.0, 2.0, 5.0, 10.0, 20.0, 30.0])]:
         n = grid_n(grid)
         h(f"Item 4 — Realistic case (sampled queries), {grid}")
-        print("Baselines use the item-2 alignment (8 candidates). MISSING = run never done / not on disk.\n")
-        rows = []
-        for q in qs:
-            for db in DATASETS:
-                for dist in DISTS:
-                    rows.append([f"{q:g}%", format_db_name(db), dist] + realistic_row(grid, n, db, dist, q))
-        md_table(["Query %", "Dataset", "Dist"] + hdr_tail, rows, range_cols=[3, 5, 6, 7, 8, 12, 13, 14, 15])
+        print(f"Reconstruction spaces: LAMa = every database it output; Even Less / Remin = {SWEEP_SAMPLES} "
+              f"databases from '{BASELINE_SPACE}' (module docstring). MISSING = run never done / not on disk.\n")
+        rows = parallel_rows(item4_row, [(grid, n, q, db, dist) for q in qs for db in DATASETS for dist in DISTS])
+        hdr = ["Query %", "Dataset", "Dist"] + hdr_tail
+        md_table(hdr, rows, range_cols=[i for i, c in enumerate(hdr)
+                                        if c in numeric or c.endswith(("mean MSE", "cent.", "diam."))])
+        print_wins(rows, hdr, key_cols=3)
 
 
 def item5():
@@ -388,7 +543,15 @@ if __name__ == "__main__":
     ap.add_argument("--items", default="1,2,4,5", help="comma list of items (2 also prints item 3)")
     ap.add_argument("--original-sweep", action="store_true",
                     help="also recompute the paper's random-sweep Table II eps for the baselines (slow)")
+    ap.add_argument("--datasets", default=",".join(DATASETS), help="comma list (items 1b, 2, 4)")
+    ap.add_argument("--dists", default=",".join(DISTS), help="comma list (items 1b, 2, 4)")
+    ap.add_argument("--baseline-space", choices=["oriented", "grid", "boxes", "sweep"], default="oriented",
+                    help="Even Less / Remin reconstruction space in items 2b and 4 (see the module docstring)")
     args = ap.parse_args()
+    BASELINE_SPACE = args.baseline_space
+    DATASETS, DISTS = args.datasets.split(","), args.dists.split(",")
+    os.environ["REBUTTAL_DATASETS"], os.environ["REBUTTAL_DISTS"] = args.datasets, args.dists
+    os.environ["REBUTTAL_BASELINE_SPACE"] = BASELINE_SPACE  # worker processes re-import this module
     items = set(args.items.split(","))
     t0 = time.time()
     if "1" in items:

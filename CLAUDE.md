@@ -182,7 +182,9 @@ TIMEOUT -> 2x time; a run that hit its LNS deadline before 1000 outputs -> rerun
 85% of the limit minus 15 min, so jobs normally finish and write results. Re-run run_me.sh to resubmit
 whatever failed; it never deletes results. 2D configs: RUNS=3 one-shot runs each (only runs with no result
 are resubmitted), merged when all are finished; a config whose 50x50 result already has 1000 consistent
-DBs gets no runs; merged < 100 consistent shows LOW in the status. RUNS=4 adds a run4. Partitions: normal (7 days, 180 GB+ nodes), bigmem (1 TB).
+DBs gets no runs; merged < 100 consistent shows LOW in the status. RUNS=4 adds a run4; with ONLY_LOW=1 the
+extra run goes only to LOW configs (others keep merging over runs 1-3). RUNS defaults to the highest
+databases/<grid>_run<k> on disk (min 3), so a plain `bash run_me.sh status` still merges run4 in. Partitions: normal (7 days, 180 GB+ nodes), bigmem (1 TB).
 
 Old (pre-2026-11-17) failure history, from sacct: job 3275393 (probs_2d array) and 3275408 (highdim).
 
@@ -203,6 +205,29 @@ Python needs numpy, scipy, matplotlib, tqdm (no system env has scipy; make a ven
   `compute_dataset_metrics` (Table II: per-record convex hull over candidates -> centroid / diameter-midpoint
   MSE, divided by dims), `load_convex_mse_data(..., grid=, limits_grid=)`.
 - `working_rebuttal.py`: prints the rebuttal tables (items 1-5) as markdown; never estimates, prints MISSING.
+  Since 2026-11-19 items 2b and 4 use 50x50 only (Even Less / Remin at 1-30% now exist there); item 1b (TV
+  noise) is still 15x15, the only grid with noise runs. main.py's convex-hull figure is 50x50 too
+  (plot_convex_mse xticks/ylim args; defaults reproduce the 15x15 paper figure).
+  DEFAULT since 2026-11-19 (oriented=True in build_box_data / load_convex_mse_data / lama_space /
+  baseline_space; working_rebuttal --baseline-space oriented): every method is TOLD ITS ORIENTATION, because
+  the 8 grid symmetries are indistinguishable from leakage (uniform: identical frequencies; low query %: mirror
+  images fit eps), so raw MSE mostly measured which mirror image a method landed in (LAMa won 47/107 raw).
+  LAMa: each output DB in its best of the 8 grid symmetries (orient_to_truth). Baselines: exact Procrustes
+  rotation/reflection (any angle, more than LAMa gets), then oriented_box_space samples every w x h box and
+  shift (scale/shift never from the truth). Result: LAMa wins 107/107 on mean MSE, hull centroid, hull
+  diameter and mass centroid. oriented=False / other --baseline-space = raw (appendix), described next.
+  Probabilistic tables (2b, 4), box plots and load_convex_mse_data: each method's 'reconstruction space' =
+  LAMa's output DBs (<= 1000, as many as the run produced) vs 1000 DBs per baseline from
+  data_loader.grid_placement_space (since 2026-11-19): the embedding's bbox scaled to any w x h cells
+  (w, h = 1..N, independent), optional reflection, rotation by any whole degree, whole-cell shift, rounded;
+  placements with a record off the grid are rejected, so the draw is uniform over all on-grid placements
+  (this favours small boxes: many more shifts). No plaintext used. Seeded per config. Columns: mean MSE
+  (not /dims), hull centroid, hull diameter, mass centroid (mean position over all DBs) MSE (all three /dims),
+  plus a "Does LAMa win?" summary. working_rebuttal.py --baseline-space boxes|sweep = the older spaces;
+  --datasets/--dists filter. Box-plot JSON: build_box_data -> figures/box/<db>_50x50_mse_distribution_boxplot.json.
+  LEGACY: generate_sampled_reconstructions (paper's Table II) sweeps the RAW embedding (Remin ~ +-15, Even
+  Less ~ +-1, not on the grid), so its baseline numbers were the distance of the truth to the origin
+  (flat, identical lines: e.g. Amsterdam 682 at every query %). Only used by --original-sweep now.
   Item 2 alignment for baselines: bbox -> [1,N]^2, round, 8 orientations. Note: with 8 symmetric candidates
   the hull centroid/diameter midpoint is always the grid centre, so baseline eps no longer depends on method.
 - `falzon.py`: Falzon et al.'s output E(D) built from the true DB (4 * 2^r databases, r reflectable

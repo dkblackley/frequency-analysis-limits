@@ -48,11 +48,11 @@ DIST_MARKERS = {
 }
 
 MARKERS = {
-    'limits': 's',  # Square for LAMa
-    'even_less': '*',  # Star for Even Less
-    'remin': 'o',  # Circle for Remin
-    'reminp': '^',  # Triangle for Remin+
-    'falzon': 'D',  # Diamond for Falzon et al.
+    'limits': 's',
+    'even_less': '*',
+    'remin': 'o',
+    'reminp': '^',
+    'falzon': 'D',
 }
 
 LABELS = {
@@ -106,6 +106,7 @@ if __name__ == "__main__":
     grid_meth = methods + ["reminp"]
     distributions = ["uniform", "gaussian", "beta"]
     grid_sizes = [(n, f"{n}x{n}") for n in range(20, 51, 10)]
+    query_percents_50 = (1.0, 2.0, 5.0, 10.0, 20.0, 30.0)
 
     # # ---------------------------------------------------------
     # # 1. Grid Size vs MSE Plots
@@ -124,14 +125,13 @@ if __name__ == "__main__":
     # (The paper's original figure used 15x15: grid="15x15", limits_grid="15x15_average",
     #  query_percents=(10.0, 20.0, 30.0) and plot_convex_mse's default axes.)
     # ---------------------------------------------------------
-    print("Loading nested data for Convex Hull metrics (50x50)...")
-    query_percents_50 = (1.0, 2.0, 5.0, 10.0, 20.0, 30.0)
-    convex_50 = load_convex_mse_data(BASE_DIR, datasets, methods, distributions,
-                                     grid="50x50", limits_grid="50x50", query_percents=query_percents_50)
-    print("Generating Convex Hull Query % vs MSE plots (50x50)...")
-    for db in datasets:
-        plot_convex_mse(convex_50, db, distributions, OUTPUT_DIR, METHOD_ORDER, COLORS, MARKERS, LABELS,
-                        grid_tag="_50x50", xticks=query_percents_50, ylim=None, yticks=None, xscale="category")
+    # print("Loading nested data for Convex Hull metrics (50x50)...")
+    # convex_50 = load_convex_mse_data(BASE_DIR, datasets, methods, distributions,
+    #                                  grid="50x50", limits_grid="50x50", query_percents=query_percents_50)
+    # print("Generating Convex Hull Query % vs MSE plots (50x50)...")
+    # for db in datasets:
+    #     plot_convex_mse(convex_50, db, distributions, OUTPUT_DIR, METHOD_ORDER, COLORS, MARKERS, LABELS,
+    #                     grid_tag="_50x50", xticks=query_percents_50, ylim=None, yticks=None, xscale="category")
 
     # # BOX PLOTS (50x50): MSE of every database in each method's reconstruction space.
     # # Every method told its orientation (data_loader ORIENTATION ORACLE): LAMa = its output DBs, each in its
@@ -143,8 +143,10 @@ if __name__ == "__main__":
     #     box_json_path = f"../figures/box/{db}_50x50_mse_distribution_boxplot.json"
     #     with open(box_json_path, "w") as f:
     #         json.dump(build_box_data(BASE_DIR, db, distributions, methods, query_percents_50), f)
-    #     plot_mse_boxplots(box_json_path, db, distributions, OUTPUT_DIR, METHOD_ORDER, COLORS, LABELS,
-    #                       queries=query_percents_50, tag="_50x50")
+    #     # Two figures per database: low (1/2/5%) and high (10/20/30%) query percents
+    #     for part, queries in (("low", (1.0, 2.0, 5.0)), ("high", (10.0, 20.0, 30.0))):
+    #         plot_mse_boxplots(box_json_path, db, distributions, OUTPUT_DIR, METHOD_ORDER, COLORS, LABELS,
+    #                           queries=queries, tag=f"_50x50_{part}")
 
     # # HISTOGRAMS
     # print("Generating Histogram Plots...")
@@ -179,15 +181,15 @@ if __name__ == "__main__":
     # ---------------------------------------------------------
     # LAMa vs Falzon et al., With / Without Guarantees (one figure per distribution)
     # ---------------------------------------------------------
-    print("Generating LAMa vs Falzon et al. With/Without Guarantees Plots...")
-    falzon_grid = 50
-    # Rows top to bottom: Spitz on top (carries the titles), Paris at the bottom (x-axis label)
-    guarantee_rows = ["spitz", "busstop", "cali", "drink", "highway", "shopparis"]
-    for dist in ["gaussian", "beta", "uniform"]:
-        paths = {db: (f"../figures/histogram_mse_sol_num/mse_histogram_{db}_{dist}.json",
-                      f"{BASE_DIR}/{falzon_grid}x{falzon_grid}/{db}/limits/{db}_{dist}_e0_d0.9_reconstruction.json")
-                 for db in guarantee_rows}
-        plot_falzon_guarantees(paths, (falzon_grid, falzon_grid), dist, OUTPUT_DIR, COLORS, LABELS)
+    # print("Generating LAMa vs Falzon et al. With/Without Guarantees Plots...")
+    # falzon_grid = 50
+    # # Rows top to bottom: Spitz on top (carries the titles), Paris at the bottom (x-axis label)
+    # guarantee_rows = ["spitz", "busstop", "cali", "drink", "highway", "shopparis"]
+    # for dist in ["gaussian", "beta", "uniform"]:
+    #     paths = {db: (f"../figures/histogram_mse_sol_num/mse_histogram_{db}_{dist}.json",
+    #                   f"{BASE_DIR}/{falzon_grid}x{falzon_grid}/{db}/limits/{db}_{dist}_e0_d0.9_reconstruction.json")
+    #              for db in guarantee_rows}
+    #     plot_falzon_guarantees(paths, (falzon_grid, falzon_grid), dist, OUTPUT_DIR, COLORS, LABELS)
 
     # # ---------------------------------------------------------
     # # Noisy query distribution (--dist-noise) table
@@ -228,8 +230,8 @@ if __name__ == "__main__":
     #         labels=LABELS
     #     )
 
-    # # ---------------------------------------------------------
-    # # 3D Spatial Reconstruction Plots
-    # # ---------------------------------------------------------
-    # print("Generating 3D Spatial Reconstruction Plots...")
-    # plot_3d_reconstruction("../figures/3d_recon/points_dump.json", OUTPUT_DIR)
+    # ---------------------------------------------------------
+    # 3D Spatial Reconstruction Plots
+    # ---------------------------------------------------------
+    print("Generating 3D Spatial Reconstruction Plots...")
+    plot_3d_reconstruction("../figures/3d_recon/points_dump.json", OUTPUT_DIR)

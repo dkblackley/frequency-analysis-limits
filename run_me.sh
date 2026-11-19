@@ -7,6 +7,15 @@
 #   bash run_me.sh status             # only refresh logs/resource_usage.tsv and print where every run is
 #   DRY_RUN=1 bash run_me.sh          # show what it would submit, change nothing
 #   PROBS="0.1 0.2" DISTS=uniform bash run_me.sh   # narrow the sweep
+#   NOISE=1 bash run_me.sh            # also the TV-noise sweep on GRID_2D (50x50): all queries, exact
+#                                     # frequencies, true distribution NOISES (TV) away from --dist
+#   NOISE=only bash run_me.sh spitz   # only the noise sweep (here: only spitz)
+#   NOISES="0.005 0.01" NOISE=only bash run_me.sh  # other TV distances
+#
+# Noise configs use the PERFECT pipeline (--query-percent 1.0 --dist-noise <tv>): every t = 2 table is
+# built and every database within eps is enumerated, with no cap. On 15x15 the count already explodes
+# above ~0.02-0.03; at 50x50 the big datasets may OOM even on bigmem. A noise config counts as done once
+# results_<name>_<dist>_p1_noise<tv>.json exists (it has no "lns" field, it is not a pair-LNS result).
 #
 # What it does, in order:
 #   1. git pull --ff-only (NO_PULL=1 skips it); if this script changed, it restarts itself
@@ -42,6 +51,11 @@ read -r -a DISTS_ARR <<< "${DISTS:-uniform gaussian beta}"
 read -r -a PROBS_ARR <<< "${PROBS:-0.01 0.02 0.05 0.1 0.2 0.3}"
 HIGHDIM_DIST="${HIGHDIM_DIST:-gaussian}"
 read -r -a HIGHDIM_PROBS_ARR <<< "${HIGHDIM_PROBS:-0.3}"
+NOISE="${NOISE:-}"           # 1: add the TV-noise sweep, only: nothing else
+read -r -a NOISES_ARR <<< "${NOISES:-0.005 0.01 0.02 0.03 0.04 0.05}"   # same TV distances as the 15x15 table
+NOISE_MEM_GB="${NOISE_MEM_GB:-64}"   # first attempt; OOM doubles it (bigmem past NORMAL_MAX_GB)
+NOISE_TIME_H="${NOISE_TIME_H:-12}"   # first attempt; TIMEOUT doubles it
+NOISE_CPUS="${NOISE_CPUS:-32}"
 
 # ---------------------------------------------------------------- resources
 # Measured: Spitz 50x50 peaks at 4.1 GB, nearly all of it the 50x50 query distribution (same for every
@@ -79,16 +93,31 @@ to_hours() { # [D-]HH:MM:SS -> hours
         printf "%.2f", d * 24 + s / 3600 }'
 }
 
-# config line: key name dir dim dist prob default_mem_gb default_time_h cpus
-# (2D: one line per run, dir <grid>_run<k>; the merged result lives in <grid>)
+# Rust's f64 Display, as it appears in file names: 1.0 -> 1, 0.050 -> 0.05
+rust_float() { awk -v x="$1" 'BEGIN { printf "%g", x + 0 }'; }
+
+# config line: key name dir dim dist prob default_mem_gb default_time_h cpus noise
+# (2D: one line per run, dir <grid>_run<k>; the merged result lives in <grid>. noise 0 = no noise)
 configs() {
-    local names=("$@") n d p k
+    local names=("$@") n d p k z
     [[ ${#names[@]} -eq 0 ]] && names=("${NAMES_2D[@]}")
+    if [[ -n "$NOISE" ]]; then
+        # single run straight into <grid>/ (exhaustive enumeration: no runs to merge)
+        for n in "${names[@]}"; do
+            for d in "${DISTS_ARR[@]}"; do
+                for z in "${NOISES_ARR[@]}"; do
+                    z=$(rust_float "$z")
+                    echo "${n}_${d}_p1_noise${z}@${GRID_2D} $n ${GRID_2D} 2 $d 1 $NOISE_MEM_GB $NOISE_TIME_H $NOISE_CPUS $z"
+                done
+            done
+        done
+        [[ "$NOISE" == only ]] && return
+    fi
     for n in "${names[@]}"; do
         for d in "${DISTS_ARR[@]}"; do
             for p in "${PROBS_ARR[@]}"; do
                 for k in $(seq 1 "$RUNS"); do
-                    echo "${n}_${d}_p${p}@${GRID_2D}_run$k $n ${GRID_2D}_run$k 2 $d $p $MEM_2D_GB $(time_2d "$n" "$p") $CPUS_2D"
+                    echo "${n}_${d}_p${p}@${GRID_2D}_run$k $n ${GRID_2D}_run$k 2 $d $p $MEM_2D_GB $(time_2d "$n" "$p") $CPUS_2D 0"
                 done
             done
         done
@@ -99,14 +128,14 @@ configs() {
             # needed hundreds of GB just for that), and its search is likely too slow to converge in time.
             # times from the 2026-11-17 runs: nh used all of 12 h, 4D all of 4 h (367 of 1000 outputs),
             # 2D/3D finished in minutes; 5D/6D never got past the start solve
-            echo "nh_${HIGHDIM_DIST}_p${p}@16x16x14 nh 16x16x14 3 $HIGHDIM_DIST $p 16 24 32"
+            echo "nh_${HIGHDIM_DIST}_p${p}@16x16x14 nh 16x16x14 3 $HIGHDIM_DIST $p 16 24 32 0"
             local dim dir
             for dim in 2 3 4 5 6; do
                 dir=$(printf '6%.0s' $(seq 1 "$dim") | sed 's/./&x/g; s/x$//')
-                if [[ $dim -le 3 ]]; then echo "grid${dim}d_${HIGHDIM_DIST}_p${p}@$dir grid $dir $dim $HIGHDIM_DIST $p 8 4 16"
-                elif [[ $dim -eq 4 ]]; then echo "grid${dim}d_${HIGHDIM_DIST}_p${p}@$dir grid $dir $dim $HIGHDIM_DIST $p 8 12 16"
-                elif [[ $dim -eq 5 ]]; then echo "grid${dim}d_${HIGHDIM_DIST}_p${p}@$dir grid $dir $dim $HIGHDIM_DIST $p 32 24 32"
-                else echo "grid${dim}d_${HIGHDIM_DIST}_p${p}@$dir grid $dir $dim $HIGHDIM_DIST $p 600 48 48"; fi
+                if [[ $dim -le 3 ]]; then echo "grid${dim}d_${HIGHDIM_DIST}_p${p}@$dir grid $dir $dim $HIGHDIM_DIST $p 8 4 16 0"
+                elif [[ $dim -eq 4 ]]; then echo "grid${dim}d_${HIGHDIM_DIST}_p${p}@$dir grid $dir $dim $HIGHDIM_DIST $p 8 12 16 0"
+                elif [[ $dim -eq 5 ]]; then echo "grid${dim}d_${HIGHDIM_DIST}_p${p}@$dir grid $dir $dim $HIGHDIM_DIST $p 32 24 32 0"
+                else echo "grid${dim}d_${HIGHDIM_DIST}_p${p}@$dir grid $dir $dim $HIGHDIM_DIST $p 600 48 48 0"; fi
             done
         done
     fi
@@ -122,12 +151,23 @@ time_2d() {
 }
 
 job_name() { echo "LAMa_${1%@*}_${1#*@}"; }
-result_file() { echo "$DB_ROOT/$3/$2/limits/results_${2}_${5}_p${6}.json"; } # key name dir dim dist prob
-recon_file() { echo "$DB_ROOT/$3/$2/limits/${2}_${5}_p${6}_reconstruction.json"; }
+# args: key name dir dim dist prob [noise]; noise 0/absent = no noise. prob 1.0 is written "1" by Rust
+run_tag() { # name dist prob noise -> <name>_<dist>_p<prob>[_noise<tv>]
+    local t="${1}_${2}_p$(rust_float "$3")"
+    awk -v z="${4:-0}" 'BEGIN { exit !(z + 0 > 0) }' && t+="_noise$(rust_float "$4")"
+    echo "$t"
+}
+result_file() { echo "$DB_ROOT/$3/$2/limits/results_$(run_tag "$2" "$5" "$6" "${7:-0}").json"; }
+recon_file() { echo "$DB_ROOT/$3/$2/limits/$(run_tag "$2" "$5" "$6" "${7:-0}")_reconstruction.json"; }
 # none: no result from the pair-LNS code | done | more: it hit its deadline before OUTPUTS consistent
 # databases (rerun with 2x time) | exhausted: finished early with fewer (no more neighbours to find; done)
+# Noise configs (perfect pipeline, no "lns" field): done as soon as the results file exists.
 result_state() {
     local f; f=$(result_file "$@")
+    if awk -v z="${7:-0}" 'BEGIN { exit !(z + 0 > 0) }'; then
+        [[ -f "$f" ]] && echo done || echo none
+        return
+    fi
     [[ -f "$f" ]] && grep -q '"lns"' "$f" || { echo none; return; }
     python3 - "$f" "$OUTPUTS" <<'PY'
 import json, sys
@@ -138,9 +178,18 @@ else: print("exhausted")
 PY
 }
 result_line() {
-    python3 - "$(result_file "$@")" <<'PY'
+    python3 - "$(result_file "$@")" "$(recon_file "$@")" <<'PY'
 import json, sys
-d = json.load(open(sys.argv[1])); l = d["lns"]
+d = json.load(open(sys.argv[1])); l = d.get("lns")
+if l is None:  # perfect pipeline (noise configs): exhaustive enumeration, no LNS summary
+    n = d.get("number_of_databases")
+    if n is None:
+        try:
+            n = len(json.load(open(sys.argv[2])))
+        except FileNotFoundError:
+            n = "?"
+    print(f"{n} DBs (all within eps, exhaustive), eps={d['eps']:.5f}, {d['time_taken'] / 3600:.2f}h")
+    sys.exit()
 print(f"{l['returned']} DBs ({'all consistent' if l['output_is_consistent'] else 'NOT consistent: best found'}), "
       f"true DB in output={l['true_db_in_output']}, true DB pairs outside eps={l['true_db_pairs_outside']}, "
       f"{d['time_taken'] / 3600:.2f}h{', hit deadline' if l['hit_deadline'] else ''}")
@@ -283,10 +332,10 @@ main() {
     # 5. submit
     local n_done=0 n_queued=0 n_sub=0 n_giveup=0
     local status_lines=() to_merge=()
-    while read -r key name dir dim dist prob mem time cpus; do
+    while read -r key name dir dim dist prob mem time cpus noise; do
         local jn; jn=$(job_name "$key")
-        local res; res=$(result_file "$key" "$name" "$dir" "$dim" "$dist" "$prob")
-        local rstate; rstate=$(result_state "$key" "$name" "$dir" "$dim" "$dist" "$prob")
+        local res; res=$(result_file "$key" "$name" "$dir" "$dim" "$dist" "$prob" "$noise")
+        local rstate; rstate=$(result_state "$key" "$name" "$dir" "$dim" "$dist" "$prob" "$noise")
         if [[ "$dir" =~ ^(.+)_run([0-9]+)$ ]]; then
             local base=${BASH_REMATCH[1]} run=${BASH_REMATCH[2]} bkey=${key%_run*}
             local fstate; fstate=$(result_state "$bkey" "$name" "$base" "$dim" "$dist" "$prob")
@@ -315,7 +364,7 @@ main() {
             fi
         elif [[ "$rstate" == done || "$rstate" == exhausted ]]; then
             n_done=$((n_done + 1))
-            status_lines+=("DONE     $key  $(result_line "$key" "$name" "$dir" "$dim" "$dist" "$prob")")
+            status_lines+=("DONE     $key  $(result_line "$key" "$name" "$dir" "$dim" "$dist" "$prob" "$noise")")
             continue
         fi
         if grep -qx "$jn" <<< "$queued"; then
@@ -350,6 +399,11 @@ main() {
         local args="--dir-path $DB_ROOT/$dir --name $name --t 2 --dim $dim --dist $dist --padding 0 --query-percent $prob --lns-hours $lns_h --lns-outputs $OUTPUTS"
         # --start-secs: t = 1 start budget (60 s objective solve, then all-different-only with the rest, >= 60 s)
         [[ -n "${START_SECS:-}" ]] && args+=" --start-secs $START_SECS"
+        # noise: perfect pipeline (all queries, exact frequencies), no LNS; enumeration has no deadline
+        if [[ "$noise" != 0 ]]; then
+            args="--dir-path $DB_ROOT/$dir --name $name --t 2 --dim $dim --dist $dist --padding 0 --query-percent 1.0 --dist-noise $noise"
+            lns_h="no deadline, exhaustive enumeration"
+        fi
 
         # keep earlier results next to the new ones (old code, or a pair-LNS run that ran out of time)
         local old; old=$(dirname "$res")/archive_pre_lns
@@ -357,10 +411,10 @@ main() {
         if [[ -f "$res" && -z "${DRY_RUN:-}" ]]; then
             mkdir -p "$old"
             cp -n "$res" "$old/" 2>/dev/null
-            cp -n "$(recon_file "$key" "$name" "$dir" "$dim" "$dist" "$prob")" "$old/" 2>/dev/null
+            cp -n "$(recon_file "$key" "$name" "$dir" "$dim" "$dist" "$prob" "$noise")" "$old/" 2>/dev/null
         fi
 
-        local desc="${mem}G ${cpus}cpu ${time}h $part (LNS ${lns_h}h)$([[ $attempts -gt 0 ]] && echo ", attempt $((attempts + 1)) after $last")$([[ $rstate == more ]] && echo ", last run hit its deadline")"
+        local desc="${mem}G ${cpus}cpu ${time}h $part (LNS ${lns_h}$([[ $noise == 0 ]] && echo h))$([[ $attempts -gt 0 ]] && echo ", attempt $((attempts + 1)) after $last")$([[ $rstate == more ]] && echo ", last run hit its deadline")"
         if [[ -n "${DRY_RUN:-}" ]]; then
             status_lines+=("WOULD    $key  $desc")
             continue

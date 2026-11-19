@@ -153,7 +153,7 @@ def grid_placement_space(embedding, n, num_samples=1000, seed=0, keep_aspect=Fal
     return clouds
 
 
-def generate_sampled_reconstructions(data, num_samples=10000):
+def generate_sampled_reconstructions(data, num_samples=1000):
     """LEGACY (the paper's Table II): sweeps the RAW embedding coordinates, which are NOT on the grid
     (Remin ~ +-15, Even Less ~ +-1), so its centroid/diameter MSE is just the distance of the truth to the
     origin. Use grid_placement_space instead. Kept only for working_rebuttal.py --original-sweep."""
@@ -412,7 +412,7 @@ def load_limits_samples_mse(base_dir, datasets, distributions, target_query=10.0
     """
     nested_data = {db: {dist: [] for dist in distributions} for db in datasets}
     data_dir = f"{base_dir}/15x15_average"
-    sample_steps = [2500, 5000, 7500, 10000]
+    sample_steps = [250, 500, 750, 1000]
 
     for db in datasets:
         for dist in distributions:

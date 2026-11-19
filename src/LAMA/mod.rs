@@ -23,6 +23,7 @@ use std::time::{Duration, Instant};
 
 mod error;
 pub mod lazy_lns;
+pub mod lazy_pairs;
 pub mod mini_solver;
 pub mod query;
 pub mod selector;
@@ -57,11 +58,14 @@ pub struct SampledSearch {
     pub pipeline_attempt: usize,
     /// Seconds Pumpkin gets to find the t = 1 start
     pub start_secs: f64,
+    /// Perfect setting (--query-percent 1.0), t = 2: check pairs on demand instead of building the
+    /// pair tables (--lazy-pairs, lazy_pairs.rs). Same databases, far less memory. Default: tables.
+    pub lazy_pairs: bool,
 }
 
 impl Default for SampledSearch {
     fn default() -> Self {
-        Self { restarts: 64, lns_hours: 0.0, max_rows_per_pair: 1_000, outputs: 1000, stall_steps: 5000, near_pairs: 20, pipeline_attempt: 1, start_secs: 60.0 }
+        Self { restarts: 64, lns_hours: 0.0, max_rows_per_pair: 1_000, outputs: 1000, stall_steps: 5000, near_pairs: 20, pipeline_attempt: 1, start_secs: 60.0, lazy_pairs: false }
     }
 }
 
@@ -220,6 +224,10 @@ pub fn lama_attack(
         &(t.clone() as usize),
         perfect,
     );
+    if perfect && sampled_search.lazy_pairs {
+        info!("--lazy-pairs: t = 2 pair constraints are checked on demand (no pair tables built)");
+        translator.set_lazy_pairs(true);
+    }
 
     let query_dist_ref = &selector.query_distribution;
     let attacker_dist_ref = attacker_dist.as_ref().unwrap_or(query_dist_ref);

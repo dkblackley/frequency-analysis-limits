@@ -955,3 +955,132 @@ fn end_to_end_sampled_noisy() {
 
     info!("Test completed successfully.")
 }
+
+/// Everything one perfect-setting run produces, normalised so the two t = 2 paths can be compared
+/// (Pumpkin may find solutions in a different order, and the original code already iterates
+/// HashMaps, so only the SETS are meaningful).
+#[derive(Debug, PartialEq)]
+struct PerfectRun {
+    /// t-tuple tables after each round, rows sorted
+    tables: Vec<(usize, Vec<(Vec<i64>, Vec<Vec<i64>>)>)>,
+    /// solutions of the last global round, sorted
+    last_solutions: Vec<Vec<i64>>,
+    constraints_per_t: Vec<(usize, usize)>,
+    recons_per_t: Vec<(usize, usize)>,
+    /// final databases (record -> value), sorted
+    databases: Vec<Vec<(i64, i64)>>,
+}
+
+/// `loaded_db` and `selector` are shared by both paths: get_dom_pairs' query order (hence the
+/// gaussian/beta weights) differs between two Selector::new calls, so two separately built runs
+/// differ even with the same code.
+fn perfect_run(
+    loaded_db: &Box<dyn Searchable + Sync>,
+    selector: &Selector,
+    eps: f64,
+    max_t: usize,
+    lazy: bool,
+) -> PerfectRun {
+    let (low_pair, high_pair) = loaded_db.get_dom_pair();
+    let universe = loaded_db.get_universe();
+    let largest_enc_val: i64 = flatten_nd(&high_pair, &high_pair, &low_pair);
+    let mut translator = Translator::new(largest_enc_val, universe.clone(), &max_t, true);
+    translator.set_lazy_pairs(lazy);
+
+    let q = &selector.query_distribution;
+    let prob = |vals: &[i64]| -> f64 {
+        let recs: Vec<Record> = vals.iter().map(|&v| unflatten_nd(v, &high_pair, &low_pair)).collect();
+        q.cumulative_prob_lookup(&get_mbq(&recs))
+    };
+    // eps > 0 plays the role of the noise bound: many candidates per record, many databases
+    let active_eps = if eps == 0.0 { 1e-9 } else { eps };
+    let validate = |enc: &[i64], pt: &[i64]| -> (bool, f64) {
+        let err = (prob(enc) - prob(pt)).abs();
+        (err <= active_eps, err)
+    };
+
+    translator.process_t1(&universe, &validate);
+    for t in 2..=max_t {
+        translator.process_t_greater_than_1(t, &universe, &validate);
+    }
+
+    let mut tables = Vec::new();
+    for t in 2..=max_t {
+        let mut rows: Vec<(Vec<i64>, Vec<Vec<i64>>)> = translator.t_assignment_archive[&t]
+            .iter()
+            .map(|(k, v)| {
+                let mut v = v.clone();
+                v.sort();
+                (k.clone(), v)
+            })
+            .collect();
+        rows.sort();
+        tables.push((t, rows));
+    }
+    let mut last_solutions = translator.last_solutions.clone().unwrap_or_default();
+    last_solutions.sort();
+    let mut constraints_per_t: Vec<_> = translator.metadata.constraints_per_t.clone().into_iter().collect();
+    constraints_per_t.sort();
+    let mut recons_per_t: Vec<_> = translator.metadata.recons_per_t.clone().into_iter().collect();
+    recons_per_t.sort();
+
+    let mut solver = Solver::new(translator.get_var_index_map());
+    let mut model = translator.get_proto_model();
+    let responses = solver.solve(&mut model, largest_enc_val, false);
+    assert!(solver.solution_stat == Optimal || solver.solution_stat == Feasible, "no databases found");
+    let num_dbs = responses.values().next().map_or(0, Vec::len);
+    let mut databases: Vec<Vec<(i64, i64)>> = (0..num_dbs)
+        .map(|d| {
+            let mut db: Vec<(i64, i64)> = responses.iter().map(|(enc, vals)| (*enc, vals[d])).collect();
+            db.sort();
+            db
+        })
+        .collect();
+    databases.sort();
+
+    PerfectRun { tables, last_solutions, constraints_per_t, recons_per_t, databases }
+}
+
+/// The lazy pair path (bits + propagator, lazy_pairs.rs) must give EXACTLY what the materialised
+/// t = 2 tables give: same t = 2 tables after the round, same solutions, same bookkeeping, same
+/// final databases. Exact frequencies and noise-sized eps; uniform (8 symmetric images), gaussian
+/// and beta; t = 2 only (what the runs use).
+#[test]
+fn perfect_lazy_pairs_match_tables() {
+    let _ = env_logger::builder().is_test(true).filter_level(log::LevelFilter::Info).try_init();
+    // (dist, grid side, density %, eps, max t)
+    let cases = [
+        ("uniform", 6, 35, 0.0, 2),
+        ("gaussian", 6, 35, 0.0, 2),
+        ("uniform", 6, 35, 0.004, 2),
+        ("gaussian", 6, 35, 0.004, 2),
+        ("beta", 6, 35, 0.004, 2),
+        ("uniform", 7, 30, 0.002, 2),
+        ("gaussian", 8, 25, 0.002, 2),
+        // wide eps: many candidates per record and many databases (the noisy 50x50 regime)
+        ("uniform", 6, 35, 0.01, 2),
+        ("gaussian", 6, 35, 0.01, 2),
+        ("beta", 6, 35, 0.01, 2),
+        ("gaussian", 7, 30, 0.006, 2),
+        ("uniform", 10, 12, 0.002, 2),
+        ("uniform", 6, 35, 0.03, 2),  // 24 databases, 4464 pair rows
+        ("gaussian", 6, 35, 0.03, 2), // 18 databases, non-symmetric
+    ];
+    for (dist, side, density, eps, max_t) in cases {
+        let loaded_db: Box<dyn Searchable + Sync> = Box::new(testDB::new(2, side, density));
+        let selector = Selector::new(dist, &loaded_db);
+        let tables = perfect_run(&loaded_db, &selector, eps, max_t, false);
+        let lazy = perfect_run(&loaded_db, &selector, eps, max_t, true);
+        // the table path must agree with itself too (guards the test against nondeterminism)
+        let tables_again = perfect_run(&loaded_db, &selector, eps, max_t, false);
+        assert_eq!(tables, tables_again, "table path not deterministic: {dist} {side}x{side} eps {eps}");
+        info!(
+            "{dist} {side}x{side} {density}% eps {eps} t<={max_t}: {} databases, t=2 rows {:?}",
+            tables.databases.len(),
+            tables.constraints_per_t
+        );
+        assert!(!tables.databases.is_empty());
+        assert_eq!(tables, lazy, "lazy pairs differ from tables: {dist} {side}x{side} eps {eps}");
+    }
+}
+

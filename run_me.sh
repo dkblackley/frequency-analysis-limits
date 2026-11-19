@@ -12,9 +12,10 @@
 #   NOISE=only bash run_me.sh spitz   # only the noise sweep (here: only spitz)
 #   NOISES="0.005 0.01" NOISE=only bash run_me.sh  # other TV distances
 #
-# Noise configs use the PERFECT pipeline (--query-percent 1.0 --dist-noise <tv>): every t = 2 table is
-# built and every database within eps is enumerated, with no cap. On 15x15 the count already explodes
-# above ~0.02-0.03; at 50x50 the big datasets may OOM even on bigmem. A noise config counts as done once
+# Noise configs use the PERFECT pipeline (--query-percent 1.0 --dist-noise <tv>): every database within
+# eps is enumerated, with no cap. They run with --lazy-pairs: the t = 2 pair tables OOMed at 64 GB in
+# seconds at 50x50 (Nov 19); --lazy-pairs checks pairs on demand instead and gives the same databases
+# (test perfect_lazy_pairs_match_tables). Many databases can still make the final solve large. A noise config counts as done once
 # results_<name>_<dist>_p1_noise<tv>.json exists (it has no "lns" field, it is not a pair-LNS result).
 #
 # What it does, in order:
@@ -401,7 +402,7 @@ main() {
         [[ -n "${START_SECS:-}" ]] && args+=" --start-secs $START_SECS"
         # noise: perfect pipeline (all queries, exact frequencies), no LNS; enumeration has no deadline
         if [[ "$noise" != 0 ]]; then
-            args="--dir-path $DB_ROOT/$dir --name $name --t 2 --dim $dim --dist $dist --padding 0 --query-percent 1.0 --dist-noise $noise"
+            args="--dir-path $DB_ROOT/$dir --name $name --t 2 --dim $dim --dist $dist --padding 0 --query-percent 1.0 --dist-noise $noise --lazy-pairs"
             lns_h="no deadline, exhaustive enumeration"
         fi
 

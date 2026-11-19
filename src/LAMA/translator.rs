@@ -33,6 +33,9 @@ pub struct Translator {
     perfect: bool,
     // Store the exact, full databases that we reconstructed in the previous round.
     pub last_solutions: Option<Vec<Vec<i64>>>,
+    // Perfect setting, t = 2: pair constraints as bits + a Pumpkin propagator instead of tables
+    // (lazy_pairs.rs; same solutions, far less memory). Off by default; --lazy-pairs turns it on.
+    lazy_pairs: bool,
 }
 
 impl Translator {
@@ -67,7 +70,13 @@ impl Translator {
             found_map: debug,
             perfect,
             last_solutions: None,
+            lazy_pairs: false,
         }
+    }
+
+    /// Perfect setting, t = 2: true = lazy pair bits + propagator, false = materialised tables.
+    pub fn set_lazy_pairs(&mut self, on: bool) {
+        self.lazy_pairs = on;
     }
 
     fn get_trunc_amount(largest_val: &i64, max_t: &usize) -> Vec<i64> {
@@ -430,6 +439,11 @@ impl Translator {
             t = random_key.len();
         }
 
+        // Perfect setting, t = 2: same constraints, but as bits + a propagator (lazy_pairs.rs)
+        if self.perfect && self.lazy_pairs && t == 1 && self.last_solutions.is_none() {
+            return self.process_pairs_lazy(t_minus_1_assignments, validate_candidate);
+        }
+
         let temp_found = Mutex::new(Vec::new());
 
         let mut table_constraints: Vec<(Vec<i64>, Vec<(Vec<i64>, f64)>)> = t_minus_1_assignments
@@ -609,6 +623,31 @@ impl Translator {
         }
 
         let all_global_solutions = response.unwrap();
+        drop(mini_model);
+        let enc_tuples: Vec<Vec<i64>> = table_constraints.into_iter().map(|(k, _)| k).collect();
+        self.finish_global_round(
+            t,
+            enc_tuples,
+            all_global_solutions,
+            constrain_count.load(std::sync::atomic::Ordering::Relaxed),
+            validate_candidate,
+        )
+    }
+
+    /// Everything after the global solve of a round (moved out of process_cpsat_global unchanged so
+    /// the lazy pair path shares it): keep the solutions, rebuild every t-tuple's table from them,
+    /// re-score, bookkeeping. `enc_tuples`: the t-tuples that had a (non-empty) table this round.
+    fn finish_global_round<V>(
+        &mut self,
+        t: usize,
+        enc_tuples: Vec<Vec<i64>>,
+        all_global_solutions: Vec<Vec<i64>>,
+        constrain_count: usize,
+        validate_candidate: &V,
+    ) -> Option<HashMap<Vec<i64>, Vec<Vec<i64>>>>
+    where
+        V: Fn(&[i64], &[i64]) -> (bool, f64) + Sync + Send,
+    {
         // Don't store the last solutions for pruning in the non-perfect world. This can cause some
         // blow-ups for the non-perfect world though...
         if self.perfect {
@@ -628,13 +667,12 @@ impl Translator {
         // PHASE 4: Extract and Filter
         // ------------------------------------------------------------------------
         let mut updated_t_cache: HashMap<Vec<i64>, Vec<Vec<i64>>> =
-            HashMap::with_capacity(table_constraints.len());
+            HashMap::with_capacity(enc_tuples.len());
 
         self.proto_model.table_constraints.clear();
-        drop(mini_model);
 
 
-        for (enc_t_tuple, _old_valid_assignments) in table_constraints {
+        for enc_t_tuple in enc_tuples {
             let solver_indices: Vec<usize> = enc_t_tuple
                 .iter()
                 .map(|rec| {
@@ -684,18 +722,61 @@ impl Translator {
         }
         info!(
             "Added {} assignments in round t={}",
-            constrain_count.load(std::sync::atomic::Ordering::Relaxed),
+            constrain_count,
             t + 1
         );
-        self.metadata.constraints_per_t.insert(
-            t + 1,
-            constrain_count.load(std::sync::atomic::Ordering::Relaxed),
-        );
+        self.metadata.constraints_per_t.insert(t + 1, constrain_count);
 
         self.do_debug();
         self.reset_debug();
 
         Some(updated_t_cache)
+    }
+
+    /// t = 2 in the perfect setting without building the pair tables: the same validate_candidate
+    /// answers as one bit per candidate pair, enforced by a Pumpkin propagator (lazy_pairs.rs).
+    /// Same solutions as the table path (tests: perfect_lazy_pairs_match_tables).
+    fn process_pairs_lazy<V>(
+        &mut self,
+        t1_assignments: &HashMap<Vec<i64>, Vec<Vec<i64>>>,
+        validate_candidate: &V,
+    ) -> Option<HashMap<Vec<i64>, Vec<Vec<i64>>>>
+    where
+        V: Fn(&[i64], &[i64]) -> (bool, f64) + Sync + Send,
+    {
+        let n = self.proto_model.num_vars;
+        let mut enc_of_var = vec![0i64; n];
+        for (idx, enc) in self.var_index_map.values() {
+            enc_of_var[*idx as usize] = *enc;
+        }
+        // C_i: the t = 1 candidates (what process_cpsat_global iterates as sub_assigns / single_assigns)
+        let mut cands = vec![Vec::new(); n];
+        for (enc_tuple, assigns) in t1_assignments {
+            let idx = self.var_index_map[&self.enc_id_to_intvar[&enc_tuple[0]]].0 as usize;
+            let mut c: Vec<i64> = assigns.iter().map(|a| a[0]).collect();
+            c.sort_unstable();
+            c.dedup();
+            cands[idx] = c;
+        }
+        let built = crate::LAMA::lazy_pairs::PairBits::build(enc_of_var, cands, validate_candidate);
+        for (enc, err) in built.found {
+            self.found_map.insert(enc, (true, err));
+        }
+        if built.enc_tuples.is_empty() {
+            return None;
+        }
+        info!("Setting up mini-model, {} constraints were added", 2 * built.rows);
+
+        let mut mini_model = self.proto_model.clone();
+        mini_model.lazy_pairs = Some(std::sync::Arc::new(built.bits));
+        mini_model.validate(&self.var_index_map);
+        let response = mini_model.solve(self.upper, false);
+        if response.is_none() {
+            warn!("Solver returned error or Infeasible");
+            return None;
+        }
+        drop(mini_model);
+        self.finish_global_round(1, built.enc_tuples, response.unwrap(), built.rows, validate_candidate)
     }
 
     pub fn process_t_greater_than_1<V>(

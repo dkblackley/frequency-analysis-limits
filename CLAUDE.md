@@ -80,6 +80,12 @@ figures/                    Intermediate JSON for figures (mostly not on the lap
 5. **t = 1** (`Translator::process_t1`): for every record, every plaintext value within eps -> candidates C_v.
 6a. **Perfect, t >= 2**: translator builds every t-tuple table (pairs of candidates within eps), Pumpkin
     enumerates all databases. Memory O(n^t |C|^t): fine with exact frequencies (|C| tiny).
+    `--lazy-pairs` (opt-in, src/LAMA/lazy_pairs.rs, t = 2 only): the same pair constraints stored as one
+    bit per candidate pair and enforced by a custom Pumpkin propagator (forward checking) instead of
+    `table` constraints, which Pumpkin encodes as a literal + clauses per row in every partition model
+    (noisy 50x50 runs OOMed at 64 GB in seconds). Same set of databases: test
+    `perfect_lazy_pairs_match_tables` (14 cases) and Spitz 50x50 uniform TV 0.02 (identical 8 DBs).
+    Everything after the solve is shared (`finish_global_round`). run_me.sh's NOISE mode passes it.
 6b. **Sampled** (`lazy_lns.rs`, only t = 2; `--t 3` is treated as 2):
     - phase 1: Pumpkin picks an all-different assignment from the t=1 tables (shared start), then each of
       `--lns-restarts` (64) restarts does LNS steps: free a random violated pair + random records (4 total),

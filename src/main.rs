@@ -88,6 +88,12 @@ pub struct Args {
     /// t = 1 tables) before the pipeline is restarted. Dense datasets (highway) need more than 60
     #[arg(long, default_value = "60")]
     start_secs: f64,
+
+    /// Perfect setting (--query-percent 1.0), t = 2: check pair constraints on demand with a Pumpkin
+    /// propagator instead of building the pair tables. Same databases (test
+    /// perfect_lazy_pairs_match_tables), far less memory; use it when the table path runs out of memory
+    #[arg(long)]
+    lazy_pairs: bool,
 }
 
 fn main() {
@@ -139,6 +145,7 @@ fn main() {
                     near_pairs: args.lns_near_pairs,
                     pipeline_attempt: attempt,
                     start_secs: args.start_secs,
+                    lazy_pairs: args.lazy_pairs,
                 },
             );
             if outcome != AttackOutcome::RestartNeeded {

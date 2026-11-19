@@ -55,6 +55,9 @@ pub struct CpModel {
     pub table_constraints: Vec<TableConstraint>,
     run_id: String,
     pub limit: Option<usize>,
+    /// Perfect setting, t = 2: the pair constraints as bits + one propagator instead of
+    /// table_constraints (see lazy_pairs.rs). None everywhere else.
+    pub lazy_pairs: Option<std::sync::Arc<crate::LAMA::lazy_pairs::PairBits>>,
 }
 
 #[derive(Clone, Debug)]
@@ -231,6 +234,18 @@ impl CpModel {
 
             let tag = solver.new_constraint_tag();
             solver.add_constraint(table(vars, tuples, tag)).post();
+        }
+
+        // 4b. Pair constraints checked on demand (perfect setting, t = 2; see lazy_pairs.rs)
+        if let Some(pairs) = &model.lazy_pairs {
+            let tag = solver.new_constraint_tag();
+            let _ = solver
+                .add_constraint(crate::LAMA::lazy_pairs::LazyPairTable {
+                    vars: solver_vars.clone(),
+                    pairs: pairs.clone(),
+                    constraint_tag: tag,
+                })
+                .post();
         }
 
         // 5. Execute search using Pumpkin's native Iterator

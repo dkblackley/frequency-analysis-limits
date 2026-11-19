@@ -55,11 +55,13 @@ pub struct SampledSearch {
     pub near_pairs: i64,
     /// Which run of the whole pipeline this is (recorded in the results; main.rs reruns on start failure)
     pub pipeline_attempt: usize,
+    /// Seconds Pumpkin gets to find the t = 1 start
+    pub start_secs: f64,
 }
 
 impl Default for SampledSearch {
     fn default() -> Self {
-        Self { restarts: 64, lns_hours: 0.0, max_rows_per_pair: 1_000, outputs: 1000, stall_steps: 5000, near_pairs: 20, pipeline_attempt: 1 }
+        Self { restarts: 64, lns_hours: 0.0, max_rows_per_pair: 1_000, outputs: 1000, stall_steps: 5000, near_pairs: 20, pipeline_attempt: 1, start_secs: 60.0 }
     }
 }
 
@@ -339,6 +341,7 @@ pub fn lama_attack(
             target_outputs: sampled_search.outputs,
             stall_steps: sampled_search.stall_steps,
             near_pairs: sampled_search.near_pairs,
+            start_secs: sampled_search.start_secs,
             deadline: (sampled_search.lns_hours > 0.0)
                 .then(|| Instant::now() + Duration::from_secs_f64(sampled_search.lns_hours * 3600.0)),
             ..LnsConfig::default()

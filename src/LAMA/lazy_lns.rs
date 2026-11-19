@@ -18,7 +18,7 @@
 //!     abandoned once it has gone `stall_steps` steps without improving, and new restarts (fresh seeds,
 //!     past `restarts` if needed) keep starting until the deadline or `target_outputs` databases.
 //!     Restarts that reach consistency are never abandoned (phase 2 is unchanged);
-//!   * if Pumpkin finds no t = 1 start within 60 s, `start_failed` is set and main.rs reruns the whole
+//!   * if Pumpkin finds no t = 1 start within --start-secs (60 s), `start_failed` is set and main.rs reruns the whole
 //!     pipeline (new query sample) instead of giving up.
 
 use crate::LAMA::mini_solver::{CpModel, ScoredReconstruction};
@@ -56,6 +56,8 @@ pub struct LnsConfig {
     pub stall_steps: usize,
     /// A restart at most this many pairs outside epsilon gets 4x stall_steps (it is close to consistent)
     pub near_pairs: i64,
+    /// Time Pumpkin gets for the t = 1 start (all-different over the t = 1 tables) before a pipeline restart
+    pub start_secs: f64,
 }
 
 impl Default for LnsConfig {
@@ -70,6 +72,7 @@ impl Default for LnsConfig {
             deadline: None,
             stall_steps: 5000,
             near_pairs: 20,
+            start_secs: 60.0,
         }
     }
 }
@@ -99,7 +102,7 @@ pub struct LnsSummary {
     /// Restarts given up while still outside epsilon (no improvement in stall_steps steps)
     #[serde(default)]
     pub restarts_abandoned: usize,
-    /// Pumpkin found no t = 1 start within 60 s (the pipeline is then restarted from scratch)
+    /// Pumpkin found no t = 1 start within --start-secs (the pipeline is then restarted from scratch)
     #[serde(default)]
     pub start_failed: bool,
     /// Which run of the whole pipeline produced this result (1 = first; >1 after start failures)
@@ -213,6 +216,63 @@ impl<'a> PairLns<'a> {
         (total, viol)
     }
 
+    /// Logs how hard the t = 1 start (all-different over the t = 1 tables) looks, so a failed start solve
+    /// can be told apart from an impossible one. The greedy pass is a DIAGNOSTIC only: its assignment is
+    /// never used as a start (every solve stays a Pumpkin solve).
+    fn log_start_diagnostics(&self, truth_is_valid_start: bool) {
+        let mut sizes: Vec<usize> = self.candidates.iter().map(|c| c.len()).collect();
+        sizes.sort_unstable();
+        let pct = |q: f64| sizes[((sizes.len() - 1) as f64 * q).round() as usize];
+        let mut owners: FxHashMap<i64, usize> = FxHashMap::default();
+        for c in &self.candidates {
+            for &x in c {
+                *owners.entry(x).or_insert(0) += 1;
+            }
+        }
+        // values that are the ONLY candidate of 2+ records: an immediate contradiction
+        let mut sole: FxHashMap<i64, usize> = FxHashMap::default();
+        for c in self.candidates.iter().filter(|c| c.len() == 1) {
+            *sole.entry(c[0]).or_insert(0) += 1;
+        }
+        let sole_clashes = sole.values().filter(|&&k| k > 1).count();
+        // greedy: most constrained record first, its cheapest free value
+        let mut order: Vec<usize> = (0..self.n).collect();
+        order.sort_by_key(|&v| self.candidates[v].len());
+        let mut used: HashSet<i64> = HashSet::new();
+        let mut placed = 0usize;
+        for &v in &order {
+            let best = self.candidates[v]
+                .iter()
+                .filter(|x| !used.contains(x))
+                .min_by_key(|x| self.t1_cost[v].get(x).copied().unwrap_or(i64::MAX));
+            if let Some(&x) = best {
+                used.insert(x);
+                placed += 1;
+            }
+        }
+        info!(
+            "t = 1 start diagnostics: {} records, {} distinct candidate values (slack {}), candidates per record \
+             min {} / p10 {} / median {} / p90 {} / max {}, {} records with 1 candidate, {} with <= 3; \
+             values that are the sole candidate of 2+ records: {}; a start exists: {}; greedy (diagnostic only) \
+             places {} of {} records ({} short)",
+            self.n,
+            owners.len(),
+            owners.len() as i64 - self.n as i64,
+            pct(0.0),
+            pct(0.1),
+            pct(0.5),
+            pct(0.9),
+            pct(1.0),
+            sizes.iter().filter(|&&k| k == 1).count(),
+            sizes.iter().filter(|&&k| k <= 3).count(),
+            sole_clashes,
+            if truth_is_valid_start { "YES (the true DB is one)" } else if sole_clashes > 0 { "NO" } else { "unknown" },
+            placed,
+            self.n,
+            self.n - placed
+        );
+    }
+
     pub fn run(&self, cfg: &LnsConfig) -> (Vec<ScoredReconstruction>, LnsSummary) {
         let started = Instant::now();
         let mut summary =
@@ -230,12 +290,36 @@ impl<'a> PairLns<'a> {
         );
 
         // 1. LAMa t = 1 step, shared by every restart.
+        self.log_start_diagnostics(summary.true_db_t1_missing == 0);
+        let start_solve = Instant::now();
         let all: Vec<usize> = (0..self.n).collect();
         let empty = vec![-1i64; self.n];
-        let Some(start_values) = self.solve_neighbourhood(&all, &empty, None, Duration::from_secs(60), cfg.max_rows_per_pair, true)
+        // First the usual start (all-different + minimise t = 1 error) for up to 60 s; if that finds nothing,
+        // a Pumpkin all-different-only solve (no objective) with the rest of --start-secs (at least 60 s).
+        // Highway: the objective solve found nothing in 900 s although the problem is easy (see diagnostics).
+        let first_secs = cfg.start_secs.min(60.0);
+        let start_values = self
+            .solve_neighbourhood(&all, &empty, None, Duration::from_secs_f64(first_secs), cfg.max_rows_per_pair, true)
+            .or_else(|| {
+                let rest = (cfg.start_secs - first_secs).max(60.0);
+                info!("t = 1 start: nothing with the error objective in {first_secs} s; trying all-different only for {rest} s");
+                let t = Instant::now();
+                let found = self.feasible_start(Duration::from_secs_f64(rest));
+                match &found {
+                    Some(_) => info!("t = 1 start: all-different-only solve found a start in {:.1}s", t.elapsed().as_secs_f64()),
+                    None => warn!("t = 1 start: all-different-only solve found nothing in {:.1}s", t.elapsed().as_secs_f64()),
+                }
+                found
+            });
+        let Some(start_values) = start_values
         else {
             // The caller restarts the whole pipeline (new query sample) when this is set
-            warn!("Pumpkin found no all-different database from the t = 1 tables within 60 s: restart needed");
+            warn!(
+                "Pumpkin found no all-different database from the t = 1 tables within {} s (gave up after {:.1}s): \
+                 restart needed. See 't = 1 start diagnostics' above: if a start exists, a larger --start-secs can help",
+                cfg.start_secs,
+                start_solve.elapsed().as_secs_f64()
+            );
             summary.start_failed = true;
             summary.lns_seconds = started.elapsed().as_secs_f64();
             return (Vec::new(), summary);
@@ -626,6 +710,32 @@ impl<'a> PairLns<'a> {
         result
     }
 
+    /// Pumpkin solve of the t = 1 tables + all-different only (no objective): any database where every
+    /// record takes one of its t = 1 values. Fallback start when the objective solve finds nothing.
+    fn feasible_start(&self, time_limit: Duration) -> Option<Vec<(usize, i64)>> {
+        let mut solver = PumpkinSolver::default();
+        let mut vars = Vec::with_capacity(self.n);
+        for v in 0..self.n {
+            if self.candidates[v].is_empty() {
+                return None;
+            }
+            vars.push(solver.new_sparse_integer(self.candidates[v].iter().map(|&x| x as i32).collect::<Vec<_>>()));
+        }
+        let tag = solver.new_constraint_tag();
+        solver.add_constraint(all_different(vars.clone(), tag)).post().ok()?;
+        let mut brancher = solver.default_brancher();
+        let mut resolver = ResolutionResolver::default();
+        let mut termination = TimeBudget::starting_now(time_limit);
+        let result = match solver.satisfy_under_assumptions(&mut brancher, &mut termination, &mut resolver, &[]) {
+            SatisfactionResultUnderAssumptions::Satisfiable(found) => {
+                let s = found.solution();
+                Some((0..self.n).map(|v| (v, s.get_integer_value(vars[v]) as i64)).collect())
+            }
+            _ => None,
+        };
+        result
+    }
+
     /// One LNS step in Pumpkin (same encoding as CpModel::solve_neighbourhood): re-assign the
     /// `freed` records, everything else keeps its value. With `t1_only`, only the t = 1 tables
     /// score (the LAMa t = 1 step). Returns the new values if Pumpkin found an error strictly below
@@ -763,6 +873,7 @@ impl<'a> PairLns<'a> {
         let mut brancher = solver.default_brancher();
         let mut resolver = ResolutionResolver::default();
         let mut termination = TimeBudget::starting_now(time_limit);
+        let solve_started = Instant::now();
         let mut bound = error_before.map(to_pumpkin);
         let mut best = None;
         loop {
@@ -776,6 +887,12 @@ impl<'a> PairLns<'a> {
                     let s = found.solution();
                     bound = Some(s.get_integer_value(total_error) as i64);
                     best = Some(freed.iter().map(|&v| (v, s.get_integer_value(record_var[&v]) as i64)).collect());
+                    // t = 1 start with a long --start-secs: keep improving for the first 60 s as before, but
+                    // once past that return the first database found instead of using up the whole budget
+                    if t1_only && solve_started.elapsed() >= Duration::from_secs(60) {
+                        info!("t = 1 start: returning the solution found after {:.1}s", solve_started.elapsed().as_secs_f64());
+                        return best;
+                    }
                 }
                 _ => return best,
             }

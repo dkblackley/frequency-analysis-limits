@@ -83,6 +83,11 @@ pub struct Args {
     /// up to this many times in total. Later runs get what is left of --lns-hours
     #[arg(long, default_value = "10")]
     max_pipeline_attempts: usize,
+
+    /// Sampled setting: seconds Pumpkin gets to find the t = 1 start (an all-different database from the
+    /// t = 1 tables) before the pipeline is restarted. Dense datasets (highway) need more than 60
+    #[arg(long, default_value = "60")]
+    start_secs: f64,
 }
 
 fn main() {
@@ -133,6 +138,7 @@ fn main() {
                     stall_steps: args.lns_stall_steps,
                     near_pairs: args.lns_near_pairs,
                     pipeline_attempt: attempt,
+                    start_secs: args.start_secs,
                 },
             );
             if outcome != AttackOutcome::RestartNeeded {

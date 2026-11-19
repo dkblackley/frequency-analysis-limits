@@ -326,6 +326,8 @@ main() {
         (( mem > BIGMEM_MAX_GB )) && mem=$BIGMEM_MAX_GB
         local lns_h; lns_h=$(awk -v t="$time" -v f="$SETUP_MARGIN_FRAC" 'BEGIN { x = t * (1 - f) - 0.25; if (x < 0.25) x = 0.25; printf "%.2f", x }')
         local args="--dir-path $DB_ROOT/$dir --name $name --t 2 --dim $dim --dist $dist --padding 0 --query-percent $prob --lns-hours $lns_h --lns-outputs $OUTPUTS"
+        # --start-secs: t = 1 start budget (60 s objective solve, then all-different-only with the rest, >= 60 s)
+        [[ -n "${START_SECS:-}" ]] && args+=" --start-secs $START_SECS"
 
         # keep earlier results next to the new ones (old code, or a pair-LNS run that ran out of time)
         local old; old=$(dirname "$res")/archive_pre_lns

@@ -96,7 +96,15 @@ figures/                    Intermediate JSON for figures (mostly not on the lap
       of 132 Nov-17 jobs found no start and wrote nothing, although exit code 0 / COMPLETED). If it still
       finds none, lama_attack returns RestartNeeded and main.rs reruns the WHOLE pipeline (new query
       sample), up to `--max-pipeline-attempts` (10), later attempts getting what is left of --lns-hours.
-      results `lns.pipeline_attempt` says which attempt produced the result. The user wants every
+      results `lns.pipeline_attempt` says which attempt produced the result. The start is a Pumpkin
+      solve of all-different + minimise t = 1 error for min(60, `--start-secs`) s; if that finds nothing,
+      a Pumpkin all-different-only solve (no objective, `feasible_start`) gets the rest (>= 60 s).
+      Why: highway gaussian 10/20% and uniform 10% failed all 10 x 60 s attempts on Nov 18, and the
+      objective solve found nothing even in 900 s, although the problem is easy (every record ~145 t = 1
+      candidates, 916 spare cells, the true DB is a valid start). The all-different-only solve finds a
+      highway start in ~4 s (local test Nov 19). The log line 't = 1 start diagnostics' (candidate counts,
+      slack, whether a start provably exists, a greedy pass that is a DIAGNOSTIC only) says whether a
+      failed start was hard or impossible. run_me.sh passes START_SECS if set. The user wants every
       solve to stay a Pumpkin CSP solve: do NOT add non-CSP shortcuts (e.g. a bipartite matching start).
     - phase 2: from a fully consistent database, `sample_neighbour` re-assigns a few random records to a
       DIFFERENT assignment keeping every touched pair within eps (values in shuffled order) and records

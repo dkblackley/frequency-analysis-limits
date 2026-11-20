@@ -134,6 +134,10 @@ pub struct LnsSummary {
     pub lns_steps: usize,
     pub hit_deadline: bool,
     pub lns_seconds: f64,
+    /// Seconds after the LNS began (t = 1 start solve included) at which the first restart reached a
+    /// fully consistent database (None = none did). run_me.sh's time limits are sized from this.
+    #[serde(default)]
+    pub first_consistent_secs: Option<f64>,
     pub max_rows_per_pair: usize,
     /// Symmetry pick (`pick_symmetry`, attacker-side only): number of grid images tried (0 = off), the
     /// polished total error of the lowest-error output in each orientation (index 0 = as found, then the
@@ -373,6 +377,7 @@ impl<'a> PairLns<'a> {
         // Every distinct fully consistent database found (phase 2), with its total error
         let pool: Mutex<FxHashMap<Vec<i64>, i64>> = Mutex::new(FxHashMap::default());
         let restarts_consistent = AtomicUsize::new(0);
+        let first_consistent: Mutex<Option<f64>> = Mutex::new(None);
         let restarts_abandoned = AtomicUsize::new(0);
         let restarts_started = AtomicUsize::new(0);
         let attempts_per_restart = 20 * cfg.target_outputs.div_ceil(cfg.restarts.max(1)) + 50;
@@ -495,6 +500,14 @@ impl<'a> PairLns<'a> {
             // databases (sample_neighbour) and keep every distinct one, until the pool is full.
             if total < Self::OUTSIDE_EPSILON {
                 restarts_consistent.fetch_add(1, Ordering::Relaxed);
+                let secs = started.elapsed().as_secs_f64();
+                {
+                    let mut first = first_consistent.lock().unwrap();
+                    if first.map_or(true, |f| secs < f) {
+                        *first = Some(secs);
+                    }
+                }
+                info!("Restart {restart} reached consistency after {step} steps, {secs:.0}s after the LNS began");
                 pool.lock().unwrap().insert(assignment.clone(), total);
                 for _ in 0..attempts_per_restart {
                     if pool.lock().unwrap().len() >= cfg.target_outputs
@@ -573,6 +586,7 @@ impl<'a> PairLns<'a> {
         );
         summary.lns_steps = steps_done.load(Ordering::Relaxed);
         summary.hit_deadline = hit_deadline.load(Ordering::Relaxed);
+        summary.first_consistent_secs = first_consistent.into_inner().unwrap();
         summary.fully_consistent = finals.iter().filter(|r| r.total_error < Self::OUTSIDE_EPSILON).count();
         if let Some(best) = finals.first() {
             summary.best_total_error = best.total_error;

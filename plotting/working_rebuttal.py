@@ -821,8 +821,11 @@ def item_r5():
     h("Item r5a — TV sweep at 50x50 (as tab:lama_noise_sweep): all queries, exact frequencies, true "
       "distribution TV away from the attacker's")
     print("Perfect pipeline (--query-percent 1.0 --dist-noise <tv> --lazy-pairs, run_me.sh NOISE mode); noise q "
-          "seeded (StdRng 1337), 1 run per cell. Cell: #DBs / true DB in output / eps. #DBs = 0 or no "
-          "reconstruction -> infeasible.\n")
+          "seeded (StdRng 1337), 1 run per cell. Cell: #DBs / true DB in output / eps. #DBs = number_of_databases "
+          "from the results file; 0 -> infeasible. 'true n/c' = not checked: the reconstruction JSON is not on "
+          "disk (sync_all.sh skips noise reconstructions; set REBUTTAL_NOISE_RECON=1 to check them when present, "
+          "slow: up to ~2 GB each).\n")
+    check_recon = os.environ.get("REBUTTAL_NOISE_RECON") == "1"
     rows = []
     for db in DATASETS:
         for dist in DISTS:
@@ -830,12 +833,16 @@ def item_r5():
             for tv in R2_TVS:
                 name = f"{db}_{dist}_p1_noise{rust_float(tv)}"
                 d = f"{BASE_DIR}/{R2_GRID}/{db}/limits"
-                res, runs = load_json(f"{d}/results_{name}.json"), load_json(f"{d}/{name}_reconstruction.json")
+                res = load_json(f"{d}/results_{name}.json")
                 if res is None:
                     row.append(None)
                     continue
-                k = len(runs) if runs else 0
-                tin = "yes" if runs and lama_true_in_output(*runs_to_arrays(runs)) else "NO"
+                rpath = f"{d}/{name}_reconstruction.json"
+                runs = load_json(rpath) if check_recon and os.path.exists(rpath) else None
+                k = res.get("number_of_databases")
+                if k is None:
+                    k = len(runs) if runs else 0
+                tin = ("yes" if lama_true_in_output(*runs_to_arrays(runs)) else "NO") if runs else "n/c"
                 row.append(f"{k} DBs / true {tin} / eps={res['eps']:.2e}" if k else
                            f"infeasible (0 DBs) / eps={res['eps']:.2e}")
             rows.append(row)
@@ -863,7 +870,10 @@ def r5c_cell(db, dist, tv):
     res = load_json(f"{d}/results_{name}.json")
     if res is None:
         return None
-    out = {"eps": res.get("eps"), "max_dist_err": res.get("max_dist_err"), "lns": res.get("lns") or {}}
+    lns = res.get("lns") or {}
+    out = {"eps": res.get("eps"), "max_dist_err": res.get("max_dist_err"), "lns": lns,
+           "k": lns.get("returned", res.get("number_of_databases", 0)), "true_in_out": lns.get("true_db_in_output")}
+    # the noisy runs' reconstructions are not synced (sync_all.sh): then no sym MSE, counts from the results
     runs = load_json(f"{d}/{name}_reconstruction.json")
     if runs:
         true = np.array([p["true"] for p in runs[0]], dtype=float)

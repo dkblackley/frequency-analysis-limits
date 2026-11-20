@@ -35,8 +35,8 @@
 #      its own history: OOM -> 2x memory (bigmem past NORMAL_MAX_GB), TIMEOUT (slurm killed it, no result)
 #      -> 2x time, and a config that completed before asks for its real peak + 50% instead of the default.
 #      A run that hit its LNS deadline before OUTPUTS (1000) consistent databases is rerun with the SAME
-#      time limit (more time did not help: runs converge in < 1 h or stall). First attempts ask small
-#      (10 GB, 1-8 h by dataset size) so they start quickly.
+#      time limit (more time did not help: runs converge in < 2 h or stall). First attempts ask small
+#      (10 GB, 1-3 h by dataset size, see time_2d) so they start quickly.
 #   6. 2D configs run RUNS (3) independent times into databases/<grid>_run<k>/ (one shot each: a run with
 #      any pair-LNS result is finished; only failures without a result are resubmitted). When all runs of
 #      a config are finished, merge_runs.py combines them round-robin (deduplicated, cut at OUTPUTS) into
@@ -160,12 +160,16 @@ configs() {
     fi
 }
 
-# first-attempt time limit (h): the search scales with the number of records, and 1-2% queries mean
-# bigger candidate sets. A run that hits its deadline before OUTPUTS databases is rerun with the same time.
+# time limit (h), sized to how long a run takes to reach a CONSISTENT database, so stalled runs fail and are
+# resubmitted sooner (any consistent result finishes a 2D run, even with < OUTPUTS databases). Nov 20 sweep
+# (4 h / 8 h at <= 2%): every consistent run finished within 1.91 h total (cali uniform 30%), phase 2 and
+# the symmetry pick included; busstop <= 0.64 h, shopparis <= 1.76 h, highway 1.61 h, drink <= 1.54 h
+# (deadline), spitz <= 0.68 h (deadline); 1-2% were no slower than 5-30%, so no doubling there any more.
+# Runs still inconsistent at 2.1 h had 1k-270k pairs outside epsilon. 3 h -> LNS 2.3 h, 2 h -> 1.45 h,
+# 1 h -> 0.6 h. first_consistent_secs in results (since Nov 20) gives the real time to consistency.
 time_2d() {
-    local n=$1 p=$2 h
-    case "$n" in spitz) h=1 ;; drink) h=2 ;; *) h=4 ;; esac
-    awk -v p="$p" 'BEGIN { exit !(p + 0 <= 0.02) }' && h=$((h * 2))
+    local n=$1 h
+    case "$n" in spitz) h=1 ;; drink) h=2 ;; *) h=3 ;; esac
     echo "$h"
 }
 

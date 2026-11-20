@@ -207,7 +207,9 @@ run_me.sh: git pull --ff-only -> build_bin.slurm if bin/lama is older than src (
 `logs/resource_usage.tsv` (per job: state, elapsed/limit h, ACTUAL peak GB vs requested, progress from the
 log) -> submits each config without a finished pair-LNS result and not queued, job name
 `LAMa_<name>_<dist>_p<q>_<grid>`, logs in `logs/lama/<jobname>_<jobid>.{out,err}`. Sizing: first attempt
-10 GB / 16 CPUs / 1 h (spitz), 2 h (drink), 4 h (others), x2 at <=2%; OOM -> 2x memory (bigmem > 170 GB);
+10 GB / 16 CPUs / 1 h (spitz), 2 h (drink), 3 h (others), no longer x2 at <=2% (since 2026-11-20:
+every consistent Nov-20 run finished within 1.91 h, stalled ones fail and resubmit sooner; results now record
+`lns.first_consistent_secs`, and the log a 'Restart N reached consistency' line); OOM -> 2x memory (bigmem > 170 GB);
 TIMEOUT -> 2x time; a run that hit its LNS deadline before 1000 outputs -> rerun with the SAME time
 (runs converge in < 1 h or stall; more time did not help). High-dim limits: nh 24 h, grid 2-3D 4 h, 4D 12 h,
 5D 24 h, 6D 48 h. The LNS gets

@@ -70,4 +70,14 @@ pub struct DbResult {
     /// Is the true database one of the output databases? (exact match of every record)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub true_db_in_output: Option<bool>,
+    /// --dist-noise (TV distance of the true query distribution from --dist); absent = no noise
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dist_noise: Option<f64>,
+    /// Largest actual |P'(enclose) - P(enclose)| over all MBQs caused by the noise
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_dist_err: Option<f64>,
+    /// true: the noise bound is part of eps (perfect setting); false: the attacker does not know about
+    /// the noise and eps is the VC bound only (sampled setting)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub noise_known: Option<bool>,
 }

@@ -49,7 +49,9 @@ pub struct Args {
     query_percent: f64,
 
     /// How far (total variation distance) the true query distribution is from --dist.
-    /// The attacker only knows --dist, so this is added to epsilon
+    /// The attacker only knows --dist. With --query-percent 1.0 the attacker knows the resulting error
+    /// bound and uses it as epsilon; with --query-percent < 1 the noise is unknown and epsilon is the
+    /// VC bound only (the realistic case)
     #[arg(long, default_value = "0.0")]
     dist_noise: f64,
 

@@ -233,7 +233,9 @@ pub fn lama_attack(
     let attacker_dist_ref = attacker_dist.as_ref().unwrap_or(query_dist_ref);
 
     // How far the attacker's expected probabilities actually are from the truth (bounded by dist_noise).
-    // The attacker is assumed to know this bound, so it is added to epsilon.
+    // Perfect setting: the attacker is assumed to know this bound, so it is epsilon. Sampled setting: the
+    // noise is unknown to the attacker (it just sits on the query distribution), so epsilon is the VC
+    // bound alone; max_dist_err is only recorded in the results.
     let max_dist_err = if *dist_noise > 0.0 {
         let max_dist_err = query_dist_ref
             .mbq_to_cumulative_prob
@@ -267,8 +269,12 @@ pub fn lama_attack(
         // was the single biggest allocation in high dimensions, so it is no longer computed.)
         let (observed_queries, _responses, epsil) =
             selector.sample_percent_responses(*query_percent, delta, &Vec::new());
-        // Sampling error + distribution error
-        eps = epsil + max_dist_err;
+        // Sampling error only: the attacker does not know the distribution is noisy
+        eps = epsil;
+        if *dist_noise > 0.0 {
+            info!("Sampled setting with unknown distribution noise: eps = VC bound {epsil} (the actual \
+                   distribution error {max_dist_err} is NOT added)");
+        }
         num_queries = observed_queries.len();
 
         info!("Making observed mapping to frequency");
@@ -506,6 +512,9 @@ pub fn lama_attack(
         lns: lns_summary,
         query_order: None, // query list order = get_dom_pairs (par_bridge): not fixed between runs
         true_db_in_output: Some((0..num_dbs).any(|d| responses.iter().all(|(enc, vals)| vals[d] == *enc))),
+        dist_noise: (*dist_noise > 0.0).then_some(*dist_noise),
+        max_dist_err: (*dist_noise > 0.0).then_some(max_dist_err),
+        noise_known: (*dist_noise > 0.0).then_some(perfect),
     };
 
     if let Err(e) = save_results(final_res, &format!("{save_dir}/results_{unique_name}.json")) {

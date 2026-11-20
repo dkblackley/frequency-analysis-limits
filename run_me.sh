@@ -11,12 +11,18 @@
 #                                     # frequencies, true distribution NOISES (TV) away from --dist
 #   NOISE=only bash run_me.sh spitz   # only the noise sweep (here: only spitz)
 #   NOISES="0.005 0.01" NOISE=only bash run_me.sh  # other TV distances
+#   NOISE=only NOISE_PROBS=0.3 bash run_me.sh      # REALISTIC noise sweep: 30% of the queries sampled from
+#                                     # the noisy distribution, the attacker does not know the noise
+#                                     # (eps = VC bound only), pair LNS like the normal sampled runs
 #
 # Noise configs use the PERFECT pipeline (--query-percent 1.0 --dist-noise <tv>): every database within
 # eps is enumerated, with no cap. They run with --lazy-pairs: the t = 2 pair tables OOMed at 64 GB in
 # seconds at 50x50 (Nov 19); --lazy-pairs checks pairs on demand instead and gives the same databases
 # (test perfect_lazy_pairs_match_tables). Many databases can still make the final solve large. A noise config counts as done once
 # results_<name>_<dist>_p1_noise<tv>.json exists (it has no "lns" field, it is not a pair-LNS result).
+# Sampled noise configs (NOISE_PROBS < 1, e.g. 0.3) run the pair LNS (--query-percent <p> --dist-noise <tv>)
+# with the normal 2D sizing, as ONE run straight into <grid>/ (no run1..3 merge), and count as done like
+# any pair-LNS result (a run that hit its deadline before OUTPUTS databases is rerun, keep-better).
 #
 # What it does, in order:
 #   1. git pull --ff-only (NO_PULL=1 skips it); if this script changed, it restarts itself
@@ -57,6 +63,7 @@ read -r -a NOISES_ARR <<< "${NOISES:-0.005 0.01 0.02 0.03 0.04 0.05}"   # same T
 NOISE_MEM_GB="${NOISE_MEM_GB:-64}"   # first attempt; OOM doubles it (bigmem past NORMAL_MAX_GB)
 NOISE_TIME_H="${NOISE_TIME_H:-12}"   # first attempt; TIMEOUT doubles it
 NOISE_CPUS="${NOISE_CPUS:-32}"
+read -r -a NOISE_PROBS_ARR <<< "${NOISE_PROBS:-1}"   # 1: perfect (attacker knows the noise bound); <1: sampled, noise unknown
 
 # ---------------------------------------------------------------- resources
 # Measured: Spitz 50x50 peaks at 4.1 GB, nearly all of it the 50x50 query distribution (same for every
@@ -108,7 +115,14 @@ configs() {
             for d in "${DISTS_ARR[@]}"; do
                 for z in "${NOISES_ARR[@]}"; do
                     z=$(rust_float "$z")
-                    echo "${n}_${d}_p1_noise${z}@${GRID_2D} $n ${GRID_2D} 2 $d 1 $NOISE_MEM_GB $NOISE_TIME_H $NOISE_CPUS $z"
+                    for p in "${NOISE_PROBS_ARR[@]}"; do
+                        p=$(rust_float "$p")
+                        if [[ "$p" == 1 ]]; then
+                            echo "${n}_${d}_p1_noise${z}@${GRID_2D} $n ${GRID_2D} 2 $d 1 $NOISE_MEM_GB $NOISE_TIME_H $NOISE_CPUS $z"
+                        else
+                            echo "${n}_${d}_p${p}_noise${z}@${GRID_2D} $n ${GRID_2D} 2 $d $p $MEM_2D_GB $(time_2d "$n" "$p") $CPUS_2D $z"
+                        fi
+                    done
                 done
             done
         done
@@ -162,10 +176,11 @@ result_file() { echo "$DB_ROOT/$3/$2/limits/results_$(run_tag "$2" "$5" "$6" "${
 recon_file() { echo "$DB_ROOT/$3/$2/limits/$(run_tag "$2" "$5" "$6" "${7:-0}")_reconstruction.json"; }
 # none: no result from the pair-LNS code | done | more: it hit its deadline before OUTPUTS consistent
 # databases (rerun with 2x time) | exhausted: finished early with fewer (no more neighbours to find; done)
-# Noise configs (perfect pipeline, no "lns" field): done as soon as the results file exists.
+# Perfect noise configs (prob 1, no "lns" field): done as soon as the results file exists. Sampled
+# noise configs (prob < 1) are pair-LNS results like any other.
 result_state() {
     local f; f=$(result_file "$@")
-    if awk -v z="${7:-0}" 'BEGIN { exit !(z + 0 > 0) }'; then
+    if awk -v z="${7:-0}" -v p="$6" 'BEGIN { exit !(z + 0 > 0 && p + 0 >= 1) }'; then
         [[ -f "$f" ]] && echo done || echo none
         return
     fi
@@ -400,8 +415,11 @@ main() {
         local args="--dir-path $DB_ROOT/$dir --name $name --t 2 --dim $dim --dist $dist --padding 0 --query-percent $prob --lns-hours $lns_h --lns-outputs $OUTPUTS"
         # --start-secs: t = 1 start budget (60 s objective solve, then all-different-only with the rest, >= 60 s)
         [[ -n "${START_SECS:-}" ]] && args+=" --start-secs $START_SECS"
-        # noise: perfect pipeline (all queries, exact frequencies), no LNS; enumeration has no deadline
-        if [[ "$noise" != 0 ]]; then
+        # sampled noise: same pair LNS, queries drawn from the noisy distribution, attacker unaware
+        if [[ "$noise" != 0 && "$prob" != 1 ]]; then
+            args+=" --dist-noise $noise"
+        # perfect noise: all queries, exact frequencies, no LNS; enumeration has no deadline
+        elif [[ "$noise" != 0 ]]; then
             args="--dir-path $DB_ROOT/$dir --name $name --t 2 --dim $dim --dist $dist --padding 0 --query-percent 1.0 --dist-noise $noise --lazy-pairs"
             lns_h="no deadline, exhaustive enumeration"
         fi
@@ -415,7 +433,7 @@ main() {
             cp -n "$(recon_file "$key" "$name" "$dir" "$dim" "$dist" "$prob" "$noise")" "$old/" 2>/dev/null
         fi
 
-        local desc="${mem}G ${cpus}cpu ${time}h $part (LNS ${lns_h}$([[ $noise == 0 ]] && echo h))$([[ $attempts -gt 0 ]] && echo ", attempt $((attempts + 1)) after $last")$([[ $rstate == more ]] && echo ", last run hit its deadline")"
+        local desc="${mem}G ${cpus}cpu ${time}h $part (LNS ${lns_h}$([[ $noise == 0 || $prob != 1 ]] && echo h))$([[ $attempts -gt 0 ]] && echo ", attempt $((attempts + 1)) after $last")$([[ $rstate == more ]] && echo ", last run hit its deadline")"
         if [[ -n "${DRY_RUN:-}" ]]; then
             status_lines+=("WOULD    $key  $desc")
             continue

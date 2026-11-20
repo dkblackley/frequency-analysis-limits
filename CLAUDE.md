@@ -70,6 +70,11 @@ figures/                    Intermediate JSON for figures (mostly not on the lap
    Noise (add_noise): p' = (1-lam) p + lam q, q seeded (StdRng 1337, handed out in sorted-pair order),
    lam = TV / TV(p,q), eps = max over MBQs of |P'(enclose) - P(enclose)|. results' `query_order` field
    is written as null; "sorted" only in results made with d71714e (Nov 19-20 hopper noise jobs).
+   Who knows the noise (since 2026-11-20): perfect (p = 1) eps = max_dist_err (attacker knows the bound);
+   SAMPLED (p < 1) queries are drawn from the noisy p' but eps = VC bound ONLY (attacker unaware, the
+   "realistic" case). results get `dist_noise`, `max_dist_err`, `noise_known` (true = perfect). run_me.sh:
+   `NOISE=only NOISE_PROBS=0.3` = sampled noise sweep, one pair-LNS run per config straight into <grid>/
+   (no run1..3 merge). 15x15 spitz gaussian 30% TV 0.02: max_dist_err 0.0016 vs eps 0.042.
    Expected probability of a tuple = sum of P(query) over queries enclosing the tuple's MBQ
    (prefix-sum precompute in `precompute_cumulative_results`).
 2. **Sampling** (`selector.rs::sample_percent_responses`): ceil(M * p) queries i.i.d. (thread_rng, NOT

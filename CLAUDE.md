@@ -63,15 +63,13 @@ figures/                    Intermediate JSON for figures (mostly not on the lap
 1. **Query distribution** (`query.rs`). All M = prod_d n_d(n_d+1)/2 axis-aligned range queries
    (grid index 0..n-1 per axis) in the order `Selector::get_dom_pairs` returns them. Query i has weight:
    uniform 1; gaussian N(i; mu=M/2, sigma=M/5) pdf; beta Beta(2,1) pdf at (i+0.5)/M (= linear).
-   Since 2026-11-19 get_dom_pairs SORTS the list (lexicographic (low corner, high corner)); results carry
-   "query_order": "sorted" and "true_db_in_output". Before, rayon par_bridge gave a random order per run,
-   so every gaussian/beta run was a different distribution (e.g. Spitz 50x50 noise: eps 0.00166 at TV 0.03,
-   0.00108 at TV 0.04). Noise (add_noise): p' = (1-lam) p + lam q, q seeded (StdRng 1337, sorted order),
-   lam = TV / TV(p,q), so eps = lam * max|P_q - P_p|: eps/TV is a constant per grid + dist (not per
-   dataset), and the perfect-setting outputs are NESTED in TV. Test noise_eps_per_tv; report from results
-   only: plotting/noise_eps_report.py. Sorted gives a LARGER eps/TV than the old random orders (15x15
-   gaussian 0.237 vs 0.08-0.15), so high-TV cells have many more DBs (15x15 drink gaussian TV 0.05: 18252).
-   run_me.sh reruns noise results without query_order once (old ones -> limits/archive_unsorted_order/).
+   The order is whatever rayon par_bridge produces in get_dom_pairs: NOT fixed between runs (the user's
+   choice; do NOT sort it, the parameters follow REMIN / Even Less). So gaussian/beta eps varies per run.
+   (A sort was added on 2026-11-19 in commit d71714e and reverted on 2026-11-20: it fixed index i to one
+   query, the gaussian mass then sat on one region of the grid and eps/TV rose ~5-8x at 50x50.)
+   Noise (add_noise): p' = (1-lam) p + lam q, q seeded (StdRng 1337, handed out in sorted-pair order),
+   lam = TV / TV(p,q), eps = max over MBQs of |P'(enclose) - P(enclose)|. results' `query_order` field
+   is written as null; "sorted" only in results made with d71714e (Nov 19-20 hopper noise jobs).
    Expected probability of a tuple = sum of P(query) over queries enclosing the tuple's MBQ
    (prefix-sum precompute in `precompute_cumulative_results`).
 2. **Sampling** (`selector.rs::sample_percent_responses`): ceil(M * p) queries i.i.d. (thread_rng, NOT

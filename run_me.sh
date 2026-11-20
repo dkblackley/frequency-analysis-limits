@@ -162,13 +162,11 @@ result_file() { echo "$DB_ROOT/$3/$2/limits/results_$(run_tag "$2" "$5" "$6" "${
 recon_file() { echo "$DB_ROOT/$3/$2/limits/$(run_tag "$2" "$5" "$6" "${7:-0}")_reconstruction.json"; }
 # none: no result from the pair-LNS code | done | more: it hit its deadline before OUTPUTS consistent
 # databases (rerun with 2x time) | exhausted: finished early with fewer (no more neighbours to find; done)
-# Noise configs (perfect pipeline, no "lns" field): done once the results file exists AND says
-# "query_order": "sorted" (2026-11-19: before, gaussian/beta weights went to queries in a random order, so
-# every run was a different distribution). Older noise results are rerun once (copied to archive_unsorted_order/).
+# Noise configs (perfect pipeline, no "lns" field): done as soon as the results file exists.
 result_state() {
     local f; f=$(result_file "$@")
     if awk -v z="${7:-0}" 'BEGIN { exit !(z + 0 > 0) }'; then
-        [[ -f "$f" ]] && grep -q '"query_order"' "$f" && echo done || echo none
+        [[ -f "$f" ]] && echo done || echo none
         return
     fi
     [[ -f "$f" ]] && grep -q '"lns"' "$f" || { echo none; return; }
@@ -410,7 +408,6 @@ main() {
 
         # keep earlier results next to the new ones (old code, or a pair-LNS run that ran out of time)
         local old; old=$(dirname "$res")/archive_pre_lns
-        [[ "$noise" != 0 ]] && old=$(dirname "$res")/archive_unsorted_order
         [[ "$rstate" == more ]] && old=$(dirname "$res")/archive_short_runs/$(date +%Y%m%d_%H%M%S)
         if [[ -f "$res" && -z "${DRY_RUN:-}" ]]; then
             mkdir -p "$old"

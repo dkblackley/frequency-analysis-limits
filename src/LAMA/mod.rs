@@ -61,12 +61,57 @@ pub struct SampledSearch {
     /// Perfect setting (--query-percent 1.0), t = 2: check pairs on demand instead of building the
     /// pair tables (--lazy-pairs, lazy_pairs.rs). Same databases, far less memory. Default: tables.
     pub lazy_pairs: bool,
+    /// Sampled setting: after the search, replace every output database by its best-scoring grid image
+    /// (mirror / rotation) under LAMa's own objective (PairLns::pick_symmetry). Default on;
+    /// --no-symmetry-pick turns it off.
+    pub symmetry_pick: bool,
+    /// Wall-clock budget of the symmetry pick in seconds (runs after the LNS deadline)
+    pub symmetry_secs: f64,
 }
 
 impl Default for SampledSearch {
     fn default() -> Self {
-        Self { restarts: 64, lns_hours: 0.0, max_rows_per_pair: 1_000, outputs: 1000, stall_steps: 5000, near_pairs: 20, pipeline_attempt: 1, start_secs: 60.0, lazy_pairs: false }
+        Self { restarts: 64, lns_hours: 0.0, max_rows_per_pair: 1_000, outputs: 1000, stall_steps: 5000, near_pairs: 20, pipeline_attempt: 1, start_secs: 60.0, lazy_pairs: false, symmetry_pick: true, symmetry_secs: 600.0 }
     }
+}
+
+/// The symmetries of the grid [low, high] (axis permutations between equally long axes x reflections of
+/// any axes), identity left out, each as a permutation of the flattened values 0..=largest
+/// (`perm[v]` = image of v). 2D square grid: the 7 non-trivial mirror images / rotations. Empty if the
+/// group has more than 48 elements (4D and up: scoring that many images of every output is too slow).
+pub fn grid_value_symmetries(low: &[Value], high: &[Value], largest: Value) -> Vec<Vec<i64>> {
+    use itertools::Itertools;
+    let d = low.len();
+    let size: Vec<Value> = (0..d).map(|k| high[k] - low[k] + 1).collect();
+    let axis_perms: Vec<Vec<usize>> =
+        (0..d).permutations(d).filter(|p| (0..d).all(|k| size[k] == size[p[k]])).collect();
+    let group = axis_perms.len() << d;
+    if group > 48 {
+        warn!("Symmetry pick skipped: the grid has {group} symmetries (only done up to 48)");
+        return Vec::new();
+    }
+    let mut out = Vec::new();
+    for p in &axis_perms {
+        for mask in 0..(1usize << d) {
+            if mask == 0 && p.iter().enumerate().all(|(k, &a)| k == a) {
+                continue; // identity
+            }
+            let perm: Vec<i64> = (0..=largest)
+                .map(|v| {
+                    let pt = unflatten_nd(v, high, low);
+                    let img: Record = (0..d)
+                        .map(|k| {
+                            let c = pt[p[k]] - low[p[k]];
+                            low[k] + if mask >> k & 1 == 1 { size[k] - 1 - c } else { c }
+                        })
+                        .collect();
+                    flatten_nd(&img, high, low)
+                })
+                .collect();
+            out.push(perm);
+        }
+    }
+    out
 }
 
 /// For every pair p in `pairs`: the sum of `weights[q]` over every q in `pairs` that encloses p
@@ -356,6 +401,13 @@ pub fn lama_attack(
             stall_steps: sampled_search.stall_steps,
             near_pairs: sampled_search.near_pairs,
             start_secs: sampled_search.start_secs,
+            value_symmetries: if sampled_search.symmetry_pick {
+                grid_value_symmetries(&low_pair, &high_pair, largest_possible_val)
+            } else {
+                Vec::new()
+            },
+            value_coords: (0..=largest_possible_val).map(|v| unflatten_nd(v, &high_pair, &low_pair)).collect(),
+            symmetry_secs: sampled_search.symmetry_secs,
             deadline: (sampled_search.lns_hours > 0.0)
                 .then(|| Instant::now() + Duration::from_secs_f64(sampled_search.lns_hours * 3600.0)),
             ..LnsConfig::default()
@@ -647,6 +699,46 @@ mod enclosing_sums_tests {
     use super::*;
     use crate::LAMA::utility::encloses;
     use rand::Rng;
+
+    /// Square 2D grid: 7 distinct non-identity symmetries, each a bijection of the values, which together
+    /// with the identity are exactly the 8 maps (x, y) -> {(x,y), (y,x), (m-x,y), ...}. 3D 16x16x14 (nh): 15.
+    #[test]
+    fn grid_value_symmetries_square_and_nh() {
+        let (low, high) = (vec![1, 1], vec![4, 4]);
+        let largest = flatten_nd(&high, &high, &low);
+        let syms = grid_value_symmetries(&low, &high, largest);
+        assert_eq!(syms.len(), 7);
+        let mut images: std::collections::HashSet<Vec<i64>> = std::collections::HashSet::new();
+        for p in &syms {
+            let mut s = p.clone();
+            s.sort_unstable();
+            assert_eq!(s, (0..=largest).collect::<Vec<_>>(), "not a bijection");
+            assert!(images.insert(p.clone()), "duplicate symmetry");
+        }
+        let m = 5; // reflections about the centre of [1, 4]
+        let expect = |f: fn(i64, i64, i64) -> (i64, i64)| -> Vec<i64> {
+            (0..=largest)
+                .map(|v| {
+                    let pt = unflatten_nd(v, &high, &low);
+                    let (x, y) = f(pt[0], pt[1], m);
+                    flatten_nd(&[x, y], &high, &low)
+                })
+                .collect()
+        };
+        for f in [
+            (|x, y, m| (m - y, x)) as fn(i64, i64, i64) -> (i64, i64),
+            |x, y, m| (m - x, m - y),
+            |x, y, m| (y, m - x),
+            |x, y, _| (y, x),
+            |x, y, m| (m - x, y),
+            |x, y, m| (m - y, m - x),
+            |x, y, m| (x, m - y),
+        ] {
+            assert!(images.contains(&expect(f)));
+        }
+        let (low, high) = (vec![0, 0, 0], vec![15, 15, 13]);
+        assert_eq!(grid_value_symmetries(&low, &high, flatten_nd(&high, &high, &low)).len(), 15);
+    }
 
     /// The prefix sum must give exactly the old brute-force count of enclosing sampled queries.
     #[test]

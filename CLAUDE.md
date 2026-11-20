@@ -134,6 +134,17 @@ figures/                    Intermediate JSON for figures (mostly not on the lap
       none were found: the restarts' best databases, flagged `output_is_consistent: false`.
     - also scores the TRUE database under the same objective (`true_db_*` fields), and records
       `centroid_mse` / `mean_db_mse` / `first_db_mse` to the truth (info only, no alignment).
+    - symmetry pick (since 2026-11-20, `pick_symmetry`; `--no-symmetry-pick` off, `--symmetry-secs` 600,
+      runs AFTER the LNS deadline): the lowest-error output and its 7 grid images (`grid_value_symmetries`,
+      2D/3D only, <= 48 symmetries) are each polished with phase-1 LNS steps in parallel; the lowest polished
+      objective wins (ties keep the found one, i.e. uniform is unchanged in effect); output = old outputs in
+      that orientation + phase-2 walk around the winner. Leakage only. Why: at 1-10% the 8 images are all
+      within eps (gaussian/beta separate them by ~0.007-0.017 in frequency vs eps 0.008-0.022), the LNS cannot
+      flip a whole DB, and most low-% gaussian/beta runs had converged in a mirror image (raw MSE 400-1450,
+      sym MSE 5-50) although the truth had lower error. Scoring the raw image does NOT work (the image is not
+      tuned to the frequencies): it must be polished. Spitz 50x50 gaussian 2% test: polished errors
+      [1792 found, ..., 750 image 4] -> 100% outputs in the true orientation, first-DB MSE 949 -> 2.7.
+      results `lns.symmetry_*` fields.
     - keep-better: if results_<...>.json already exists in the output dir, the better of old/new by
       `sampled_rank` (consistent, #consistent DBs, -pairs outside, -error: attacker-side only, NEVER the
       truth/MSE) stays; the other goes to limits/archive_other_runs/<ts>/.
@@ -162,7 +173,7 @@ figures/                    Intermediate JSON for figures (mostly not on the lap
     (input json symlinked from 50x50), `50x50_run0` = best earlier single run; the MERGE is what sits in
     `50x50/<name>/limits/` (`merged_from` = DBs used per run). Runs draw their own query samples, so a
     merged DB is consistent with its own run's sample. High-dim stays single runs.
-  - `archive_other_runs/<ts>/`: displaced results (keep-better, or a merge replacing what was there);
+  - `archive_other_runs/<ts>/`: displaced results (keep-better; merges OVERWRITE since 2026-11-20, no copy);
   - `archive_pre_lns/`: results from the old sampled code, copied by run_me.sh before rerunning;
     `archive_short_runs/<ts>/`: pair-LNS runs that hit their deadline before 1000 outputs.
 - Reconstruction JSON: list of databases; each a list of {"true": [...], "reconstructed": [...],
@@ -229,6 +240,8 @@ Python needs numpy, scipy, matplotlib, tqdm (no system env has scipy; make a ven
   Since 2026-11-19 items 2b and 4 use 50x50 only (Even Less / Remin at 1-30% now exist there); item 1b (TV
   noise) is still 15x15, the only grid with noise runs. main.py's convex-hull figure is 50x50 too
   (plot_convex_mse xticks/ylim args; defaults reproduce the 15x15 paper figure).
+  Item r5c (printed with r5): the realistic 50x50 TV sweep (p0.3_noise<tv>, attacker unaware) next to the
+  noiseless 30% run: #DBs/consistent, true DB pairs outside eps, sym MSE; plus max_dist_err vs eps per TV.
   DEFAULT since 2026-11-19 (oriented=True in build_box_data / load_convex_mse_data / lama_space /
   baseline_space; working_rebuttal --baseline-space oriented): every method is TOLD ITS ORIENTATION, because
   the 8 grid symmetries are indistinguishable from leakage (uniform: identical frequencies; low query %: mirror

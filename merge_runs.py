@@ -20,8 +20,8 @@ NOTE: each run draws its own query sample (and epsilon), so a merged database is
 sample of the run it came from, not necessarily with the others. "merged_from" records which run gave
 how many databases.
 
-Whatever was in databases/<grid>/<name>/limits/ before is moved to limits/archive_other_runs/<ts>/.
-Nothing is deleted. Up to date (merge newer than every run result) -> does nothing, unless --force.
+Whatever was in databases/<grid>/<name>/limits/ before is OVERWRITTEN (no archive copy; since 2026-11-20).
+The run results in <grid>_run<k>/ are never touched. Up to date (merge newer than every run result) -> does nothing, unless --force.
 """
 import argparse
 import glob
@@ -29,7 +29,6 @@ import json
 import os
 import shutil
 import sys
-import time
 
 
 def rank(res):
@@ -166,17 +165,7 @@ def main():
     out["merged_from"] = per_source
     out["time_taken_per_run"] = {lab: s["time_taken"] for lab, s in per_source.items()}
 
-    # move whatever is there to the archive, then write
-    ts = time.strftime("%Y%m%d_%H%M%S", time.gmtime())
-    for f in (out_res, out_rec):
-        if os.path.exists(f):
-            arch = os.path.join(out_dir, "archive_other_runs", ts)
-            k = 1
-            while os.path.exists(os.path.join(arch, os.path.basename(f))):  # never overwrite an archived file
-                k += 1
-                arch = os.path.join(out_dir, "archive_other_runs", f"{ts}_{k}")
-            os.makedirs(arch, exist_ok=True)
-            shutil.move(f, os.path.join(arch, os.path.basename(f)))
+    # overwrite whatever is there (written to .tmp first, then renamed over it)
     os.makedirs(out_dir, exist_ok=True)
     with open(out_rec + ".tmp", "w") as fh:
         json.dump(merged, fh)

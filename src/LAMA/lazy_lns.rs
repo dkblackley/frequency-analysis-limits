@@ -58,6 +58,15 @@ pub struct LnsConfig {
     pub near_pairs: i64,
     /// Time Pumpkin gets for the t = 1 start (all-different over the t = 1 tables) before a pipeline restart
     pub start_secs: f64,
+    /// Symmetries of the grid as value permutations (`perm[v]` = image of plaintext value v), identity left
+    /// out. After the search the output is moved to whichever orientation scores best under the search's
+    /// own objective (see `pick_symmetry`). Empty = off.
+    pub value_symmetries: Vec<Vec<i64>>,
+    /// Grid coordinates of every plaintext value (`value_coords[v]`), used by `pick_symmetry` to tell which
+    /// orientation an output database is in. Needed when value_symmetries is not empty.
+    pub value_coords: Vec<Vec<i64>>,
+    /// Wall-clock budget of `pick_symmetry` in seconds (half polishing the images, half collecting outputs)
+    pub symmetry_secs: f64,
 }
 
 impl Default for LnsConfig {
@@ -73,6 +82,9 @@ impl Default for LnsConfig {
             stall_steps: 5000,
             near_pairs: 20,
             start_secs: 60.0,
+            value_symmetries: Vec::new(),
+            value_coords: Vec::new(),
+            symmetry_secs: 600.0,
         }
     }
 }
@@ -123,6 +135,23 @@ pub struct LnsSummary {
     pub hit_deadline: bool,
     pub lns_seconds: f64,
     pub max_rows_per_pair: usize,
+    /// Symmetry pick (`pick_symmetry`, attacker-side only): number of grid images tried (0 = off), the
+    /// polished total error of the lowest-error output in each orientation (index 0 = as found, then the
+    /// images in value_symmetries order), which one won (0 = the orientation the search found), how many
+    /// output databases were dropped for being in another orientation, how many new ones were collected
+    /// around the winner, and how long it took
+    #[serde(default)]
+    pub symmetry_images: usize,
+    #[serde(default)]
+    pub symmetry_polished_errors: Vec<i64>,
+    #[serde(default)]
+    pub symmetry_chosen: usize,
+    #[serde(default)]
+    pub symmetry_dropped: usize,
+    #[serde(default)]
+    pub symmetry_added: usize,
+    #[serde(default)]
+    pub symmetry_seconds: f64,
 }
 
 pub struct PairLns<'a> {
@@ -566,11 +595,215 @@ impl<'a> PairLns<'a> {
             finals
         };
         out.truncate(cfg.target_outputs);
+        if !cfg.value_symmetries.is_empty() && !out.is_empty() {
+            out = self.pick_symmetry(out, cfg, &mut summary);
+            summary.output_is_consistent = out[0].total_error < Self::OUTSIDE_EPSILON;
+        }
         summary.returned = out.len();
         summary.true_db_in_output = out.iter().any(|r| r.assignment == truth);
         summary.lns_seconds = started.elapsed().as_secs_f64();
         info!("Pair LNS: {summary:?}");
         (out, summary)
+    }
+
+    /// Leakage-only orientation fix (`--no-symmetry-pick` turns it off).
+    ///
+    /// Why: in the sampled setting the grid's mirror images / rotations of a database are often all within
+    /// epsilon (the query distribution separates them by less than eps at low query %), and an LNS step
+    /// only moves a few records, so a run can converge in a mirror image although the true orientation has
+    /// a lower total error. Simply scoring the IMAGE of an output does not work: the output was tuned to
+    /// the observed frequencies in its own orientation and its image was not, so the image always scores
+    /// worse (Spitz 50x50 gaussian 2%: every output flipped, no raw image better).
+    ///
+    /// What: the lowest-error output and each of its images (all-different is kept, a symmetry permutes the
+    /// values) are POLISHED with the same LNS steps as phase 1, in parallel, for the same budget (half of
+    /// symmetry_secs; the as-found database is polished too, so all are compared alike). The orientation
+    /// with the lowest polished objective (pairs outside eps first, then error; ties keep the as-found one,
+    /// e.g. every image under a uniform distribution) wins. The output is then the old outputs that are in
+    /// the winner's orientation (closest, in grid coordinates, to the winner without a symmetry), the
+    /// polished winner, and if it is consistent, new distinct consistent databases collected around it with
+    /// phase 2's walk (rest of the budget), up to target_outputs. Consistent ones only if there are any.
+    /// Never uses the truth.
+    fn pick_symmetry(
+        &self,
+        out: Vec<ScoredReconstruction>,
+        cfg: &LnsConfig,
+        summary: &mut LnsSummary,
+    ) -> Vec<ScoredReconstruction> {
+        let t0 = Instant::now();
+        let polish_until = t0 + Duration::from_secs_f64(cfg.symmetry_secs / 2.0);
+        let end = t0 + Duration::from_secs_f64(cfg.symmetry_secs);
+        let d0 = out[0].assignment.clone();
+        // orientation 0 = as found, k = value_symmetries[k - 1]
+        let starts: Vec<Vec<i64>> = std::iter::once(d0.clone())
+            .chain(cfg.value_symmetries.iter().map(|p| d0.iter().map(|&v| p[v as usize]).collect()))
+            .collect();
+        let polished: Vec<(i64, Vec<i64>)> = starts
+            .into_par_iter()
+            .enumerate()
+            .map(|(k, a)| self.polish(a, cfg, polish_until, 1_000_003 + k as u64))
+            .collect();
+        summary.symmetry_images = cfg.value_symmetries.len();
+        summary.symmetry_polished_errors = polished.iter().map(|p| p.0).collect();
+        // strictly better only: a tie keeps orientation 0
+        let mut chosen = 0;
+        for k in 1..polished.len() {
+            if polished[k].0 < polished[chosen].0 {
+                chosen = k;
+            }
+        }
+        summary.symmetry_chosen = chosen;
+        let (w_err, winner) = polished[chosen].clone();
+
+        // old outputs in the winner's orientation: no symmetry brings them closer to the winner
+        let dist = |a: &[i64], b: &[i64]| -> i64 {
+            a.iter()
+                .zip(b)
+                .map(|(&x, &y)| {
+                    cfg.value_coords[x as usize].iter().zip(&cfg.value_coords[y as usize]).map(|(p, q)| (p - q) * (p - q)).sum::<i64>()
+                })
+                .sum()
+        };
+        let n_old = out.len();
+        let mut result: Vec<ScoredReconstruction> = out
+            .into_par_iter()
+            .filter(|r| {
+                let own = dist(&r.assignment, &winner);
+                cfg.value_symmetries.iter().all(|p| {
+                    let img: Vec<i64> = r.assignment.iter().map(|&v| p[v as usize]).collect();
+                    dist(&img, &winner) >= own
+                })
+            })
+            .collect();
+        summary.symmetry_dropped = n_old - result.len();
+        result.push(ScoredReconstruction { assignment: winner.clone(), total_error: w_err });
+
+        // collect more around the winner (phase 2's walk) if it is consistent and there is room
+        let mut seen: HashSet<Vec<i64>> = result.iter().map(|r| r.assignment.clone()).collect();
+        let before = seen.len();
+        if w_err < Self::OUTSIDE_EPSILON && seen.len() < cfg.target_outputs {
+            let mut rng = rand::rngs::StdRng::seed_from_u64(2_000_003);
+            let mut a = winner.clone();
+            let mut total = w_err;
+            let mut attempts = 0usize;
+            while seen.len() < cfg.target_outputs && Instant::now() < end && attempts < 50 * cfg.target_outputs {
+                attempts += 1;
+                let mut freed: Vec<usize> = Vec::new();
+                while freed.len() < cfg.neighbourhood_size.min(self.n) {
+                    let v = rng.gen_range(0..self.n);
+                    if !freed.contains(&v) {
+                        freed.push(v);
+                    }
+                }
+                let Some(new_values) =
+                    self.sample_neighbour(&freed, &a, &mut rng, cfg.time_per_neighbourhood, cfg.max_rows_per_pair)
+                else {
+                    continue;
+                };
+                let before = self.local_error(&freed, &a);
+                let old: Vec<(usize, i64)> = freed.iter().map(|&v| (v, a[v])).collect();
+                for (v, value) in new_values {
+                    a[v] = value;
+                }
+                let after = self.local_error(&freed, &a);
+                if after.1.is_empty() {
+                    total += after.0 - before.0;
+                    if seen.insert(a.clone()) {
+                        result.push(ScoredReconstruction { assignment: a.clone(), total_error: total });
+                    }
+                } else {
+                    for (v, value) in old {
+                        a[v] = value;
+                    }
+                }
+            }
+        }
+        summary.symmetry_added = seen.len() - before;
+
+        let mut uniq: HashSet<Vec<i64>> = HashSet::new();
+        result.retain(|r| uniq.insert(r.assignment.clone()));
+        if result.iter().any(|r| r.total_error < Self::OUTSIDE_EPSILON) {
+            result.retain(|r| r.total_error < Self::OUTSIDE_EPSILON);
+        }
+        result.sort_by(|a, b| a.total_error.cmp(&b.total_error).then_with(|| a.assignment.cmp(&b.assignment)));
+        result.truncate(cfg.target_outputs);
+        summary.symmetry_seconds = t0.elapsed().as_secs_f64();
+        info!(
+            "Symmetry pick: polished errors per orientation {:?} -> orientation {chosen} ({}); {} outputs dropped \
+             (other orientation), {} added around the winner, {} returned, {:.0} s",
+            summary.symmetry_polished_errors,
+            if chosen == 0 { "as found" } else { "an image" },
+            summary.symmetry_dropped,
+            summary.symmetry_added,
+            result.len(),
+            summary.symmetry_seconds
+        );
+        result
+    }
+
+    /// Phase 1's LNS steps from `start` until `until`, 3000 steps, or (once every pair is within eps) 300
+    /// steps without improving. Returns (total error, assignment). Used by `pick_symmetry`.
+    fn polish(&self, start: Vec<i64>, cfg: &LnsConfig, until: Instant, seed: u64) -> (i64, Vec<i64>) {
+        let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
+        let mut assignment = start;
+        let (mut total, mut viol) = self.score(&assignment);
+        let mut since = 0usize;
+        for _ in 0..3000 {
+            if Instant::now() >= until || (total < Self::OUTSIDE_EPSILON && since >= 300) {
+                break;
+            }
+            since += 1;
+            let violated_vars: Vec<usize> = (0..self.n).filter(|&v| viol[v] > 0).collect();
+            let mut freed: Vec<usize> = Vec::new();
+            if let Some(&v) = violated_vars.choose(&mut rng) {
+                let partners: Vec<usize> = (0..self.n)
+                    .filter(|&u| u != v && self.pair_cost(v.min(u), v.max(u), assignment[v.min(u)], assignment[v.max(u)]).is_none())
+                    .collect();
+                freed.push(v);
+                if let Some(&u) = partners.choose(&mut rng) {
+                    freed.push(u);
+                }
+            }
+            let target = cfg.neighbourhood_size.min(self.n).max(freed.len());
+            while freed.len() < target {
+                let v = rng.gen_range(0..self.n);
+                if !freed.contains(&v) {
+                    freed.push(v);
+                }
+            }
+            let before = self.local_error(&freed, &assignment);
+            if let Some(new_values) = self.solve_neighbourhood(
+                &freed,
+                &assignment,
+                Some(before.0),
+                cfg.time_per_neighbourhood,
+                cfg.max_rows_per_pair,
+                false,
+            ) {
+                let old: Vec<(usize, i64)> = freed.iter().map(|&v| (v, assignment[v])).collect();
+                for (v, value) in new_values {
+                    assignment[v] = value;
+                }
+                let after = self.local_error(&freed, &assignment);
+                if after.0 < before.0 {
+                    since = 0;
+                    total += after.0 - before.0;
+                    for &(i, j) in &before.1 {
+                        viol[i] -= 1;
+                        viol[j] -= 1;
+                    }
+                    for &(i, j) in &after.1 {
+                        viol[i] += 1;
+                        viol[j] += 1;
+                    }
+                } else {
+                    for (v, value) in old {
+                        assignment[v] = value;
+                    }
+                }
+            }
+        }
+        (total, assignment)
     }
 
     /// Error of every t-tuple touching a freed record (their t = 1 tables and every pair with a

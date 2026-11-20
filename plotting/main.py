@@ -133,20 +133,20 @@ if __name__ == "__main__":
     #     plot_convex_mse(convex_50, db, distributions, OUTPUT_DIR, METHOD_ORDER, COLORS, MARKERS, LABELS,
     #                     grid_tag="_50x50", xticks=query_percents_50, ylim=None, yticks=None, xscale="category")
 
-    # # BOX PLOTS (50x50): MSE of every database in each method's reconstruction space.
-    # # Every method told its orientation (data_loader ORIENTATION ORACLE): LAMa = its output DBs, each in its
-    # # best grid symmetry; Even Less / Remin = oriented_box_space (Procrustes rotation, then 1000 draws over
-    # # every box size / shift). build_box_data(..., oriented=False) = raw appendix version. JSON rebuilt each run.
-    # print("Generating Box Plots...")
-    # os.makedirs("../figures/box", exist_ok=True)
-    # for db in datasets:
-    #     box_json_path = f"../figures/box/{db}_50x50_mse_distribution_boxplot.json"
-    #     with open(box_json_path, "w") as f:
-    #         json.dump(build_box_data(BASE_DIR, db, distributions, methods, query_percents_50), f)
-    #     # Two figures per database: low (1/2/5%) and high (10/20/30%) query percents
-    #     for part, queries in (("low", (1.0, 2.0, 5.0)), ("high", (10.0, 20.0, 30.0))):
-    #         plot_mse_boxplots(box_json_path, db, distributions, OUTPUT_DIR, METHOD_ORDER, COLORS, LABELS,
-    #                           queries=queries, tag=f"_50x50_{part}")
+    # BOX PLOTS (50x50): MSE of every database in each method's reconstruction space.
+    # Every method told its orientation (data_loader ORIENTATION ORACLE): LAMa = its output DBs, each in its
+    # best grid symmetry; Even Less / Remin = oriented_box_space (Procrustes rotation, then 1000 draws over
+    # every box size / shift). build_box_data(..., oriented=False) = raw appendix version. JSON rebuilt each run.
+    print("Generating Box Plots...")
+    os.makedirs("../figures/box", exist_ok=True)
+    for db in datasets:
+        box_json_path = f"../figures/box/{db}_50x50_mse_distribution_boxplot.json"
+        with open(box_json_path, "w") as f:
+            json.dump(build_box_data(BASE_DIR, db, distributions, methods, query_percents_50), f)
+        # Two figures per database: low (1/2/5%) and high (10/20/30%) query percents
+        for part, queries in (("low", (1.0, 2.0, 5.0)), ("high", (10.0, 20.0, 30.0))):
+            plot_mse_boxplots(box_json_path, db, distributions, OUTPUT_DIR, METHOD_ORDER, COLORS, LABELS,
+                              queries=queries, tag=f"_50x50_{part}")
 
     # # HISTOGRAMS
     # print("Generating Histogram Plots...")
@@ -233,5 +233,5 @@ if __name__ == "__main__":
     # ---------------------------------------------------------
     # 3D Spatial Reconstruction Plots
     # ---------------------------------------------------------
-    print("Generating 3D Spatial Reconstruction Plots...")
-    plot_3d_reconstruction("../figures/3d_recon/points_dump.json", OUTPUT_DIR)
+    # print("Generating 3D Spatial Reconstruction Plots...")
+    # plot_3d_reconstruction("../figures/3d_recon/points_dump.json", OUTPUT_DIR)

@@ -46,6 +46,10 @@
 #   7. prints the status table
 # A result counts as done only if results_*.json was written by the pair-LNS code (it has an "lns" field);
 # older results are copied to limits/archive_pre_lns/ before their config is rerun.
+# A pair-LNS result with output_is_consistent = false (no fully consistent database found, best ones output)
+# is NOT done: the config (or that 2D run) is resubmitted and, once the job is submitted, its results /
+# reconstruction JSON are DELETED (no archive copy), so the new run's result replaces it (the Rust
+# keep-better finds nothing to compare with). Bounded by MAX_ATTEMPTS like any other rerun.
 # Everything it prints is also saved in logs/run_me/<timestamp>.log.
 
 set -uo pipefail
@@ -174,7 +178,8 @@ run_tag() { # name dist prob noise -> <name>_<dist>_p<prob>[_noise<tv>]
 }
 result_file() { echo "$DB_ROOT/$3/$2/limits/results_$(run_tag "$2" "$5" "$6" "${7:-0}").json"; }
 recon_file() { echo "$DB_ROOT/$3/$2/limits/$(run_tag "$2" "$5" "$6" "${7:-0}")_reconstruction.json"; }
-# none: no result from the pair-LNS code | done | more: it hit its deadline before OUTPUTS consistent
+# none: no result from the pair-LNS code | inconsistent: no fully consistent database (rerun, overwrite)
+# | done | more: it hit its deadline before OUTPUTS consistent
 # databases (rerun with 2x time) | exhausted: finished early with fewer (no more neighbours to find; done)
 # Perfect noise configs (prob 1, no "lns" field): done as soon as the results file exists. Sampled
 # noise configs (prob < 1) are pair-LNS results like any other.
@@ -188,7 +193,8 @@ result_state() {
     python3 - "$f" "$OUTPUTS" <<'PY'
 import json, sys
 d = json.load(open(sys.argv[1])); l = d["lns"]; want = int(sys.argv[2])
-if l["output_is_consistent"] and l["returned"] >= want: print("done")
+if not l["output_is_consistent"]: print("inconsistent")
+elif l["returned"] >= want: print("done")
 elif l["hit_deadline"]: print("more")
 else: print("exhausted")
 PY
@@ -361,8 +367,9 @@ main() {
                 continue
             fi
             [[ $run == 1 ]] && to_merge+=("$bkey $name $base $dim $dist $prob")
-            # one shot per run: any pair-LNS result (even with few consistent databases) finishes it
-            if [[ "$rstate" != none ]]; then
+            # one shot per run: any CONSISTENT pair-LNS result (even with few databases) finishes it;
+            # an inconsistent one is rerun and overwritten
+            if [[ "$rstate" != none && "$rstate" != inconsistent ]]; then
                 status_lines+=("RUN DONE $key  $(result_line "$key" "$name" "$dir" "$dim" "$dist" "$prob")")
                 continue
             fi
@@ -425,15 +432,16 @@ main() {
         fi
 
         # keep earlier results next to the new ones (old code, or a pair-LNS run that ran out of time)
+        # (not for an inconsistent result: that one is deleted after the submit below, no copy kept)
         local old; old=$(dirname "$res")/archive_pre_lns
         [[ "$rstate" == more ]] && old=$(dirname "$res")/archive_short_runs/$(date +%Y%m%d_%H%M%S)
-        if [[ -f "$res" && -z "${DRY_RUN:-}" ]]; then
+        if [[ -f "$res" && -z "${DRY_RUN:-}" && "$rstate" != inconsistent ]]; then
             mkdir -p "$old"
             cp -n "$res" "$old/" 2>/dev/null
             cp -n "$(recon_file "$key" "$name" "$dir" "$dim" "$dist" "$prob" "$noise")" "$old/" 2>/dev/null
         fi
 
-        local desc="${mem}G ${cpus}cpu ${time}h $part (LNS ${lns_h}$([[ $noise == 0 || $prob != 1 ]] && echo h))$([[ $attempts -gt 0 ]] && echo ", attempt $((attempts + 1)) after $last")$([[ $rstate == more ]] && echo ", last run hit its deadline")"
+        local desc="${mem}G ${cpus}cpu ${time}h $part (LNS ${lns_h}$([[ $noise == 0 || $prob != 1 ]] && echo h))$([[ $attempts -gt 0 ]] && echo ", attempt $((attempts + 1)) after $last")$([[ $rstate == more ]] && echo ", last run hit its deadline")$([[ $rstate == inconsistent ]] && echo ", OVERWRITES an inconsistent result")"
         if [[ -n "${DRY_RUN:-}" ]]; then
             status_lines+=("WOULD    $key  $desc")
             continue
@@ -444,6 +452,11 @@ main() {
             --output="$LOGDIR/%x_%j.out" --error="$LOGDIR/%x_%j.err" \
             --export=ALL,LAMA_ARGS="$args" run_lama_one.slurm) || { status_lines+=("SUBMIT FAILED  $key"); continue; }
         n_sub=$((n_sub + 1))
+        # inconsistent result: delete it now (only once the job is submitted), so the new run overwrites it
+        # instead of the Rust keep-better comparing against it or archiving one of the two
+        if [[ "$rstate" == inconsistent ]]; then
+            rm -f "$res" "$(recon_file "$key" "$name" "$dir" "$dim" "$dist" "$prob" "$noise")"
+        fi
         status_lines+=("SUBMIT   $key  job $jid: $desc")
     done < <(configs "$@")
 

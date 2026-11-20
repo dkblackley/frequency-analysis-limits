@@ -323,7 +323,7 @@ def lama_space(base_dir, grid, db, dist, query_pct, oriented=True):
 
 
 def build_box_data(base_dir, db, distributions, methods, query_percents, grid="50x50", num_samples=1000,
-                   oriented=True):
+                   oriented=False):
     """Box-plot JSON for plot_mse_boxplots: {dist: {method: [[query, [MSE of every database]], ...]}}.
     MSE = calculate_mse to the truth. LAMa: every output database; baselines: num_samples from their space.
     oriented: see the ORIENTATION ORACLE note above (False = raw, the appendix version)."""

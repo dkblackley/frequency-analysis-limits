@@ -96,6 +96,16 @@ pub struct Args {
     /// perfect_lazy_pairs_match_tables), far less memory; use it when the table path runs out of memory
     #[arg(long)]
     lazy_pairs: bool,
+
+    /// Sampled setting: do NOT replace each output database by its best-scoring grid image (mirror image /
+    /// rotation) under LAMa's own objective. That step uses only the leakage; default on
+    #[arg(long)]
+    no_symmetry_pick: bool,
+
+    /// Sampled setting: seconds the symmetry pick may take after the LNS deadline (half polishing the
+    /// 8 orientations of the best output in parallel, half collecting outputs around the winner)
+    #[arg(long, default_value = "600")]
+    symmetry_secs: f64,
 }
 
 fn main() {
@@ -148,6 +158,8 @@ fn main() {
                     pipeline_attempt: attempt,
                     start_secs: args.start_secs,
                     lazy_pairs: args.lazy_pairs,
+                    symmetry_pick: !args.no_symmetry_pick,
+                    symmetry_secs: args.symmetry_secs,
                 },
             );
             if outcome != AttackOutcome::RestartNeeded {

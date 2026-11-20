@@ -841,6 +841,8 @@ def item_r5():
             rows.append(row)
     md_table(["Dataset", "Dist"] + [f"TV {tv:g}" for tv in R2_TVS], rows)
 
+    item_r5c()
+
     h("Item r5b — Misspecified query distribution (Reviewer C)")
     print("MISSING: no runs, and the code cannot do it yet. lama_attack builds ONE QueryDistribution from --dist "
           "and uses it both to sample the queries and as the attacker's model (only --dist-noise perturbs the "
@@ -848,6 +850,77 @@ def item_r5():
           "--attacker-dist / --attacker-sigma-scale (gaussian sigma = 1.1 * M/5 and 1.25 * M/5 while sampling "
           "with M/5; uniform attacker while sampling Beta(2,1)), then runs for the six datasets. Per case the "
           "table would give: feasible, true DB in output, #DBs, eps.\n")
+
+
+R5C_Q = 0.3
+
+
+def r5c_cell(db, dist, tv):
+    """One cell of item r5c: sampled (30%) run, TV-noisy query distribution unknown to the attacker.
+    tv = 0 -> the noiseless 30% run (merged result in 50x50/). Returns a dict, or None if missing."""
+    name = f"{db}_{dist}_p{rust_float(R5C_Q)}" + (f"_noise{rust_float(tv)}" if tv else "")
+    d = f"{BASE_DIR}/{R2_GRID}/{db}/limits"
+    res = load_json(f"{d}/results_{name}.json")
+    if res is None:
+        return None
+    out = {"eps": res.get("eps"), "max_dist_err": res.get("max_dist_err"), "lns": res.get("lns") or {}}
+    runs = load_json(f"{d}/{name}_reconstruction.json")
+    if runs:
+        true = np.array([p["true"] for p in runs[0]], dtype=float)
+        stack = np.array([[p["reconstructed"] for p in run] for run in runs if run], dtype=float)
+        del runs
+        m = sym_mse_matrix(true, stack, R2_N)
+        out.update(k=len(stack), sym=float(m.min(0).mean()), exp=float(m[0].mean()),
+                   true_in_out=bool((stack == true).all(axis=(1, 2)).any()))
+    return out
+
+
+def item_r5c():
+    tvs = [0.0] + R2_TVS
+    h(f"Item r5c — Realistic TV sweep at 50x50: {R5C_Q:.0%} of the queries sampled from the noisy "
+      "distribution, attacker UNAWARE of the noise")
+    print(f"Pair LNS (--query-percent {R5C_Q} --dist-noise <tv>, run_me.sh NOISE=only NOISE_PROBS={R5C_Q}); one "
+          "run per cell, written straight into 50x50/ (no run1..3 merge). Queries are drawn i.i.d. from p' = "
+          "(1-λ)p + λq (q seeded, StdRng 1337, TV(p,p') = tv); the attacker scores against the clean p and eps is "
+          "the VC bound only (the noise is NOT added). TV 0 = the noiseless 30% run (merged over runs 1..3).")
+    print("Cell: #DBs (✓ = all pairs within eps, ✗ = no consistent DB found, best ones output) / true DB pairs "
+          "outside eps / sym MSE (per DB min MSE over the 8 grid symmetries, mean over the output; not /dims, "
+          "as r1). 'true in out' is never expected here.\n")
+    cells = parallel_rows(r5c_cell, [(db, dist, tv) for db in DATASETS for dist in DISTS for tv in tvs],
+                          default_workers=3)
+    it = iter(cells)
+    rows, by_dist = [], {}
+    for db in DATASETS:
+        for dist in DISTS:
+            row = [format_db_name(db), dist]
+            for tv in tvs:
+                c = next(it)
+                if c is None:
+                    row.append(None)
+                    continue
+                if tv and c.get("max_dist_err") is not None:
+                    by_dist.setdefault((dist, tv), []).append(c["max_dist_err"])
+                if tv:
+                    by_dist.setdefault(("eps", tv), []).append(c["eps"])
+                lns = c["lns"]
+                ok = "✓" if lns.get("output_is_consistent") else "✗"
+                parts = [f"{c.get('k', 0)} {ok}", f"true out {lns.get('true_db_pairs_outside', '?')}"]
+                if "sym" in c:
+                    parts.append(f"sym {c['sym']:.1f}")
+                if c.get("true_in_out"):
+                    parts.append("TRUE IN OUT")
+                row.append(" / ".join(parts))
+            rows.append(row)
+    md_table(["Dataset", "Dist"] + [f"TV {tv:g}" if tv else "no noise" for tv in tvs], rows)
+
+    print("Size of the noise vs eps: max_dist_err = largest |P'(enclose) - P(enclose)| over all MBQs (what the "
+          "noise does to the expected frequencies; the attacker does not know it). eps = VC bound of the run "
+          "(depends only on the number of sampled queries). Range over the datasets that have a result.\n")
+    rng = lambda v: MISSING if not v else (f"{min(v):.2e}" if max(v) - min(v) < 1e-12
+                                            else f"{min(v):.2e}–{max(v):.2e}")
+    mrows = [[f"max_dist_err ({dist})"] + [rng(by_dist.get((dist, tv))) for tv in R2_TVS] for dist in DISTS]
+    mrows.append(["eps (VC)"] + [rng(by_dist.get(("eps", tv))) for tv in R2_TVS])
+    md_table([""] + [f"TV {tv:g}" for tv in R2_TVS], mrows)
 
 
 def round2(items):

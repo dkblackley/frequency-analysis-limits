@@ -86,6 +86,11 @@ figures/                    Intermediate JSON for figures (mostly not on the lap
     (noisy 50x50 runs OOMed at 64 GB in seconds). Same set of databases: test
     `perfect_lazy_pairs_match_tables` (14 cases) and Spitz 50x50 uniform TV 0.02 (identical 8 DBs).
     Everything after the solve is shared (`finish_global_round`). run_me.sh's NOISE mode passes it.
+    With --t 2 (since 2026-11-19) the lazy round's enumerated databases ARE the output: the per-pair
+    table rebuild and the final Solver are skipped (`Translator::final_databases`), because the final
+    model's solutions are exactly that set. Before, the rebuild + final solve OOMed at 128 GB even when
+    the enumeration had found only 8 databases (shopparis/highway uniform). Spitz uniform TV 0.02 gives
+    the identical 8 DBs (compared by record -> value; record ORDER in the JSON differs between runs).
 6b. **Sampled** (`lazy_lns.rs`, only t = 2; `--t 3` is treated as 2):
     - phase 1: Pumpkin picks an all-different assignment from the t=1 tables (shared start), then each of
       `--lns-restarts` (64) restarts does LNS steps: free a random violated pair + random records (4 total),

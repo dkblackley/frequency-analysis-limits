@@ -386,9 +386,17 @@ pub fn lama_attack(
             )
         }
 
+        translater_met = translator.metadata.clone();
+        if let Some(dbs) = translator.final_databases() {
+            // --lazy-pairs, t = 2: the pair round already enumerated every database (same set the final
+            // solve would find, Translator::final_databases); the final solve rebuilt every pair table
+            // and OOMed at 128 GB on the noisy 50x50 runs.
+            info!("Output = the {} databases of the lazy pair round (final solve skipped)",
+                  dbs.values().next().map_or(0, Vec::len));
+            responses = dbs;
+        } else {
         info!("Building and executing the CP-SAT Solver for the final constraint graph...");
         let mut solver = Solver::new(translator.get_var_index_map());
-        translater_met = translator.metadata.clone();
 
         let mut model = translator.get_proto_model();
 
@@ -406,6 +414,7 @@ pub fn lama_attack(
             trace!("CPModel: {:?}", model);
             debug!("Solver Status: {:?}", solver.solution_stat);
             return AttackOutcome::Failed;
+        }
         }
     }
     let end = Instant::now();

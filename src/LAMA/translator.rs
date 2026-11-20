@@ -36,6 +36,12 @@ pub struct Translator {
     // Perfect setting, t = 2: pair constraints as bits + a Pumpkin propagator instead of tables
     // (lazy_pairs.rs; same solutions, far less memory). Off by default; --lazy-pairs turns it on.
     lazy_pairs: bool,
+    // Largest tuple size this run goes to (--t). With --lazy-pairs and max_t == 2 the pair round is the
+    // last one, so its enumerated databases ARE the answer (see process_pairs_lazy / final_databases).
+    max_t: usize,
+    // True once the lazy pair round was the final round and kept its databases in last_solutions
+    // without rebuilding the tables; lama_attack then skips the final Solver (final_databases).
+    final_from_lazy: bool,
 }
 
 impl Translator {
@@ -71,6 +77,8 @@ impl Translator {
             perfect,
             last_solutions: None,
             lazy_pairs: false,
+            max_t: *max_t,
+            final_from_lazy: false,
         }
     }
 
@@ -94,6 +102,29 @@ impl Translator {
         trunc_amount
 
         //return vec![300, 4000, 8000];
+    }
+
+    /// Perfect setting with --lazy-pairs and --t 2: the databases the lazy pair round enumerated, as
+    /// record (true encrypted id) -> its value in every database, the same shape Solver::solve returns.
+    /// None if the final Solver still has to run (table path, or t > 2).
+    ///
+    /// Why skipping the final solve gives the same databases: the lazy round enumerates every
+    /// all-different assignment satisfying the t = 1 tables and every pair constraint. The final model
+    /// would be the t = 1 tables + all-different + per pair the PROJECTION of those solutions (a subset of
+    /// the pair's valid rows), so each of its solutions is already in the list and each listed database
+    /// satisfies it. Only the order can differ (test: perfect_lazy_pairs_match_tables). Rebuilding those
+    /// tables and posting them to Pumpkin in every partition is what ran out of memory at 128 GB.
+    pub fn final_databases(&self) -> Option<HashMap<i64, Vec<i64>>> {
+        if !self.final_from_lazy {
+            return None;
+        }
+        let sols = self.last_solutions.as_ref()?;
+        Some(
+            self.var_index_map
+                .values()
+                .map(|&(idx, enc)| (enc, sols.iter().map(|s| s[idx as usize]).collect()))
+                .collect(),
+        )
     }
 
     pub fn get_var_index_map(&self) -> HashMap<IntVar, (i32, i64)> {
@@ -776,7 +807,26 @@ impl Translator {
             return None;
         }
         drop(mini_model);
-        self.finish_global_round(1, built.enc_tuples, response.unwrap(), built.rows, validate_candidate)
+        let solutions = response.unwrap();
+        if self.max_t == 2 {
+            // Last round: these are the final databases. Keep them, skip the table rebuild and (in
+            // lama_attack) the final Solver; see final_databases for why the result is the same.
+            debug!("Finished mini-solve with {} possible reconstructions", solutions.len());
+            info!(
+                "Lazy pair round is the last round (t = 2): {} databases are the output, skipping the table \
+                 rebuild and the final solve",
+                solutions.len()
+            );
+            self.metadata.recons_per_t.insert(2, solutions.len());
+            self.metadata.constraints_per_t.insert(2, built.rows);
+            info!("Added {} assignments in round t=2", built.rows);
+            self.last_solutions = Some(solutions);
+            self.final_from_lazy = true;
+            self.do_debug();
+            self.reset_debug();
+            return Some(HashMap::new());
+        }
+        self.finish_global_round(1, built.enc_tuples, solutions, built.rows, validate_candidate)
     }
 
     pub fn process_t_greater_than_1<V>(

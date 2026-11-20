@@ -1024,10 +1024,21 @@ fn perfect_run(
     let mut recons_per_t: Vec<_> = translator.metadata.recons_per_t.clone().into_iter().collect();
     recons_per_t.sort();
 
-    let mut solver = Solver::new(translator.get_var_index_map());
-    let mut model = translator.get_proto_model();
-    let responses = solver.solve(&mut model, largest_enc_val, false);
-    assert!(solver.solution_stat == Optimal || solver.solution_stat == Feasible, "no databases found");
+    // --lazy-pairs at t = 2: lama_attack takes the pair round's databases and skips the final solve
+    // (Translator::final_databases); the table path still runs the final Solver.
+    let responses = match translator.final_databases() {
+        Some(dbs) => {
+            assert!(lazy && max_t == 2, "final_databases is only for the lazy pair path at t = 2");
+            dbs
+        }
+        None => {
+            let mut solver = Solver::new(translator.get_var_index_map());
+            let mut model = translator.get_proto_model();
+            let responses = solver.solve(&mut model, largest_enc_val, false);
+            assert!(solver.solution_stat == Optimal || solver.solution_stat == Feasible, "no databases found");
+            responses
+        }
+    };
     let num_dbs = responses.values().next().map_or(0, Vec::len);
     let mut databases: Vec<Vec<(i64, i64)>> = (0..num_dbs)
         .map(|d| {
@@ -1042,8 +1053,9 @@ fn perfect_run(
 }
 
 /// The lazy pair path (bits + propagator, lazy_pairs.rs) must give EXACTLY what the materialised
-/// t = 2 tables give: same t = 2 tables after the round, same solutions, same bookkeeping, same
-/// final databases. Exact frequencies and noise-sized eps; uniform (8 symmetric images), gaussian
+/// t = 2 tables give: same solutions, same bookkeeping, same final databases. At t = 2 the lazy path
+/// skips the table rebuild and the final solve (its databases ARE the output), so its t = 2 tables are
+/// not compared; the table path's final databases (after the final solve) must equal them. Exact frequencies and noise-sized eps; uniform (8 symmetric images), gaussian
 /// and beta; t = 2 only (what the runs use).
 #[test]
 fn perfect_lazy_pairs_match_tables() {
@@ -1080,7 +1092,13 @@ fn perfect_lazy_pairs_match_tables() {
             tables.constraints_per_t
         );
         assert!(!tables.databases.is_empty());
-        assert_eq!(tables, lazy, "lazy pairs differ from tables: {dist} {side}x{side} eps {eps}");
+        let ctx = format!("{dist} {side}x{side} eps {eps}");
+        assert_eq!(tables.last_solutions, lazy.last_solutions, "lazy round solutions differ: {ctx}");
+        assert_eq!(tables.constraints_per_t, lazy.constraints_per_t, "lazy bookkeeping differs: {ctx}");
+        assert_eq!(tables.recons_per_t, lazy.recons_per_t, "lazy bookkeeping differs: {ctx}");
+        assert_eq!(tables.databases, lazy.databases, "final databases differ (final solve skipped): {ctx}");
+        // and the skipped final solve really changed nothing: final databases = the round's solutions
+        assert_eq!(tables.databases.len(), tables.last_solutions.len(), "final solve changed the set: {ctx}");
     }
 }
 

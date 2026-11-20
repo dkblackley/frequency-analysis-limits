@@ -62,4 +62,12 @@ pub struct DbResult {
     /// Sampled setting only: what the pair LNS found, and how the true database scores
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub lns: Option<crate::LAMA::lazy_lns::LnsSummary>,
+    /// "sorted" since the query list is sorted (selector.rs get_dom_pairs); absent = an older run whose
+    /// gaussian / beta weights went to queries in a random order (not reproducible). run_me.sh reruns
+    /// noise results without it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub query_order: Option<String>,
+    /// Is the true database one of the output databases? (exact match of every record)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub true_db_in_output: Option<bool>,
 }

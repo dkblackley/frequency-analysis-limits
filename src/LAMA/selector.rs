@@ -117,6 +117,15 @@ impl<'a> Selector<'a> {
             .collect();
 
         pb.finish_with_message("Done computing dominant pair frequencies");
+        // par_bridge collects in whatever order the threads finish, and the gaussian / beta weights are
+        // handed out by INDEX in this list (query.rs: query i gets pdf(i)). Unsorted, every run had a
+        // different distribution: e.g. Spitz 50x50 gaussian noise runs gave eps 0.00166 at TV 0.03 but
+        // 0.00108 at TV 0.04 (121716 vs 16 databases). Sorted (lexicographic by (low corner, high corner)),
+        // the distribution is a fixed function of the grid, and with the seeded noise the perfect-setting
+        // databases are NESTED in TV: the observed error of every tuple is lambda * d(tuple) and
+        // eps = lambda * max|d|, with lambda proportional to TV (results: query_order = "sorted").
+        let mut pair_vec = pair_vec;
+        pair_vec.par_sort_unstable();
         pair_vec
     }
 

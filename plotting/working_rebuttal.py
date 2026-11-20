@@ -44,6 +44,7 @@ Reconstruction space in the probabilistic (sampled-query) tables, items 2b and 4
 import argparse
 import itertools
 import json
+import math
 import os
 import random
 import time
@@ -52,7 +53,8 @@ from concurrent.futures import ProcessPoolExecutor
 import numpy as np
 
 from data_loader import (calculate_mse, compute_dataset_metrics, generate_sampled_reconstructions,
-                         grid_placement_space, mass_centroid_mse, oriented_box_space, orient_to_truth)
+                         grid_placement_space, mass_centroid_mse, oriented_box_space, orient_to_truth,
+                         procrustes_align)
 from falzon import falzon_mse_distribution
 from globals_vars import format_db_name
 
@@ -98,8 +100,8 @@ def md_table(header, rows, range_cols=None):
     print("|" + "|".join("---" for _ in header) + "|")
     for r in rows:
         print("| " + " | ".join(fmt(c) for c in r) + " |")
-    if range_cols:
-        rng = ["**min–max**"] + [""] * (len(header) - 1)
+    if range_cols and rows:
+        rng =["**min–max**"] + [""] * (len(header) - 1)
         for c in range_cols:
             vals = [r[c] for r in rows if isinstance(r[c], (int, float, np.integer, np.floating))]
             if vals:
@@ -111,9 +113,10 @@ def md_table(header, rows, range_cols=None):
     print()
 
 
-def parallel_rows(fn, tasks):
+def parallel_rows(fn, tasks, default_workers=6):
     """fn(*task) for every task on several CPUs (each config is independent); results in task order."""
-    workers = max(1, min(len(tasks), (os.cpu_count() or 2) - 1, int(os.environ.get("REBUTTAL_WORKERS", 6))))
+    workers = max(1, min(len(tasks), (os.cpu_count() or 2) - 1,
+                         int(os.environ.get("REBUTTAL_WORKERS", default_workers))))
     if workers == 1:
         return [fn(*t) for t in tasks]
     with ProcessPoolExecutor(max_workers=workers) as ex:
@@ -538,9 +541,332 @@ def item5():
           "and new runs for LAMa, Even Less and Remin.\n")
 
 
+# =========================================================
+# Round 2 (second request from the response writer): items r1-r5, 2D only, 50x50.
+# One protocol for every method ("domainfit"): baselines = the item-2a alignment (bbox -> [1,N]^2, round,
+# 8 orientations), no Procrustes, no random boxes; LAMa = its output databases as they are.
+# MSE = calculate_mse (mean squared Euclidean distance, NOT divided by dims) everywhere in r1-r3.
+# =========================================================
+
+R2_GRID, R2_N = "50x50", 50
+R2_QS = [1.0, 2.0, 5.0, 10.0, 20.0, 30.0]
+R2_TVS = [0.005, 0.01, 0.02, 0.03, 0.04, 0.05]
+# Same 8 maps (and order) as bbox_align_candidates / data_loader.grid_symmetries; m = n + 1.
+_SYMS = [lambda x, y, m: (x, y), lambda x, y, m: (m - y, x), lambda x, y, m: (m - x, m - y),
+         lambda x, y, m: (y, m - x), lambda x, y, m: (y, x), lambda x, y, m: (m - x, y),
+         lambda x, y, m: (m - y, m - x), lambda x, y, m: (x, m - y)]
+
+
+def sym(a, n, s):
+    """Grid symmetry s (0..7) of a (..., 2) array of points on [1, n]^2."""
+    return np.stack(_SYMS[s](a[..., 0], a[..., 1], n + 1), axis=-1)
+
+
+def sym_mse_matrix(true, stack, n):
+    """(8, K): calculate_mse of every database in stack (K, R, 2) under every grid symmetry."""
+    return np.stack([((sym(stack, n, s) - true) ** 2).sum(-1).mean(-1) for s in range(8)])
+
+
+def align_to_first(stack, n):
+    """Each database in whichever of the 8 symmetries is closest (MSE) to database 0. No plaintext used."""
+    ref, out = stack[0], np.empty_like(stack)
+    best = np.stack([((sym(stack, n, s) - ref) ** 2).sum(-1).mean(-1) for s in range(8)]).argmin(0)
+    for s in range(8):
+        if (best == s).any():
+            out[best == s] = sym(stack[best == s], n, s)
+    return out
+
+
+def _circle2(a, b):
+    c = ((a[0] + b[0]) / 2, (a[1] + b[1]) / 2)
+    return c, math.hypot(a[0] - c[0], a[1] - c[1])
+
+
+def _circle3(a, b, c):
+    d = 2 * (a[0] * (b[1] - c[1]) + b[0] * (c[1] - a[1]) + c[0] * (a[1] - b[1]))
+    if abs(d) < 1e-12:  # collinear: the widest pair
+        return max((_circle2(a, b), _circle2(a, c), _circle2(b, c)), key=lambda t: t[1])
+    sa, sb, sc = a[0] ** 2 + a[1] ** 2, b[0] ** 2 + b[1] ** 2, c[0] ** 2 + c[1] ** 2
+    ux = (sa * (b[1] - c[1]) + sb * (c[1] - a[1]) + sc * (a[1] - b[1])) / d
+    uy = (sa * (c[0] - b[0]) + sb * (a[0] - c[0]) + sc * (b[0] - a[0])) / d
+    return (ux, uy), math.hypot(a[0] - ux, a[1] - uy)
+
+
+def min_enclosing_circle(points, rng):
+    """Smallest enclosing ball (2D) of a set of points, Welzl's randomised incremental algorithm. (centre, r)"""
+    p = [tuple(map(float, q)) for q in np.unique(np.asarray(points), axis=0)]
+    rng.shuffle(p)
+    inside = lambda c, r, q: math.hypot(q[0] - c[0], q[1] - c[1]) <= r + 1e-9
+    c, r = p[0], 0.0
+    for i in range(1, len(p)):
+        if not inside(c, r, p[i]):
+            c, r = p[i], 0.0
+            for j in range(i):
+                if not inside(c, r, p[j]):
+                    c, r = _circle2(p[i], p[j])
+                    for k in range(j):
+                        if not inside(c, r, p[k]):
+                            c, r = _circle3(p[i], p[j], p[k])
+    return c, r
+
+
+def single_db_scores(true, db, n):
+    """(up to symmetry, expected) of one database: min and mean of calculate_mse over its 8 images."""
+    m = sym_mse_matrix(true, db[None], n)[:, 0]
+    return float(m.min()), float(m.mean())
+
+
+def method_metrics(true, stack, n, seed):
+    """r1 + r2 numbers for one method's output stack (K, R, 2)."""
+    m = sym_mse_matrix(true, stack, n)
+    out = {"k": len(stack), "sym": float(m.min(0).mean()), "exp": float(m[0].mean())}
+    al = align_to_first(stack, n)
+    mass = al.mean(0)
+    rng = random.Random(seed)
+    balls = [min_enclosing_circle(al[:, i], rng) for i in range(al.shape[1])]
+    seb = np.array([b[0] for b in balls])
+    radii = np.array([b[1] for b in balls])
+    out["mass_sym"], out["mass_exp"] = single_db_scores(true, mass, n)
+    out["seb_sym"], out["seb_exp"] = single_db_scores(true, seb, n)
+    out["max_r"], out["mean_r"] = float(radii.max()), float(radii.mean())
+    return out
+
+
+def procrustes_mse(true, emb):
+    """MSE after Procrustes (rotation, scale, shift) allowing a REFLECTION too: the better of the embedding and
+    its mirror image. data_loader.procrustes_align forces det(R) = +1 (rotations only), so a mirrored output
+    collapses to scale ~0 and scores the truth's variance (~362 at 50x50)."""
+    e = np.asarray(emb, dtype=float)
+    return float(min(calculate_mse(true, procrustes_align(true, e)),
+                     calculate_mse(true, procrustes_align(true, e * [1.0, -1.0]))))
+
+
+def r2_config(q, db, dist):
+    """Everything items r1-r4 need for one config; the LAMa JSON is loaded once. q = 100 -> ideal case."""
+    grid, n = R2_GRID, R2_N
+    seed = config_seed(grid, db, dist, q)
+    out = {"q": q, "db": db, "dist": dist}
+    rpath, respath = lama_paths(grid, db, dist, None if q == 100 else q / 100)
+    res = load_json(respath)
+    if res:
+        out["res"] = {k: res.get(k) for k in ("eps", "lns", "merged_from", "time_taken", "time_taken_per_run")}
+    runs = load_json(rpath)
+    if runs:
+        true = np.array([p["true"] for p in runs[0]], dtype=float)
+        stack = np.array([[p["reconstructed"] for p in run] for run in runs if run], dtype=float)
+        del runs
+        mm = method_metrics(true, stack, n, seed)
+        procs = [procrustes_mse(true, d) for d in stack]
+        mm["proc_best"], mm["proc_first"] = float(min(procs)), float(procs[0])
+        mm["true_in_out"] = bool((stack == true).all(axis=(1, 2)).any())
+        out["limits"] = mm
+    for m in BASELINES:
+        data = load_json(baseline_path(grid, db, dist, m, q))
+        if not data:
+            continue
+        true = np.array([p["true"] for p in data], dtype=float)
+        emb = [p["reconstructed"] for p in data]
+        mm = method_metrics(true, np.stack(bbox_align_candidates(emb, n)), n, seed)
+        mm["proc"] = procrustes_mse(true, emb)
+        out[m] = mm
+    return out
+
+
+def g(cfg, method, key):
+    return cfg.get(method, {}).get(key)
+
+
+def consistent_flag(cfg):
+    lns = (cfg.get("res") or {}).get("lns")
+    if not cfg.get("limits"):
+        return None
+    if not lns:
+        return "n/a (no lns)"
+    return "yes" if lns["output_is_consistent"] else "NO"
+
+
+def print_wins_cols(rows, hdr, key_cols, metrics):
+    """metrics: [(name, LAMa column, [baseline columns])]. LAMa wins = strictly lower than every baseline."""
+    out = []
+    for name, lc, bcs in metrics:
+        li, bi = hdr.index(lc), [hdr.index(c) for c in bcs]
+        wins, total, losses = 0, 0, []
+        for r in rows:
+            vals = [r[li]] + [r[i] for i in bi]
+            if any(not isinstance(v, (float, int, np.floating)) for v in vals):
+                continue
+            total += 1
+            if vals[0] < min(vals[1:]):
+                wins += 1
+            else:
+                losses.append(" ".join(str(c) for c in r[:key_cols]) +
+                              f" (LAMa {vals[0]:.1f} vs " + ", ".join(f"{v:.1f}" for v in vals[1:]) + ")")
+        out.append([name, f"{wins}/{total}", "; ".join(losses) if losses else "none"])
+    md_table(["Metric", "LAMa wins", "Configs where LAMa does not win"], out)
+
+
+R1_WINS = [("up to symmetry", "LAMa sym", ["Even Less sym", "Remin sym"]),
+           ("expected", "LAMa exp", ["Even Less exp", "Remin exp"])]
+
+
+def r1_rows(cfgs):
+    rows = []
+    for c in cfgs:
+        if c["q"] == 100:
+            continue
+        rows.append([f"{c['q']:g}%", format_db_name(c["db"]), c["dist"], g(c, "limits", "k"), consistent_flag(c),
+                     g(c, "limits", "sym"), g(c, "limits", "exp")] +
+                    [g(c, m, k) for m in BASELINES for k in ("sym", "exp")])
+    hdr = ["Query %", "Dataset", "Dist", "LAMa #DBs", "all pairs within eps", "LAMa sym", "LAMa exp"] + \
+          [f"{LABEL[m]} {k}" for m in BASELINES for k in ("sym", "exp")]
+    return hdr, rows
+
+
+def item_r1(cfgs):
+    h("Item r1 — Sampled queries, one protocol ('domainfit'), 50x50, 1/2/5/10/20/30%")
+    print("LAMa: every output database as written (no alignment). Even Less / Remin: their single embedding, "
+          "bbox scaled to [1,50]^2, rounded, 8 orientations (= item 2a); no Procrustes, no random boxes, no "
+          "plaintext.")
+    print("- sym = up to symmetry: per output database min MSE over the 8 grid symmetries, then the mean over the "
+          "output (baseline: the best of its 8 candidates, since they are each other's symmetries).")
+    print("- exp = expected: mean raw MSE over the whole output (baseline: mean of its 8 candidates).")
+    print("- MSE = mean squared Euclidean distance in grid cells (not /dims). 'all pairs within eps' = NO: the run "
+          "found no fully consistent database and output its best ones instead (see r4).\n")
+    hdr, rows = r1_rows(cfgs)
+    md_table(hdr, rows, range_cols=[3] + list(range(5, len(hdr))))
+    print("**Does LAMa win?** (lower is better; LAMa must beat both Even Less and Remin)\n")
+    print_wins_cols(rows, hdr, 3, R1_WINS)
+
+
+def item_r2(cfgs):
+    h("Item r2 — Single database without plaintext (per-record mass centroid / smallest-enclosing-ball centre)")
+    print("Each method's output databases are aligned to its FIRST one (each database in its best of the 8 grid "
+          "symmetries w.r.t. database 0, MSE; no plaintext). Per record: mass centroid (mean position over all "
+          "aligned databases) and the centre / radius of the smallest enclosing ball (Welzl) of its candidate "
+          "positions. Each resulting single database is scored up to symmetry (min MSE over its 8 images) and "
+          "expected (mean MSE over its 8 images). MSE not /dims. max r / mean r = max / mean over records of the "
+          "ball radius, in grid cells (max r = the new Table II epsilon). Hull-diameter midpoint dropped.")
+    print("Baselines: the same on their 8 domainfit candidates. These are exact symmetries of each other, so "
+          "aligning them to the first makes all 8 identical: radius 0 and the single database = candidate 0 "
+          "(scores equal r1's best-of-8 / mean-of-8). Without alignment every centre is the grid centre.\n")
+    rows = []
+    for c in cfgs:
+        if c["q"] == 100:
+            continue
+        row = [f"{c['q']:g}%", format_db_name(c["db"]), c["dist"], g(c, "limits", "k")]
+        row += [g(c, "limits", k) for k in ("mass_sym", "mass_exp", "seb_sym", "seb_exp", "max_r", "mean_r")]
+        for m in BASELINES:
+            row += [g(c, m, k) for k in ("mass_sym", "mass_exp", "seb_sym", "seb_exp", "max_r")]
+        rows.append(row)
+    hdr = ["Query %", "Dataset", "Dist", "LAMa #DBs", "LAMa mass sym", "LAMa mass exp", "LAMa ball sym",
+           "LAMa ball exp", "LAMa max r", "LAMa mean r"]
+    for m in BASELINES:
+        hdr += [f"{LABEL[m]} {k}" for k in ("mass sym", "mass exp", "ball sym", "ball exp", "max r")]
+    md_table(hdr, rows, range_cols=list(range(3, len(hdr))))
+    print("**Does LAMa win?**\n")
+    print_wins_cols(rows, hdr, 3, [
+        (f"{a} {b}", f"LAMa {a} {b}", [f"{LABEL[m]} {a} {b}" for m in BASELINES])
+        for a in ("mass", "ball") for b in ("sym", "exp")])
+
+
+def item_r3(cfgs):
+    h("Item r3 — Baselines' own protocol: Procrustes (rotation, reflection, scale, shift) to the truth")
+    print("data_loader.procrustes_align (uses the truth), best of the embedding and its mirror image (that "
+          "function alone allows rotations only), then MSE (not /dims). Even Less / Remin: their single "
+          "embedding. LAMa best = min over its output databases (uses the truth to pick); LAMa first = database 0, "
+          "the lowest attacker-side error (picked without the truth). 'ideal' = all queries, exact frequencies "
+          "(LAMa e0_d0.9 run, baselines prob100).\n")
+    rows = []
+    for c in cfgs:
+        rows.append(["ideal" if c["q"] == 100 else f"{c['q']:g}%", format_db_name(c["db"]), c["dist"],
+                     g(c, "limits", "proc_best"), g(c, "limits", "proc_first")] +
+                    [g(c, m, "proc") for m in BASELINES])
+    hdr = ["Query %", "Dataset", "Dist", "LAMa best", "LAMa first"] + [LABEL[m] for m in BASELINES]
+    md_table(hdr, rows, range_cols=[3, 4, 5, 6])
+    print_wins_cols(rows, hdr, 3, [("Procrustes, LAMa best DB", "LAMa best", [LABEL[m] for m in BASELINES]),
+                                   ("Procrustes, LAMa first DB", "LAMa first", [LABEL[m] for m in BASELINES])])
+
+
+def item_r4(cfgs):
+    h("Item r4 — Runs that did not find a fully consistent database ('all pairs within eps' = NO)")
+    print("Time limit is NOT stored in the results; run_me.sh gives the LNS (1 - 0.15) * limit - 0.25 h, so for a "
+          "run that hit its deadline the limit is inferred as (LNS seconds / 3600 + 0.25) / 0.85 (job limits are "
+          "1/2/4/8/16 ... h). For a merged config (2D, since 2026-11-18) the lns fields are those of the run that "
+          "was copied (no run was consistent); 'runs' lists every run's (#DBs, time h).\n")
+    rows = []
+    for c in cfgs:
+        if c["q"] == 100 or consistent_flag(c) != "NO":
+            continue
+        res = c["res"]
+        lns = res["lns"]
+        lim = (lns["lns_seconds"] / 3600 + 0.25) / 0.85 if lns.get("hit_deadline") else None
+        mf = res.get("merged_from") or {}
+        runs = ", ".join(f"{k}: {v['returned']} DBs {v['time_taken'] / 3600:.1f} h" for k, v in sorted(mf.items()))
+        rows.append([f"{c['q']:g}%", format_db_name(c["db"]), c["dist"], lns["returned"],
+                     lns["best_pairs_outside"], lns["true_db_pairs_outside"],
+                     "yes" if lns.get("hit_deadline") else "no", lns["lns_seconds"] / 3600,
+                     f"≈{lim:.1f} h (inferred)" if lim else "n/a (no deadline hit)",
+                     lns.get("pipeline_attempt"), runs or "single run"])
+    md_table(["Query %", "Dataset", "Dist", "#DBs output", "best DB pairs outside eps", "true DB pairs outside eps",
+              "hit deadline", "LNS time (h)", "time limit", "pipeline attempt", "runs (merged)"], rows,
+             range_cols=[3, 4, 7])
+    print(f"{len(rows)} configs without a fully consistent output.\n")
+    hdr, all_rows = r1_rows(cfgs)
+    kept = [r for r in all_rows if r[4] != "NO"]
+    print(f"**r1 win counts with those configs excluded** ({len(kept)} of {len(all_rows)} configs left)\n")
+    print_wins_cols(kept, hdr, 3, R1_WINS)
+
+
+def item_r5():
+    h("Item r5a — TV sweep at 50x50 (as tab:lama_noise_sweep): all queries, exact frequencies, true "
+      "distribution TV away from the attacker's")
+    print("Perfect pipeline (--query-percent 1.0 --dist-noise <tv> --lazy-pairs, run_me.sh NOISE mode); noise q "
+          "seeded (StdRng 1337), 1 run per cell. Cell: #DBs / true DB in output / eps. #DBs = 0 or no "
+          "reconstruction -> infeasible.\n")
+    rows = []
+    for db in DATASETS:
+        for dist in DISTS:
+            row = [format_db_name(db), dist]
+            for tv in R2_TVS:
+                name = f"{db}_{dist}_p1_noise{rust_float(tv)}"
+                d = f"{BASE_DIR}/{R2_GRID}/{db}/limits"
+                res, runs = load_json(f"{d}/results_{name}.json"), load_json(f"{d}/{name}_reconstruction.json")
+                if res is None:
+                    row.append(None)
+                    continue
+                k = len(runs) if runs else 0
+                tin = "yes" if runs and lama_true_in_output(*runs_to_arrays(runs)) else "NO"
+                row.append(f"{k} DBs / true {tin} / eps={res['eps']:.2e}" if k else
+                           f"infeasible (0 DBs) / eps={res['eps']:.2e}")
+            rows.append(row)
+    md_table(["Dataset", "Dist"] + [f"TV {tv:g}" for tv in R2_TVS], rows)
+
+    h("Item r5b — Misspecified query distribution (Reviewer C)")
+    print("MISSING: no runs, and the code cannot do it yet. lama_attack builds ONE QueryDistribution from --dist "
+          "and uses it both to sample the queries and as the attacker's model (only --dist-noise perturbs the "
+          "sampling side, towards random weights). Needed: a separate attacker distribution, e.g. "
+          "--attacker-dist / --attacker-sigma-scale (gaussian sigma = 1.1 * M/5 and 1.25 * M/5 while sampling "
+          "with M/5; uniform attacker while sampling Beta(2,1)), then runs for the six datasets. Per case the "
+          "table would give: feasible, true DB in output, #DBs, eps.\n")
+
+
+def round2(items):
+    cfgs = parallel_rows(r2_config, [(q, db, dist) for q in R2_QS + [100.0] for db in DATASETS for dist in DISTS],
+                         default_workers=3)  # 3: json.load of a 1000-DB file takes a few GB
+    if "r1" in items:
+        item_r1(cfgs)
+    if "r2" in items:
+        item_r2(cfgs)
+    if "r3" in items:
+        item_r3(cfgs)
+    if "r4" in items:
+        item_r4(cfgs)
+
+
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
-    ap.add_argument("--items", default="1,2,4,5", help="comma list of items (2 also prints item 3)")
+    ap.add_argument("--items", default="1,2,4,5,r1,r2,r3,r4,r5",
+                    help="comma list of items (2 also prints item 3); r1-r5 = second request (50x50, domainfit)")
     ap.add_argument("--original-sweep", action="store_true",
                     help="also recompute the paper's random-sweep Table II eps for the baselines (slow)")
     ap.add_argument("--datasets", default=",".join(DATASETS), help="comma list (items 1b, 2, 4)")
@@ -562,4 +888,8 @@ if __name__ == "__main__":
         item4()
     if "5" in items:
         item5()
+    if items & {"r1", "r2", "r3", "r4"}:
+        round2(items)
+    if "r5" in items:
+        item_r5()
     print(f"\n_Generated in {time.time() - t0:.0f}s from {os.path.abspath(BASE_DIR)}_")

@@ -504,6 +504,8 @@ pub fn lama_attack(
         translator_meta: translater_met,
         number_of_databases: Some(num_dbs),
         lns: lns_summary,
+        query_order: Some("sorted".to_string()),
+        true_db_in_output: Some((0..num_dbs).any(|d| responses.iter().all(|(enc, vals)| vals[d] == *enc))),
     };
 
     if let Err(e) = save_results(final_res, &format!("{save_dir}/results_{unique_name}.json")) {

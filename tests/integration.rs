@@ -1102,3 +1102,46 @@ fn perfect_lazy_pairs_match_tables() {
     }
 }
 
+
+/// eps of the perfect-setting noise runs, exactly as lama_attack computes it (mod.rs: max over every MBQ
+/// of |P_true'(enclose) - P_attacker(enclose)|, true' = noisy, attacker = noiseless), for each TV.
+fn noise_eps(loaded_db: &Box<dyn Searchable + Sync>, dist: &str, tv: f64) -> f64 {
+    let selector = Selector::new_with_noise(dist, loaded_db, tv);
+    let attacker = QueryDistribution::new(selector.query_distribution.pairs.clone(), loaded_db, dist.parse().unwrap());
+    selector
+        .query_distribution
+        .mbq_to_cumulative_prob
+        .iter()
+        .map(|(mbq, p)| (p - attacker.cumulative_prob_lookup(mbq)).abs())
+        .fold(0.0, f64::max)
+}
+
+/// Debug report + checks for the TV-noise sweep. Prints eps at every TV per distribution
+/// (`cargo test --release --test integration noise_eps_per_tv -- --nocapture`) and checks:
+/// - deterministic: building the distributions again gives the SAME eps (needs the sorted query list,
+///   selector.rs get_dom_pairs; before, gaussian / beta changed every run),
+/// - eps = lambda * max|P_q - P_p| with lambda = TV / TV(p, q), i.e. eps / TV is the same at every TV
+///   (this is what makes the output databases nested in TV),
+/// - eps <= TV (an enclosing probability can't move by more than the total variation).
+/// NOISE_EPS_SIDE=<n> sets the synthetic grid side (default 8; 15 is still quick).
+#[test]
+fn noise_eps_per_tv() {
+    let side: usize = std::env::var("NOISE_EPS_SIDE").ok().and_then(|s| s.parse().ok()).unwrap_or(8);
+    let loaded_db: Box<dyn Searchable + Sync> = Box::new(testDB::new(2, side, 35));
+    let tvs = [0.005, 0.01, 0.02, 0.03, 0.04, 0.05];
+    println!("{side}x{side} synthetic grid, 35% density");
+    println!("{:<9} {:>7} {:>12} {:>10}", "dist", "TV", "eps", "eps/TV");
+    for dist in ["uniform", "gaussian", "beta"] {
+        let eps: Vec<f64> = tvs.iter().map(|&tv| noise_eps(&loaded_db, dist, tv)).collect();
+        let again: Vec<f64> = tvs.iter().map(|&tv| noise_eps(&loaded_db, dist, tv)).collect();
+        for (tv, e) in tvs.iter().zip(&eps) {
+            println!("{dist:<9} {tv:>7} {e:>12.6e} {:>10.6}", e / tv);
+        }
+        assert_eq!(eps, again, "{dist}: eps differs between two identical builds (query order not fixed?)");
+        let ratio = eps[0] / tvs[0];
+        for (tv, e) in tvs.iter().zip(&eps) {
+            assert!(*e <= tv + 1e-12, "{dist}: eps {e} > TV {tv}");
+            assert!((e / tv - ratio).abs() <= 1e-9 * ratio.max(1e-300), "{dist}: eps/TV not constant ({} vs {ratio} at TV {tv})", e / tv);
+        }
+    }
+}
